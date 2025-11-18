@@ -26,6 +26,11 @@ namespace UnityCtl
         private string _projectRoot;
         private string _projectId;
 
+        // Automatic reconnection tracking
+        private float _lastConnectionCheck;
+        private float _lastReconnectAttempt;
+        private int _reconnectAttempts;
+
         // Conditional debug logging helpers
         private static void DebugLog(string message)
         {
@@ -64,6 +69,7 @@ namespace UnityCtl
                 _projectRoot = FindProjectRoot();
                 if (string.IsNullOrEmpty(_projectRoot))
                 {
+                    DebugLogWarning("[UnityCtl] Cannot find project root");
                     return;
                 }
 
@@ -71,10 +77,13 @@ namespace UnityCtl
                 var config = ProjectLocator.ReadBridgeConfig(_projectRoot);
                 if (config == null)
                 {
+                    DebugLog("[UnityCtl] No bridge config found (.unityctl/bridge.json missing)");
                     return;
                 }
 
                 _projectId = config.ProjectId;
+
+                DebugLog($"[UnityCtl] Attempting to connect to bridge on port {config.Port}...");
 
                 // Connect to bridge
                 ConnectAsync(config.Port).ContinueWith(task =>
@@ -100,12 +109,26 @@ namespace UnityCtl
 
         private async Task ConnectAsync(int port)
         {
-            if (_isConnected || (_webSocket != null && _webSocket.State == WebSocketState.Open))
+            // Skip if already connected with a healthy WebSocket
+            if (_isConnected && _webSocket != null && _webSocket.State == WebSocketState.Open)
             {
+                DebugLog("[UnityCtl] Already connected, skipping connection attempt");
                 return;
             }
 
-            _webSocket?.Dispose();
+            // Clean up any existing WebSocket
+            if (_webSocket != null)
+            {
+                try
+                {
+                    _webSocket.Dispose();
+                }
+                catch (Exception disposeEx)
+                {
+                    DebugLogWarning($"[UnityCtl] Error disposing old WebSocket: {disposeEx.Message}");
+                }
+            }
+
             _webSocket = new ClientWebSocket();
             _receiveCts?.Cancel();
             _receiveCts = new CancellationTokenSource();
@@ -116,8 +139,9 @@ namespace UnityCtl
             {
                 await _webSocket.ConnectAsync(uri, _receiveCts.Token);
                 _isConnected = true;
+                _reconnectAttempts = 0; // Reset reconnection counter on successful connection
 
-                DebugLog($"[UnityCtl] Connected to bridge at port {port}");
+                DebugLog($"[UnityCtl] ✓ Connected to bridge at port {port}");
 
                 // Send hello message
                 await SendHelloMessageAsync();
@@ -130,7 +154,7 @@ namespace UnityCtl
             }
             catch (Exception ex)
             {
-                DebugLogWarning($"[UnityCtl] Connection failed: {ex.Message}");
+                DebugLogWarning($"[UnityCtl] ✗ Connection failed: {ex.Message}");
                 _isConnected = false;
             }
         }
@@ -162,6 +186,7 @@ namespace UnityCtl
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
+                        DebugLog("[UnityCtl] Bridge closed connection gracefully");
                         await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
                         break;
                     }
@@ -172,6 +197,15 @@ namespace UnityCtl
                         HandleMessageOnBackgroundThread(json);
                     }
                 }
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    DebugLog("[UnityCtl] Receive loop cancelled");
+                }
+                else if (_webSocket.State != WebSocketState.Open)
+                {
+                    DebugLogWarning($"[UnityCtl] WebSocket closed unexpectedly (state: {_webSocket.State})");
+                }
             }
             catch (Exception ex)
             {
@@ -180,6 +214,7 @@ namespace UnityCtl
             finally
             {
                 _isConnected = false;
+                DebugLog("[UnityCtl] Disconnected from bridge - will attempt to reconnect");
             }
         }
 
@@ -241,6 +276,37 @@ namespace UnityCtl
                 catch (Exception ex)
                 {
                     DebugLogError($"[UnityCtl] Error executing command: {ex.Message}");
+                }
+            }
+
+            // Periodic connection health check and automatic reconnection
+            var currentTime = Time.realtimeSinceStartup;
+
+            // Check connection health every 3 seconds
+            if (currentTime - _lastConnectionCheck > 3f)
+            {
+                _lastConnectionCheck = currentTime;
+
+                // If disconnected or WebSocket is not in Open state, attempt reconnection
+                if (!_isConnected || _webSocket == null || _webSocket.State != WebSocketState.Open)
+                {
+                    // Calculate exponential backoff delay: 1s, 2s, 4s, 8s, 16s, 30s (max)
+                    var backoffDelay = Mathf.Min(1f * Mathf.Pow(2, _reconnectAttempts), 30f);
+
+                    // Calculate time since last reconnection attempt
+                    var timeSinceLastReconnect = currentTime - _lastReconnectAttempt;
+
+                    // Attempt reconnection if:
+                    // 1. This is the first attempt (_reconnectAttempts == 0), OR
+                    // 2. Enough time has passed according to backoff delay
+                    if (_reconnectAttempts == 0 || timeSinceLastReconnect >= backoffDelay)
+                    {
+                        _lastReconnectAttempt = currentTime;
+                        _reconnectAttempts++;
+
+                        DebugLog($"[UnityCtl] Reconnection attempt #{_reconnectAttempts} (backoff: {backoffDelay:F1}s)");
+                        TryConnectIfBridgePresent();
+                    }
                 }
             }
         }
