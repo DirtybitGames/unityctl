@@ -19,3 +19,5 @@ unity-project/*.sln
 
 # UnityCtl runtime
 .unityctl/
+
+**/.claude/settings.local.json
