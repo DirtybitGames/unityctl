@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityCtl.Protocol;
 
 namespace UnityCtl.Bridge;
@@ -61,7 +62,8 @@ public static class BridgeEndpoints
             try
             {
                 var response = await state.SendCommandToUnityAsync(requestMessage, TimeSpan.FromSeconds(30));
-                return Results.Json(response, JsonHelper.Options);
+                var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
+                return Results.Content(json, "application/json");
             }
             catch (TimeoutException ex)
             {
@@ -133,16 +135,15 @@ public static class BridgeEndpoints
     {
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            var jObject = JObject.Parse(json);
 
-            if (!root.TryGetProperty("type", out var typeElement))
+            if (!jObject.TryGetValue("type", out var typeToken))
             {
                 Console.WriteLine($"[Warning] Received message without 'type' field");
                 return;
             }
 
-            var messageType = typeElement.GetString();
+            var messageType = typeToken.ToString();
 
             switch (messageType)
             {
@@ -224,9 +225,9 @@ public static class BridgeEndpoints
         switch (eventMessage.Event)
         {
             case UnityCtlEvents.Log:
-                var logEntry = JsonSerializer.Deserialize<LogEntry>(
-                    JsonSerializer.Serialize(eventMessage.Payload),
-                    JsonHelper.Options
+                var logEntry = JsonConvert.DeserializeObject<LogEntry>(
+                    JsonConvert.SerializeObject(eventMessage.Payload, JsonHelper.Settings),
+                    JsonHelper.Settings
                 );
                 if (logEntry != null)
                 {

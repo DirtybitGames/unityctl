@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <Version>0.1.0</Version>
-    <Authors>DirtyBit</Authors>
+    <Authors>Dirtybit</Authors>
   </PropertyGroup>
 
   <PropertyGroup>

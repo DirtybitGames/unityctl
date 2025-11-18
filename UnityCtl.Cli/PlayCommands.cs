@@ -1,8 +1,8 @@
 using System;
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.Text.Json;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using UnityCtl.Protocol;
 
 namespace UnityCtl.Cli;
@@ -64,9 +64,9 @@ public static class PlayCommands
         }
         else
         {
-            var result = JsonSerializer.Deserialize<PlayModeResult>(
-                JsonSerializer.Serialize(response.Result),
-                JsonHelper.Options
+            var result = JsonConvert.DeserializeObject<PlayModeResult>(
+                JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                JsonHelper.Settings
             );
 
             if (result != null)

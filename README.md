@@ -278,7 +278,7 @@ dotnet publish UnityCtl.Protocol/UnityCtl.Protocol.csproj -c Release
 dotnet pack
 ```
 
-The `dotnet publish` command automatically copies UnityCtl.Protocol.dll and all its dependencies (System.Text.Json, etc.) to the Unity package's Plugins folder.
+The `dotnet publish` command automatically copies UnityCtl.Protocol.dll to the Unity package's Plugins folder.
 
 ### Project Structure
 

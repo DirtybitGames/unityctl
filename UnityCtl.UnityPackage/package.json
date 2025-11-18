@@ -5,6 +5,9 @@
   "description": "Remote control plugin for Unity Editor",
   "unity": "6000.0",
   "author": {
-    "name": "DirtyBit"
+    "name": "Dirtybit"
+  },
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
   }
 }

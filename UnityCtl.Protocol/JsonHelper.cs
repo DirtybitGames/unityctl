@@ -1,34 +1,36 @@
 using System;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using Newtonsoft.Json.Serialization;
 
 namespace UnityCtl.Protocol;
 
 public static class JsonHelper
 {
-    public static readonly JsonSerializerOptions Options = new()
+    public static readonly JsonSerializerSettings Settings = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false,
+        ContractResolver = new CamelCasePropertyNamesContractResolver(),
+        NullValueHandling = NullValueHandling.Ignore,
+        Formatting = Formatting.None,
+        ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
         Converters =
         {
-            new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)
+            new StringEnumConverter(new CamelCaseNamingStrategy())
         }
     };
 
     public static string Serialize<T>(T value)
     {
-        return JsonSerializer.Serialize(value, Options);
+        return JsonConvert.SerializeObject(value, Settings);
     }
 
     public static T? Deserialize<T>(string json)
     {
-        return JsonSerializer.Deserialize<T>(json, Options);
+        return JsonConvert.DeserializeObject<T>(json, Settings);
     }
 
     public static object? Deserialize(string json, Type type)
     {
-        return JsonSerializer.Deserialize(json, type, Options);
+        return JsonConvert.DeserializeObject(json, type, Settings);
     }
 }

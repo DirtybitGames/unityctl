@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.Text.Json;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using UnityCtl.Protocol;
 
 namespace UnityCtl.Cli;
@@ -45,9 +45,9 @@ public static class SceneCommands
             }
             else
             {
-                var result = JsonSerializer.Deserialize<SceneListResult>(
-                    JsonSerializer.Serialize(response.Result),
-                    JsonHelper.Options
+                var result = JsonConvert.DeserializeObject<SceneListResult>(
+                    JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                    JsonHelper.Settings
                 );
 
                 if (result?.Scenes != null)

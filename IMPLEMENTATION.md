@@ -267,7 +267,6 @@ The implementation includes a test Unity project at `unity-project/` with the Un
 
 - Added polyfills for `IsExternalInit`, `RequiredMemberAttribute`, etc.
 - Used older SHA256 API (Create() instead of HashData())
-- Added System.Text.Json NuGet package
 
 ### Global Options in System.CommandLine
 

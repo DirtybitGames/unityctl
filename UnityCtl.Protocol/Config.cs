@@ -1,15 +1,15 @@
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 namespace UnityCtl.Protocol;
 
 public class BridgeConfig
 {
-    [JsonPropertyName("projectId")]
+    [JsonProperty("projectId")]
     public required string ProjectId { get; init; }
 
-    [JsonPropertyName("port")]
+    [JsonProperty("port")]
     public required int Port { get; init; }
 
-    [JsonPropertyName("pid")]
+    [JsonProperty("pid")]
     public required int Pid { get; init; }
 }

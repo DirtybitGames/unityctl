@@ -1,87 +1,87 @@
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 namespace UnityCtl.Protocol;
 
 public class HealthResult
 {
-    [JsonPropertyName("status")]
+    [JsonProperty("status")]
     public required string Status { get; init; }
 
-    [JsonPropertyName("projectId")]
+    [JsonProperty("projectId")]
     public required string ProjectId { get; init; }
 
-    [JsonPropertyName("unityConnected")]
+    [JsonProperty("unityConnected")]
     public required bool UnityConnected { get; init; }
 }
 
 public class ConsoleTailResult
 {
-    [JsonPropertyName("entries")]
+    [JsonProperty("entries")]
     public required LogEntry[] Entries { get; init; }
 }
 
 public class LogEntry
 {
-    [JsonPropertyName("timestamp")]
+    [JsonProperty("timestamp")]
     public required string Timestamp { get; init; }
 
-    [JsonPropertyName("level")]
+    [JsonProperty("level")]
     public required string Level { get; init; }
 
-    [JsonPropertyName("message")]
+    [JsonProperty("message")]
     public required string Message { get; init; }
 
-    [JsonPropertyName("stackTrace")]
+    [JsonProperty("stackTrace")]
     public string? StackTrace { get; init; }
 }
 
 public class SceneInfo
 {
-    [JsonPropertyName("path")]
+    [JsonProperty("path")]
     public required string Path { get; init; }
 
-    [JsonPropertyName("enabledInBuild")]
+    [JsonProperty("enabledInBuild")]
     public bool EnabledInBuild { get; init; }
 }
 
 public class SceneListResult
 {
-    [JsonPropertyName("scenes")]
+    [JsonProperty("scenes")]
     public required SceneInfo[] Scenes { get; init; }
 }
 
 public class SceneLoadResult
 {
-    [JsonPropertyName("loadedScenePath")]
+    [JsonProperty("loadedScenePath")]
     public required string LoadedScenePath { get; init; }
 }
 
 public class PlayModeResult
 {
-    [JsonPropertyName("state")]
+    [JsonProperty("state")]
     public required string State { get; init; }
 }
 
 public class AssetImportResult
 {
-    [JsonPropertyName("success")]
+    [JsonProperty("success")]
     public required bool Success { get; init; }
 }
 
 public class CompileResult
 {
-    [JsonPropertyName("started")]
+    [JsonProperty("started")]
     public required bool Started { get; init; }
 }
 
 public class CompilationFinishedPayload
 {
-    [JsonPropertyName("success")]
+    [JsonProperty("success")]
     public required bool Success { get; init; }
 }
 
 public class PlayModeChangedPayload
 {
-    [JsonPropertyName("state")]
+    [JsonProperty("state")]
     public required string State { get; init; }
 }

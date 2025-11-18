@@ -1,7 +1,9 @@
 {
     "name": "UnityCtl",
     "rootNamespace": "UnityCtl",
-    "references": [],
+    "references": [
+        "Newtonsoft.Json"
+    ],
     "includePlatforms": [
         "Editor"
     ],

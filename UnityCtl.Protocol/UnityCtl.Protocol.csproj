@@ -6,13 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <!-- Automatically copy DLLs to Unity package after publish -->
   <Target Name="CopyToUnityPackage" AfterTargets="Publish">
     <ItemGroup>
-      <PublishedDlls Include="$(PublishDir)*.dll" />
+      <PublishedDlls Include="$(PublishDir)*.dll" Exclude="$(PublishDir)Newtonsoft.Json.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(PublishedDlls)"
           DestinationFolder="$(MSBuildThisFileDirectory)..\UnityCtl.UnityPackage\Plugins"
