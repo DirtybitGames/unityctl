@@ -26,6 +26,11 @@ namespace UnityCtl
         private string _projectRoot;
         private string _projectId;
 
+        // Log buffering for early logs before connection
+        private const int MAX_BUFFERED_LOGS = 1000;
+        private readonly System.Collections.Generic.Queue<EventMessage> _logBuffer = new();
+        private readonly object _bufferLock = new object();
+
         public void TryConnectIfBridgePresent()
         {
             try
@@ -91,6 +96,9 @@ namespace UnityCtl
 
                 // Send hello message
                 await SendHelloMessageAsync();
+
+                // Flush any logs that were buffered before connection
+                FlushLogBuffer();
 
                 // Start receive loop
                 _ = Task.Run(() => ReceiveLoopAsync(_receiveCts.Token));
@@ -384,8 +392,6 @@ namespace UnityCtl
 
         public void SendLogEvent(string message, string stackTrace, LogType type)
         {
-            if (!_isConnected) return;
-
             var level = type switch
             {
                 LogType.Error => LogLevel.Error,
@@ -410,7 +416,54 @@ namespace UnityCtl
                 Payload = logEntry
             };
 
+            // If not connected, buffer the log for later
+            if (!_isConnected)
+            {
+                lock (_bufferLock)
+                {
+                    // Respect buffer size limit - drop oldest logs if at capacity
+                    if (_logBuffer.Count >= MAX_BUFFERED_LOGS)
+                    {
+                        _logBuffer.Dequeue();
+                    }
+                    _logBuffer.Enqueue(eventMessage);
+                }
+                return;
+            }
+
             _ = SendMessageAsync(eventMessage);
+        }
+
+        private void FlushLogBuffer()
+        {
+            if (!_isConnected)
+            {
+                return;
+            }
+
+            EventMessage[] bufferedLogs;
+            lock (_bufferLock)
+            {
+                if (_logBuffer.Count == 0)
+                {
+                    return;
+                }
+
+                // Copy buffered logs to array and clear buffer
+                bufferedLogs = _logBuffer.ToArray();
+                _logBuffer.Clear();
+            }
+
+            // Send all buffered logs
+            foreach (var logMessage in bufferedLogs)
+            {
+                _ = SendMessageAsync(logMessage);
+            }
+
+            if (bufferedLogs.Length > 0)
+            {
+                Debug.Log($"[UnityCtl] Flushed {bufferedLogs.Length} buffered log(s)");
+            }
         }
 
         public void SendPlayModeChangedEvent(PlayModeStateChange stateChange)
