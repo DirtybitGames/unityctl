@@ -1,0 +1,21 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# NuGet
+*.nupkg
+packages/
+
+# Unity
+unity-project/Library/
+unity-project/Temp/
+unity-project/Logs/
+unity-project/UserSettings/
+unity-project/*.csproj
+unity-project/*.sln
+
+# UnityCtl runtime
+.unityctl/

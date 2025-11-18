@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <Version>0.1.0</Version>
+    <Authors>DirtyBit</Authors>
+    <Description>Bridge daemon for UnityCtl</Description>
+
+    <!-- Dotnet tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>unityctl-bridge</ToolCommandName>
+    <PackageId>UnityCtl.Bridge</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UnityCtl.Protocol\UnityCtl.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>
