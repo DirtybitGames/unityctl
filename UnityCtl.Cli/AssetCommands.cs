@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.Threading.Tasks;
 using UnityCtl.Protocol;
 
@@ -17,8 +18,13 @@ public static class AssetCommands
         var pathArg = new Argument<string>("path", "Asset path (e.g., Assets/Textures/logo.png)");
         importCommand.AddArgument(pathArg);
 
-        importCommand.SetHandler(async (string? projectPath, string? agentId, bool json, string path) =>
+        importCommand.SetHandler(async (InvocationContext context) =>
         {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+            var path = context.ParseResult.GetValueForArgument(pathArg);
+
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) return;
 
@@ -40,11 +46,7 @@ public static class AssetCommands
             {
                 Console.WriteLine($"Asset imported: {path}");
             }
-        },
-        new ProjectBinder(),
-        new AgentIdBinder(),
-        new JsonBinder(),
-        pathArg);
+        });
 
         assetCommand.AddCommand(importCommand);
         return assetCommand;

@@ -1,5 +1,6 @@
 using System;
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.Threading.Tasks;
 using UnityCtl.Protocol;
 
@@ -14,8 +15,12 @@ public static class CompileCommands
         // compile scripts
         var scriptsCommand = new Command("scripts", "Trigger script compilation");
 
-        scriptsCommand.SetHandler(async (string? projectPath, string? agentId, bool json) =>
+        scriptsCommand.SetHandler(async (InvocationContext context) =>
         {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) return;
 
@@ -36,10 +41,7 @@ public static class CompileCommands
             {
                 Console.WriteLine("Script compilation triggered");
             }
-        },
-        new ProjectBinder(),
-        new AgentIdBinder(),
-        new JsonBinder());
+        });
 
         compileCommand.AddCommand(scriptsCommand);
         return compileCommand;
