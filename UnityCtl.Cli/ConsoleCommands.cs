@@ -2,6 +2,8 @@ using System;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 using UnityCtl.Protocol;
 
@@ -61,7 +63,34 @@ public static class ConsoleCommands
             }
         });
 
+        var clearCommand = new Command("clear", "Clear the console log buffer");
+
+        clearCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) return;
+
+            // Send clear request
+            var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            var result = await client.PostAsync<dynamic>("/console/clear", content);
+            if (result == null) return;
+
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(result));
+            }
+            else
+            {
+                Console.WriteLine("Console cleared successfully");
+            }
+        });
+
         consoleCommand.AddCommand(tailCommand);
+        consoleCommand.AddCommand(clearCommand);
         return consoleCommand;
     }
 }

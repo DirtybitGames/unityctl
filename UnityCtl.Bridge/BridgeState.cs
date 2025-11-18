@@ -86,6 +86,14 @@ public class BridgeState
         }
     }
 
+    public void ClearLogs()
+    {
+        lock (_lock)
+        {
+            _logBuffer.Clear();
+        }
+    }
+
     public async Task<ResponseMessage> SendCommandToUnityAsync(RequestMessage request, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         if (!IsUnityConnected || UnityConnection == null)

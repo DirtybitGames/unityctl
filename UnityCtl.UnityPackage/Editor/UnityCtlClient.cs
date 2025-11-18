@@ -362,6 +362,8 @@ namespace UnityCtl
                         break;
 
                     case UnityCtlCommands.CompileScripts:
+                        // Refresh asset database first to pick up new scripts
+                        AssetDatabase.Refresh();
                         CompilationPipeline.RequestScriptCompilation();
                         result = new CompileResult { Started = true };
                         break;

@@ -83,6 +83,13 @@ public static class BridgeEndpoints
             return new ConsoleTailResult { Entries = entries };
         });
 
+        // Console clear endpoint
+        app.MapPost("/console/clear", () =>
+        {
+            state.ClearLogs();
+            return new { success = true, message = "Console cleared" };
+        });
+
         // RPC endpoint
         app.MapPost("/rpc", async (HttpContext context, [FromBody] RpcRequest request) =>
         {

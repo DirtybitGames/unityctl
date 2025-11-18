@@ -75,6 +75,38 @@ public class BridgeClient
         }
     }
 
+    public async Task<T?> PostAsync<T>(string endpoint, HttpContent content)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsync(endpoint, content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                {
+                    Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
+                    Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+                    return default;
+                }
+
+                var error = await response.Content.ReadAsStringAsync();
+                Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
+                Console.Error.WriteLine(error);
+                return default;
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            return JsonHelper.Deserialize<T>(json);
+        }
+        catch (HttpRequestException)
+        {
+            Console.Error.WriteLine("Error: Failed to communicate with bridge.");
+            Console.Error.WriteLine("The bridge process may not be running. Try: unityctl bridge start");
+            return default;
+        }
+    }
+
     public async Task<ResponseMessage?> SendCommandAsync(string command, Dictionary<string, object?>? args = null)
     {
         try
