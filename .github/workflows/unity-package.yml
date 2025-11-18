@@ -1,0 +1,77 @@
+name: Build and Publish Unity Package
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-unity-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Protocol DLL for Unity
+        run: dotnet publish UnityCtl.Protocol/UnityCtl.Protocol.csproj -c Release -f netstandard2.1
+
+      - name: Verify Protocol DLL was copied
+        run: |
+          if [ ! -f "UnityCtl.UnityPackage/Plugins/UnityCtl.Protocol.dll" ]; then
+            echo "Error: Protocol DLL was not copied to Unity package"
+            exit 1
+          fi
+          echo "Protocol DLL successfully copied to Unity package"
+          ls -lh UnityCtl.UnityPackage/Plugins/
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git diff --quiet UnityCtl.UnityPackage/Plugins/UnityCtl.Protocol.dll || echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push updated DLL
+        if: steps.check_changes.outputs.changed == 'true' && !startsWith(github.ref, 'refs/tags/')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add UnityCtl.UnityPackage/Plugins/UnityCtl.Protocol.dll
+          git commit -m "chore: update Unity package Protocol DLL [skip ci]"
+          git push
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Unity Package Installation
+
+            Add this to your Unity project's `manifest.json`:
+
+            ```json
+            {
+              "dependencies": {
+                "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#${{ github.ref_name }}"
+              }
+            }
+            ```
+
+            Or use `#main` for the latest version.
