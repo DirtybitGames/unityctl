@@ -1,12 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
+    <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
-    <Version>0.1.0</Version>
-    <Authors>DirtyBit</Authors>
     <Description>CLI tool for UnityCtl</Description>
 
     <!-- Dotnet tool packaging -->

@@ -24,10 +24,10 @@ UnityCtl consists of three components:
 From the repository root:
 
 ```bash
-# Install as global dotnet tools
-dotnet pack UnityCtl.Cli/UnityCtl.Cli.csproj -o ./artifacts
-dotnet pack UnityCtl.Bridge/UnityCtl.Bridge.csproj -o ./artifacts
+# Pack all tool projects to ./artifacts
+dotnet pack
 
+# Install as global dotnet tools
 dotnet tool install -g UnityCtl.Cli --add-source ./artifacts
 dotnet tool install -g UnityCtl.Bridge --add-source ./artifacts
 ```
@@ -269,22 +269,24 @@ Unity's domain reload (triggered by script compilation) destroys all Editor obje
 
 ```bash
 # Build all projects
-dotnet build unityctl.sln
+dotnet build
 
-# Build and copy Protocol DLL with dependencies for Unity
-dotnet publish UnityCtl.Protocol/UnityCtl.Protocol.csproj -c Release -o UnityCtl.Protocol/publish
-cp UnityCtl.Protocol/publish/*.dll UnityCtl.UnityPackage/Plugins/
+# Publish Protocol DLL with dependencies for Unity (automatically copies to Unity package)
+dotnet publish UnityCtl.Protocol/UnityCtl.Protocol.csproj -c Release
+
+# Pack CLI and Bridge tools
+dotnet pack
 ```
 
-This copies UnityCtl.Protocol.dll and all its dependencies (System.Text.Json, etc.) to the Unity package.
+The `dotnet publish` command automatically copies UnityCtl.Protocol.dll and all its dependencies (System.Text.Json, etc.) to the Unity package's Plugins folder.
 
 ### Project Structure
 
 ```
 unityctl/
 ├── UnityCtl.Protocol/        # Shared protocol library (netstandard2.1)
-├── UnityCtl.Bridge/          # Bridge daemon (net8.0)
-├── UnityCtl.Cli/             # CLI tool (net8.0)
+├── UnityCtl.Bridge/          # Bridge daemon (net10.0)
+├── UnityCtl.Cli/             # CLI tool (net10.0)
 ├── UnityCtl.UnityPackage/    # Unity UPM package
 │   ├── package.json
 │   ├── Editor/

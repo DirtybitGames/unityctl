@@ -29,7 +29,7 @@ Successfully implemented a complete remote control system for Unity Editor based
 ### 2. UnityCtl.Bridge (Bridge Daemon)
 
 **Location:** `UnityCtl.Bridge/`
-**Target:** net8.0
+**Target:** net10.0
 **Tool Name:** `unityctl-bridge`
 
 **Files:**
@@ -53,7 +53,7 @@ Successfully implemented a complete remote control system for Unity Editor based
 ### 3. UnityCtl.Cli (CLI Tool)
 
 **Location:** `UnityCtl.Cli/`
-**Target:** net8.0
+**Target:** net10.0
 **Tool Name:** `unityctl`
 
 **Files:**
@@ -300,7 +300,7 @@ The implementation includes a test Unity project at `unity-project/` with the Un
 
 4. **Why netstandard2.1 for Protocol?**
    - Compatible with Unity 2021.2+
-   - Shared between .NET 8.0 and Unity
+   - Shared between .NET 10.0 and Unity
    - Single source of truth for protocol
 
 ## Compliance with Specification
