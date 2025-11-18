@@ -21,6 +21,20 @@ UnityCtl consists of three components:
 
 ### 1. Install the CLI and Bridge Tools
 
+**Quick Install (Recommended for Development):**
+
+From the repository root, run the install script:
+
+```bash
+# Bash/Git Bash
+./dev-install.sh
+
+# PowerShell
+.\dev-install.ps1
+```
+
+**Manual Install:**
+
 From the repository root:
 
 ```bash
@@ -32,7 +46,7 @@ dotnet tool install -g UnityCtl.Cli --add-source ./artifacts
 dotnet tool install -g UnityCtl.Bridge --add-source ./artifacts
 ```
 
-Or build and run locally:
+**Run Without Installing:**
 
 ```bash
 # Run bridge locally
@@ -181,6 +195,9 @@ unityctl scene load Assets/Scenes/Level1.unity --mode additive
 ```bash
 # Show recent console logs
 unityctl console tail --lines 50
+
+# Clear the console log buffer
+unityctl console clear
 ```
 
 ### Asset Management
@@ -265,7 +282,30 @@ Unity's domain reload (triggered by script compilation) destroys all Editor obje
 
 ## Development
 
-### Building
+### Quick Development Install
+
+For local development, use the provided scripts to build and install all components:
+
+**Bash/Git Bash:**
+```bash
+./dev-install.sh
+```
+
+**PowerShell:**
+```powershell
+.\dev-install.ps1
+```
+
+These scripts will:
+1. Stop any running bridge processes
+2. Uninstall existing global tools
+3. Clean and build the solution
+4. Publish Protocol DLL to Unity package
+5. Pack all NuGet packages to `./artifacts`
+6. Install the tools globally from artifacts
+7. Verify the installation
+
+### Manual Building
 
 ```bash
 # Build all projects
