@@ -85,3 +85,18 @@ public class PlayModeChangedPayload
     [JsonProperty("state")]
     public required string State { get; init; }
 }
+
+public class AssetImportCompletePayload
+{
+    [JsonProperty("path")]
+    public required string Path { get; init; }
+
+    [JsonProperty("success")]
+    public required bool Success { get; init; }
+}
+
+public class AssetReimportCompletePayload
+{
+    [JsonProperty("success")]
+    public required bool Success { get; init; }
+}

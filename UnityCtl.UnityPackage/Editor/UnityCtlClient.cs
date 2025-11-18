@@ -26,6 +26,31 @@ namespace UnityCtl
         private string _projectRoot;
         private string _projectId;
 
+        // Conditional debug logging helpers
+        private static void DebugLog(string message)
+        {
+            if (Editor.UnityCtlSettings.Instance.ShowDebugMessages)
+            {
+                Debug.Log(message);
+            }
+        }
+
+        private static void DebugLogWarning(string message)
+        {
+            if (Editor.UnityCtlSettings.Instance.ShowDebugMessages)
+            {
+                Debug.LogWarning(message);
+            }
+        }
+
+        private static void DebugLogError(string message)
+        {
+            if (Editor.UnityCtlSettings.Instance.ShowDebugMessages)
+            {
+                Debug.LogError(message);
+            }
+        }
+
         // Log buffering for early logs before connection
         private const int MAX_BUFFERED_LOGS = 1000;
         private readonly System.Collections.Generic.Queue<EventMessage> _logBuffer = new();
@@ -56,13 +81,13 @@ namespace UnityCtl
                 {
                     if (task.IsFaulted)
                     {
-                        Debug.LogWarning($"[UnityCtl] Failed to connect to bridge: {task.Exception?.GetBaseException().Message}");
+                        DebugLogWarning($"[UnityCtl] Failed to connect to bridge: {task.Exception?.GetBaseException().Message}");
                     }
                 });
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityCtl] Error during connection attempt: {ex.Message}");
+                DebugLogWarning($"[UnityCtl] Error during connection attempt: {ex.Message}");
             }
         }
 
@@ -92,7 +117,7 @@ namespace UnityCtl
                 await _webSocket.ConnectAsync(uri, _receiveCts.Token);
                 _isConnected = true;
 
-                Debug.Log($"[UnityCtl] Connected to bridge at port {port}");
+                DebugLog($"[UnityCtl] Connected to bridge at port {port}");
 
                 // Send hello message
                 await SendHelloMessageAsync();
@@ -105,7 +130,7 @@ namespace UnityCtl
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityCtl] Connection failed: {ex.Message}");
+                DebugLogWarning($"[UnityCtl] Connection failed: {ex.Message}");
                 _isConnected = false;
             }
         }
@@ -150,7 +175,7 @@ namespace UnityCtl
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityCtl] Receive loop error: {ex.Message}");
+                DebugLogWarning($"[UnityCtl] Receive loop error: {ex.Message}");
             }
             finally
             {
@@ -177,12 +202,12 @@ namespace UnityCtl
                 else if (messageType == "response")
                 {
                     // Bridge responded to our hello
-                    Debug.Log("[UnityCtl] Handshake complete");
+                    DebugLog("[UnityCtl] Handshake complete");
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[UnityCtl] Failed to handle message: {ex.Message}");
+                DebugLogError($"[UnityCtl] Failed to handle message: {ex.Message}");
             }
         }
 
@@ -215,7 +240,7 @@ namespace UnityCtl
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"[UnityCtl] Error executing command: {ex.Message}");
+                    DebugLogError($"[UnityCtl] Error executing command: {ex.Message}");
                 }
             }
         }
@@ -284,7 +309,7 @@ namespace UnityCtl
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[UnityCtl] Command failed: {ex.Message}");
+                DebugLogError($"[UnityCtl] Command failed: {ex.Message}");
                 SendResponseError(request.RequestId, "command_failed", ex.Message);
             }
         }
@@ -354,8 +379,18 @@ namespace UnityCtl
                 throw new ArgumentException("Asset path is required");
             }
 
+            // Start the import - this will complete asynchronously
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
-            AssetDatabase.Refresh();
+
+            // Register callback to send completion event when done
+            EditorApplication.delayCall += () =>
+            {
+                // Wait one frame for the import to fully complete
+                EditorApplication.delayCall += () =>
+                {
+                    SendAssetImportCompleteEvent(path, true);
+                };
+            };
 
             return new AssetImportResult { Success = true };
         }
@@ -462,7 +497,7 @@ namespace UnityCtl
 
             if (bufferedLogs.Length > 0)
             {
-                Debug.Log($"[UnityCtl] Flushed {bufferedLogs.Length} buffered log(s)");
+                DebugLog($"[UnityCtl] Flushed {bufferedLogs.Length} buffered log(s)");
             }
         }
 
@@ -517,6 +552,34 @@ namespace UnityCtl
             _ = SendMessageAsync(eventMessage);
         }
 
+        public void SendAssetImportCompleteEvent(string path, bool success)
+        {
+            if (!_isConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.AssetImportComplete,
+                Payload = new AssetImportCompletePayload { Path = path, Success = success }
+            };
+
+            _ = SendMessageAsync(eventMessage);
+        }
+
+        public void SendAssetReimportAllCompleteEvent(bool success)
+        {
+            if (!_isConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.AssetReimportAllComplete,
+                Payload = new AssetReimportCompletePayload { Success = success }
+            };
+
+            _ = SendMessageAsync(eventMessage);
+        }
+
         private async Task SendMessageAsync(BaseMessage message)
         {
             if (!_isConnected || _webSocket == null || _webSocket.State != WebSocketState.Open)
@@ -537,7 +600,7 @@ namespace UnityCtl
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityCtl] Failed to send message: {ex.Message}");
+                DebugLogWarning($"[UnityCtl] Failed to send message: {ex.Message}");
                 _isConnected = false;
             }
         }

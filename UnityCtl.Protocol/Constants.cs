@@ -27,6 +27,8 @@ public static class UnityCtlEvents
     public const string PlayModeChanged = "playModeChanged";
     public const string CompilationStarted = "compilation.started";
     public const string CompilationFinished = "compilation.finished";
+    public const string AssetImportComplete = "asset.importComplete";
+    public const string AssetReimportAllComplete = "asset.reimportAllComplete";
 }
 
 public static class MessageOrigin

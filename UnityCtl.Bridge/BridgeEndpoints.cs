@@ -16,6 +16,51 @@ namespace UnityCtl.Bridge;
 
 public static class BridgeEndpoints
 {
+    // Command timeout configuration (in seconds, configurable via environment variables)
+    private static readonly Dictionary<string, CommandConfig> CommandConfigs = new()
+    {
+        [UnityCtlCommands.PlayEnter] = new CommandConfig
+        {
+            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_PLAYMODE", 30),
+            CompletionEvent = UnityCtlEvents.PlayModeChanged
+        },
+        [UnityCtlCommands.PlayExit] = new CommandConfig
+        {
+            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_PLAYMODE", 30),
+            CompletionEvent = UnityCtlEvents.PlayModeChanged
+        },
+        [UnityCtlCommands.CompileScripts] = new CommandConfig
+        {
+            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_COMPILE", 30),
+            CompletionEvent = UnityCtlEvents.CompilationFinished
+        },
+        [UnityCtlCommands.AssetImport] = new CommandConfig
+        {
+            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_ASSET", 30),
+            CompletionEvent = UnityCtlEvents.AssetImportComplete
+        },
+        [UnityCtlCommands.AssetReimportAll] = new CommandConfig
+        {
+            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_ASSET", 30),
+            CompletionEvent = UnityCtlEvents.AssetReimportAllComplete
+        }
+    };
+
+    private static TimeSpan GetTimeoutFromEnv(string envVar, int defaultSeconds)
+    {
+        var value = Environment.GetEnvironmentVariable(envVar);
+        if (int.TryParse(value, out var seconds))
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+        return TimeSpan.FromSeconds(defaultSeconds);
+    }
+
+    private static TimeSpan GetDefaultTimeout()
+    {
+        return GetTimeoutFromEnv("UNITYCTL_TIMEOUT_DEFAULT", 30);
+    }
+
     public static void MapEndpoints(WebApplication app)
     {
         var state = app.Services.GetRequiredService<BridgeState>();
@@ -39,7 +84,7 @@ public static class BridgeEndpoints
         });
 
         // RPC endpoint
-        app.MapPost("/rpc", async ([FromBody] RpcRequest request) =>
+        app.MapPost("/rpc", async (HttpContext context, [FromBody] RpcRequest request) =>
         {
             if (!state.IsUnityConnected)
             {
@@ -61,9 +106,29 @@ public static class BridgeEndpoints
 
             try
             {
-                var response = await state.SendCommandToUnityAsync(requestMessage, TimeSpan.FromSeconds(30));
+                // Get command configuration (timeout and completion event)
+                var hasConfig = CommandConfigs.TryGetValue(request.Command, out var config);
+                var timeout = hasConfig ? config!.Timeout : GetDefaultTimeout();
+
+                // Send command to Unity with cancellation support
+                var response = await state.SendCommandToUnityAsync(requestMessage, timeout, context.RequestAborted);
+
+                // If command has a completion event, wait for it with cancellation support
+                if (hasConfig && config!.CompletionEvent != null)
+                {
+                    await state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted);
+                }
+
                 var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
                 return Results.Content(json, "application/json");
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Problem(
+                    statusCode: 499,
+                    title: "Request Cancelled",
+                    detail: "Request was cancelled (client disconnected or server shutting down)"
+                );
             }
             catch (TimeoutException ex)
             {
@@ -99,7 +164,7 @@ public static class BridgeEndpoints
 
             try
             {
-                await HandleUnityConnectionAsync(webSocket, state);
+                await HandleUnityConnectionAsync(webSocket, state, context.RequestAborted);
             }
             finally
             {
@@ -109,29 +174,51 @@ public static class BridgeEndpoints
         });
     }
 
-    private static async Task HandleUnityConnectionAsync(WebSocket webSocket, BridgeState state)
+    private static async Task HandleUnityConnectionAsync(WebSocket webSocket, BridgeState state, CancellationToken cancellationToken)
     {
         var buffer = new byte[1024 * 16];
 
-        while (webSocket.State == WebSocketState.Open)
+        try
         {
-            var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-
-            if (result.MessageType == WebSocketMessageType.Close)
+            while (webSocket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
             {
-                await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
-                break;
+                var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", cancellationToken);
+                    break;
+                }
+
+                if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    await HandleUnityMessageAsync(json, webSocket, state, cancellationToken);
+                }
             }
-
-            if (result.MessageType == WebSocketMessageType.Text)
+        }
+        catch (OperationCanceledException)
+        {
+            // Graceful shutdown - try to close the WebSocket cleanly
+            if (webSocket.State == WebSocketState.Open)
             {
-                var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                await HandleUnityMessageAsync(json, webSocket, state);
+                try
+                {
+                    await webSocket.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "Bridge shutting down",
+                        CancellationToken.None // Use None here as we're already cancelled
+                    );
+                }
+                catch
+                {
+                    // Ignore errors during cleanup
+                }
             }
         }
     }
 
-    private static async Task HandleUnityMessageAsync(string json, WebSocket webSocket, BridgeState state)
+    private static async Task HandleUnityMessageAsync(string json, WebSocket webSocket, BridgeState state, CancellationToken cancellationToken)
     {
         try
         {
@@ -148,7 +235,7 @@ public static class BridgeEndpoints
             switch (messageType)
             {
                 case "hello":
-                    await HandleHelloAsync(json, webSocket, state);
+                    await HandleHelloAsync(json, webSocket, state, cancellationToken);
                     break;
 
                 case "response":
@@ -170,7 +257,7 @@ public static class BridgeEndpoints
         }
     }
 
-    private static async Task HandleHelloAsync(string json, WebSocket webSocket, BridgeState state)
+    private static async Task HandleHelloAsync(string json, WebSocket webSocket, BridgeState state, CancellationToken cancellationToken)
     {
         var hello = JsonHelper.Deserialize<HelloMessage>(json);
         if (hello == null)
@@ -204,7 +291,7 @@ public static class BridgeEndpoints
             new ArraySegment<byte>(bytes),
             WebSocketMessageType.Text,
             true,
-            CancellationToken.None
+            cancellationToken
         );
     }
 
@@ -222,6 +309,10 @@ public static class BridgeEndpoints
         var eventMessage = JsonHelper.Deserialize<EventMessage>(json);
         if (eventMessage == null) return;
 
+        // Process event for any waiters first
+        state.ProcessEvent(eventMessage);
+
+        // Then handle specific events
         switch (eventMessage.Event)
         {
             case UnityCtlEvents.Log:
@@ -246,6 +337,14 @@ public static class BridgeEndpoints
             case UnityCtlEvents.CompilationFinished:
                 Console.WriteLine($"[Event] Compilation finished");
                 break;
+
+            case UnityCtlEvents.AssetImportComplete:
+                Console.WriteLine($"[Event] Asset import complete");
+                break;
+
+            case UnityCtlEvents.AssetReimportAllComplete:
+                Console.WriteLine($"[Event] Asset reimport all complete");
+                break;
         }
     }
 }
@@ -255,4 +354,10 @@ public class RpcRequest
     public string? AgentId { get; set; }
     public required string Command { get; set; }
     public Dictionary<string, object?>? Args { get; set; }
+}
+
+internal class CommandConfig
+{
+    public required TimeSpan Timeout { get; init; }
+    public string? CompletionEvent { get; init; }
 }

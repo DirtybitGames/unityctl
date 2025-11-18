@@ -48,13 +48,29 @@ public class BridgeClient
         try
         {
             var response = await _httpClient.GetAsync(endpoint);
-            response.EnsureSuccessStatusCode();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                {
+                    Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
+                    Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+                    return default;
+                }
+
+                var error = await response.Content.ReadAsStringAsync();
+                Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
+                Console.Error.WriteLine(error);
+                return default;
+            }
+
             var json = await response.Content.ReadAsStringAsync();
             return JsonHelper.Deserialize<T>(json);
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException)
         {
-            Console.Error.WriteLine($"Error: Failed to communicate with bridge: {ex.Message}");
+            Console.Error.WriteLine("Error: Failed to communicate with bridge.");
+            Console.Error.WriteLine("The bridge process may not be running. Try: unityctl bridge start");
             return default;
         }
     }
@@ -77,6 +93,13 @@ public class BridgeClient
 
             if (!response.IsSuccessStatusCode)
             {
+                if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                {
+                    Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
+                    Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+                    return null;
+                }
+
                 var error = await response.Content.ReadAsStringAsync();
                 Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
                 Console.Error.WriteLine(error);
@@ -86,9 +109,10 @@ public class BridgeClient
             var responseJson = await response.Content.ReadAsStringAsync();
             return JsonHelper.Deserialize<ResponseMessage>(responseJson);
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException)
         {
-            Console.Error.WriteLine($"Error: Failed to communicate with bridge: {ex.Message}");
+            Console.Error.WriteLine("Error: Failed to communicate with bridge.");
+            Console.Error.WriteLine("The bridge process may not be running. Try: unityctl bridge start");
             return null;
         }
     }
