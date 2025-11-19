@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
-    <Description>Bridge daemon for UnityCtl</Description>
+    <Description>Bridge daemon that coordinates communication between UnityCtl CLI and Unity Editor via HTTP/WebSocket. Required for remote Unity control.</Description>
 
     <!-- Dotnet tool packaging -->
     <IsPackable>true</IsPackable>

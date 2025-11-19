@@ -21,7 +21,34 @@ UnityCtl consists of three components:
 
 ### 1. Install the CLI and Bridge Tools
 
-**Quick Install (Recommended for Development):**
+[![NuGet - UnityCtl.Cli](https://img.shields.io/nuget/v/UnityCtl.Cli.svg?label=UnityCtl.Cli)](https://www.nuget.org/packages/UnityCtl.Cli)
+[![NuGet - UnityCtl.Bridge](https://img.shields.io/nuget/v/UnityCtl.Bridge.svg?label=UnityCtl.Bridge)](https://www.nuget.org/packages/UnityCtl.Bridge)
+
+**Install from NuGet (Recommended):**
+
+```bash
+dotnet tool install -g UnityCtl.Cli
+dotnet tool install -g UnityCtl.Bridge
+```
+
+**Update existing installation:**
+
+```bash
+dotnet tool update -g UnityCtl.Cli
+dotnet tool update -g UnityCtl.Bridge
+```
+
+**Uninstall:**
+
+```bash
+dotnet tool uninstall -g UnityCtl.Cli
+dotnet tool uninstall -g UnityCtl.Bridge
+```
+
+<details>
+<summary><b>Development Installation (from source)</b></summary>
+
+**Quick Install:**
 
 From the repository root, run the install script:
 
@@ -56,6 +83,8 @@ dotnet run --project UnityCtl.Bridge/UnityCtl.Bridge.csproj -- --project ./unity
 dotnet run --project UnityCtl.Cli/UnityCtl.Cli.csproj -- --help
 ```
 
+</details>
+
 ### 2. Add Unity Package
 
 The Unity package is already added to the test project in `unity-project/`. For other projects:
@@ -75,7 +104,7 @@ Add to `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.dirtybit.unityctl": "https://github.com/yourorg/unityctl.git?path=UnityCtl.UnityPackage#v0.1.0",
+    "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#v0.1.0",
     ...
   }
 }

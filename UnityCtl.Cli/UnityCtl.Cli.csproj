@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
-    <Description>CLI tool for UnityCtl</Description>
+    <Description>Command-line interface for remotely controlling Unity Editor. Send commands to Unity from your terminal or CI/CD pipeline.</Description>
 
     <!-- Dotnet tool packaging -->
     <PackAsTool>true</PackAsTool>

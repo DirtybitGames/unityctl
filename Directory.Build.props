@@ -6,7 +6,20 @@
     <Nullable>enable</Nullable>
     <Version>0.1.0</Version>
     <Authors>Dirtybit</Authors>
+
+    <!-- Package metadata for NuGet -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/DirtybitGames/unityctl</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/DirtybitGames/unityctl</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>unity;unity-editor;cli;automation;remote-control;gamedev</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Include README.md in all packages -->
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <PropertyGroup>
     <!-- Pack all tool projects to the same artifacts directory -->
