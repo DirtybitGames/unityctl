@@ -55,22 +55,21 @@ jobs:
           git commit -m "chore: update Unity package Protocol DLL [skip ci]"
           git push
 
-      - name: Create GitHub Release
+      - name: Update Unity package version from tag
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          body: |
-            ## Unity Package Installation
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Updating Unity package.json to version $VERSION"
 
-            Add this to your Unity project's `manifest.json`:
+          # Update package.json version using jq
+          sudo apt-get update && sudo apt-get install -y jq
+          jq --arg version "$VERSION" '.version = $version' UnityCtl.UnityPackage/package.json > temp.json
+          mv temp.json UnityCtl.UnityPackage/package.json
 
-            ```json
-            {
-              "dependencies": {
-                "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#${{ github.ref_name }}"
-              }
-            }
-            ```
-
-            Or use `#main` for the latest version.
+          # Commit and push the version update
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add UnityCtl.UnityPackage/package.json
+          git commit -m "chore: update Unity package version to $VERSION [skip ci]"
+          git push
