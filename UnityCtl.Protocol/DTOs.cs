@@ -169,3 +169,15 @@ public class TestFinishedPayload
     [JsonProperty("failures")]
     public TestFailureInfo[]? Failures { get; init; }
 }
+
+public class ScreenshotCaptureResult
+{
+    [JsonProperty("path")]
+    public required string Path { get; init; }
+
+    [JsonProperty("width")]
+    public required int Width { get; init; }
+
+    [JsonProperty("height")]
+    public required int Height { get; init; }
+}

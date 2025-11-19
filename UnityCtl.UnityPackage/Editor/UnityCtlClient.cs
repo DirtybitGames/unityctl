@@ -394,6 +394,10 @@ namespace UnityCtl
                         result = HandleTestRun(request);
                         break;
 
+                    case UnityCtlCommands.ScreenshotCapture:
+                        result = HandleScreenshotCapture(request);
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
@@ -543,6 +547,79 @@ namespace UnityCtl
             }
 
             return null;
+        }
+
+        private static int? GetIntArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return null;
+
+            try
+            {
+                // Try to access as dictionary
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return null;
+
+                    // Direct int
+                    if (value is int intValue)
+                    {
+                        return intValue;
+                    }
+
+                    // Handle long (JavaScript numbers can be sent as long)
+                    if (value is long longValue)
+                    {
+                        return (int)longValue;
+                    }
+
+                    // Handle Newtonsoft.Json types
+                    if (value is JToken jtoken && jtoken.Type == JTokenType.Integer)
+                    {
+                        return jtoken.Value<int>();
+                    }
+
+                    // Try to parse as int
+                    if (int.TryParse(value.ToString(), out var parsed))
+                    {
+                        return parsed;
+                    }
+
+                    DebugLog($"[UnityCtl] Could not parse argument '{key}' as int: {value}");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get int argument '{key}': {ex.Message}");
+            }
+
+            return null;
+        }
+
+        private static void ForceGameViewUpdate()
+        {
+            try
+            {
+                // Forces the editor to process the loop immediately
+                EditorApplication.QueuePlayerLoopUpdate();
+
+                // Force the GameView to repaint specifically
+                System.Reflection.Assembly assembly = typeof(EditorWindow).Assembly;
+                System.Type type = assembly.GetType("UnityEditor.GameView");
+                if (type != null)
+                {
+                    EditorWindow gameView = EditorWindow.GetWindow(type, false, null, false);
+                    if (gameView != null)
+                    {
+                        gameView.Repaint();
+                        DebugLog("[UnityCtl] Forced GameView update for screenshot");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to force GameView update: {ex.Message}");
+            }
         }
 
         private object HandleMenuList(RequestMessage request)
@@ -717,6 +794,92 @@ namespace UnityCtl
             {
                 Started = true,
                 TestRunId = testRunId
+            };
+        }
+
+        private object HandleScreenshotCapture(RequestMessage request)
+        {
+            var path = GetStringArgument(request, "path");
+            var width = GetIntArgument(request, "width");
+            var height = GetIntArgument(request, "height");
+
+            // Generate default path with timestamp if not provided
+            if (string.IsNullOrEmpty(path))
+            {
+                var timestamp = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                path = $"Screenshots/screenshot_{timestamp}.png";
+            }
+
+            // Ensure path uses forward slashes and has .png extension
+            path = path.Replace("\\", "/");
+            if (!path.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
+                !path.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
+            {
+                path += ".png";
+            }
+
+            // If path doesn't start with Screenshots/, prepend it (unless it's an absolute path)
+            if (!path.StartsWith("Screenshots/") && !System.IO.Path.IsPathRooted(path))
+            {
+                path = "Screenshots/" + path;
+            }
+
+            // Ensure directory exists
+            var directory = System.IO.Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
+            {
+                System.IO.Directory.CreateDirectory(directory);
+                DebugLog($"[UnityCtl] Created directory: {directory}");
+            }
+
+            // Get current game view resolution
+            int actualWidth = UnityEngine.Screen.width;
+            int actualHeight = UnityEngine.Screen.height;
+
+            // Force GameView to update if not in play mode
+            // This ensures the screenshot is captured even when the window isn't focused
+            if (!EditorApplication.isPlaying)
+            {
+                ForceGameViewUpdate();
+            }
+
+            // Capture screenshot
+            if (width.HasValue && height.HasValue)
+            {
+                // Calculate supersize multiplier based on desired width
+                int superSize = System.Math.Max(1, width.Value / actualWidth);
+                UnityEngine.ScreenCapture.CaptureScreenshot(path, superSize);
+                actualWidth = width.Value;
+                actualHeight = height.Value;
+                DebugLog($"[UnityCtl] Capturing screenshot with supersize {superSize} to: {path}");
+            }
+            else if (width.HasValue)
+            {
+                int superSize = System.Math.Max(1, width.Value / actualWidth);
+                UnityEngine.ScreenCapture.CaptureScreenshot(path, superSize);
+                actualWidth = width.Value;
+                actualHeight = actualHeight * superSize;
+                DebugLog($"[UnityCtl] Capturing screenshot with width {width.Value} to: {path}");
+            }
+            else if (height.HasValue)
+            {
+                int superSize = System.Math.Max(1, height.Value / actualHeight);
+                UnityEngine.ScreenCapture.CaptureScreenshot(path, superSize);
+                actualWidth = actualWidth * superSize;
+                actualHeight = height.Value;
+                DebugLog($"[UnityCtl] Capturing screenshot with height {height.Value} to: {path}");
+            }
+            else
+            {
+                UnityEngine.ScreenCapture.CaptureScreenshot(path);
+                DebugLog($"[UnityCtl] Capturing screenshot at game view resolution to: {path}");
+            }
+
+            return new ScreenshotCaptureResult
+            {
+                Path = path,
+                Width = actualWidth,
+                Height = actualHeight
             };
         }
 

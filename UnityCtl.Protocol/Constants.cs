@@ -26,6 +26,9 @@ public static class UnityCtlCommands
 
     // Tests
     public const string TestRun = "test.run";
+
+    // Screenshots
+    public const string ScreenshotCapture = "screenshot.capture";
 }
 
 public static class UnityCtlEvents
