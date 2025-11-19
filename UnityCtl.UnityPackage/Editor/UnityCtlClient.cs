@@ -659,23 +659,58 @@ namespace UnityCtl
                 ? UnityEditor.TestTools.TestRunner.Api.TestMode.PlayMode
                 : UnityEditor.TestTools.TestRunner.Api.TestMode.EditMode;
 
-            var testFilter = new UnityEditor.TestTools.TestRunner.Api.Filter
-            {
-                testMode = testMode
-            };
-
-            // Apply name filter if provided
+            // Apply name filter if provided - supports partial matching
             if (!string.IsNullOrEmpty(filter))
             {
-                testFilter.testNames = new[] { filter };
+                var matchingTests = new System.Collections.Generic.List<string>();
+
+                // Retrieve all tests for this mode using callback
+                // Note: This callback is asynchronous - it runs later
+                testRunnerApi.RetrieveTestList(testMode, (rootTest) =>
+                {
+                    // Recursively collect matching test names
+                    CollectMatchingTests(rootTest, filter, matchingTests);
+
+                    DebugLog($"[UnityCtl] Filter '{filter}' matched {matchingTests.Count} test(s)");
+
+                    // Build the test filter with matched tests
+                    var testFilter = new UnityEditor.TestTools.TestRunner.Api.Filter
+                    {
+                        testMode = testMode
+                    };
+
+                    if (matchingTests.Count > 0)
+                    {
+                        testFilter.testNames = matchingTests.ToArray();
+                        DebugLog($"[UnityCtl] Running {matchingTests.Count} matched test(s)");
+                    }
+                    else
+                    {
+                        // If no matches found, still pass the filter as-is for exact match attempt
+                        DebugLog($"[UnityCtl] No matches found, attempting exact match with: {filter}");
+                        testFilter.testNames = new[] { filter };
+                    }
+
+                    // Create callback handler that will send event when done
+                    var callback = new TestRunnerCallback(testRunId, this);
+                    testRunnerApi.RegisterCallbacks(callback);
+
+                    // Run tests (this starts the test run asynchronously and returns immediately)
+                    testRunnerApi.Execute(new UnityEditor.TestTools.TestRunner.Api.ExecutionSettings(testFilter));
+                });
             }
+            else
+            {
+                // No filter - run all tests
+                var testFilter = new UnityEditor.TestTools.TestRunner.Api.Filter
+                {
+                    testMode = testMode
+                };
 
-            // Create callback handler that will send event when done
-            var callback = new TestRunnerCallback(testRunId, this);
-            testRunnerApi.RegisterCallbacks(callback);
-
-            // Run tests (this starts the test run asynchronously and returns immediately)
-            testRunnerApi.Execute(new UnityEditor.TestTools.TestRunner.Api.ExecutionSettings(testFilter));
+                var callback = new TestRunnerCallback(testRunId, this);
+                testRunnerApi.RegisterCallbacks(callback);
+                testRunnerApi.Execute(new UnityEditor.TestTools.TestRunner.Api.ExecutionSettings(testFilter));
+            }
 
             // Return immediately - results will be sent via TestFinished event
             return new TestRunResult
@@ -683,6 +718,33 @@ namespace UnityCtl
                 Started = true,
                 TestRunId = testRunId
             };
+        }
+
+        private void CollectMatchingTests(UnityEditor.TestTools.TestRunner.Api.ITestAdaptor test, string filter, System.Collections.Generic.List<string> results)
+        {
+            if (test == null) return;
+
+            // Check if this is a leaf test (actual test method, not a container)
+            if (!test.HasChildren)
+            {
+                // Match against full name using case-insensitive contains
+                if (test.FullName.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    results.Add(test.FullName);
+                    DebugLog($"[UnityCtl] Matched test: {test.FullName}");
+                }
+            }
+            else
+            {
+                // Recursively check children
+                if (test.Children != null)
+                {
+                    foreach (var child in test.Children)
+                    {
+                        CollectMatchingTests(child, filter, results);
+                    }
+                }
+            }
         }
 
         // Nested class to handle test runner callbacks
