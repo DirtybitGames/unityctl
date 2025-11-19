@@ -113,12 +113,12 @@ unityctl/
 │   ├── Config/               # Configuration models
 │   └── Utils/                # Helper utilities
 │
-├── UnityCtl.Bridge/          # Bridge daemon (net8.0)
+├── UnityCtl.Bridge/          # Bridge daemon (net10.0)
 │   ├── Server/               # HTTP and WebSocket servers
 │   ├── LogBuffer/            # Console log buffering
 │   └── Program.cs            # Entry point
 │
-├── UnityCtl.Cli/             # CLI tool (net8.0)
+├── UnityCtl.Cli/             # CLI tool (net10.0)
 │   ├── Commands/             # Command implementations
 │   ├── BridgeClient.cs       # HTTP client for bridge
 │   └── Program.cs            # Entry point

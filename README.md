@@ -24,7 +24,7 @@ UnityCtl consists of three components:
 
 ### 1. Install CLI and Bridge
 
-Install from NuGet (requires .NET 8.0+):
+Install from NuGet (requires .NET 10.0+):
 
 ```bash
 dotnet tool install -g UnityCtl.Cli
@@ -117,6 +117,9 @@ unityctl bridge status
 
 # Start bridge daemon
 unityctl bridge start [--project <path>]
+
+# Stop bridge daemon
+unityctl bridge stop
 ```
 
 ### Play Mode
@@ -167,6 +170,30 @@ unityctl compile scripts
 ```bash
 # Import a specific asset
 unityctl asset import Assets/Textures/logo.png
+```
+
+### Menu Management
+
+```bash
+# List all Unity menu items
+unityctl menu list
+
+# Execute a Unity menu item
+unityctl menu execute Assets/Refresh
+```
+
+### Test Runner
+
+```bash
+# Run tests (default: editmode)
+unityctl test run
+
+# Run tests in specific mode
+unityctl test run --mode editmode
+unityctl test run --mode playmode
+
+# Run tests with filter pattern
+unityctl test run --filter MyTest
 ```
 
 ### Global Options

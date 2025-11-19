@@ -7,18 +7,18 @@ echo "========================================"
 echo ""
 
 # Step 1: Kill any running bridge processes
-echo "[1/6] Stopping running bridge processes..."
+echo "[1/7] Stopping running bridge processes..."
 taskkill //F //IM unityctl-bridge.exe 2>/dev/null || echo "  No bridge process running"
 echo ""
 
 # Step 2: Uninstall existing tools
-echo "[2/6] Uninstalling existing tools..."
+echo "[2/7] Uninstalling existing tools..."
 dotnet tool uninstall -g UnityCtl.Cli 2>/dev/null || echo "  UnityCtl.Cli not installed"
 dotnet tool uninstall -g UnityCtl.Bridge 2>/dev/null || echo "  UnityCtl.Bridge not installed"
 echo ""
 
 # Step 3: Clean the solution
-echo "[3/6] Cleaning solution..."
+echo "[3/7] Cleaning solution..."
 dotnet clean --configuration Release
 echo ""
 

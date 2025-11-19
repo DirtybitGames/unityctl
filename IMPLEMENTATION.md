@@ -89,7 +89,7 @@ unityctl compile scripts        # Trigger compilation
 
 **Location:** `UnityCtl.UnityPackage/`
 **Package Name:** `com.dirtybit.unityctl`
-**Unity Version:** 6000.0+
+**Unity Version:** 6.0+
 
 **Files:**
 - `package.json` - UPM package manifest
@@ -238,7 +238,7 @@ dotnet tool install -g UnityCtl.Bridge --add-source ./artifacts
 1. **Start the bridge:**
    ```bash
    cd unity-project
-   unityctl-bridge --project .
+   unityctl bridge start --project .
    ```
 
 2. **Open Unity Editor** with the project
@@ -298,7 +298,7 @@ The implementation includes a test Unity project at `unity-project/` with the Un
    - Multiple CLIs can connect
 
 4. **Why netstandard2.1 for Protocol?**
-   - Compatible with Unity 2021.2+
+   - Compatible with Unity 6.0+
    - Shared between .NET 10.0 and Unity
    - Single source of truth for protocol
 

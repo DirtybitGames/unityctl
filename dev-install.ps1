@@ -7,7 +7,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Kill any running bridge processes
-Write-Host "[1/6] Stopping running bridge processes..." -ForegroundColor Yellow
+Write-Host "[1/7] Stopping running bridge processes..." -ForegroundColor Yellow
 try {
     Stop-Process -Name "unityctl-bridge" -Force -ErrorAction SilentlyContinue
     Write-Host "  Bridge process stopped" -ForegroundColor Gray
@@ -17,7 +17,7 @@ try {
 Write-Host ""
 
 # Step 2: Uninstall existing tools
-Write-Host "[2/6] Uninstalling existing tools..." -ForegroundColor Yellow
+Write-Host "[2/7] Uninstalling existing tools..." -ForegroundColor Yellow
 try {
     dotnet tool uninstall -g UnityCtl.Cli 2>$null
     Write-Host "  UnityCtl.Cli uninstalled" -ForegroundColor Gray
@@ -33,7 +33,7 @@ try {
 Write-Host ""
 
 # Step 3: Clean the solution
-Write-Host "[3/6] Cleaning solution..." -ForegroundColor Yellow
+Write-Host "[3/7] Cleaning solution..." -ForegroundColor Yellow
 dotnet clean --configuration Release
 Write-Host ""
 

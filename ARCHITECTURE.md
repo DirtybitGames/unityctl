@@ -40,12 +40,12 @@ Shared library (netstandard2.1) containing all message types and shared logic.
   - Scene info, console logs, compilation results
 
 **Why netstandard2.1?**
-- Compatible with both .NET 8.0 (CLI/Bridge) and Unity 2021.3+ (requires netstandard2.1)
+- Compatible with both .NET 10.0 (CLI/Bridge) and Unity 6.0+ (requires netstandard2.1)
 - Allows sharing types without duplication
 
 ### 2. Bridge Daemon (UnityCtl.Bridge)
 
-.NET 8.0 console application that runs as a daemon process.
+.NET 10.0 console application that runs as a daemon process.
 
 **Responsibilities:**
 
@@ -85,7 +85,7 @@ unityctl bridge start
 
 ### 3. CLI Tool (UnityCtl.Cli)
 
-.NET 8.0 console application using System.CommandLine for argument parsing.
+.NET 10.0 console application using System.CommandLine for argument parsing.
 
 **Architecture:**
 

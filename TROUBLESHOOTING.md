@@ -36,7 +36,7 @@ This guide covers common issues and how to resolve them.
 
 3. **Check bridge logs:**
    - Look for error messages in bridge output
-   - Check if .NET 8.0 runtime is installed:
+   - Check if .NET 10.0 runtime is installed:
      ```bash
      dotnet --version
      ```
@@ -178,12 +178,7 @@ This guide covers common issues and how to resolve them.
    - Look for exceptions or errors
    - Check if Unity is waiting for user input (dialogs, etc.)
 
-4. **Increase timeout:**
-   ```bash
-   unityctl --timeout 60 scene load Assets/Scenes/Heavy.unity
-   ```
-
-5. **Try a simpler command first:**
+4. **Try a simpler command first:**
    ```bash
    unityctl bridge status
    unityctl play status
@@ -270,7 +265,7 @@ This guide covers common issues and how to resolve them.
    dotnet --version
    ```
 
-   Requires .NET 8.0 or later.
+   Requires .NET 10.0 or later.
 
 2. **Check NuGet package exists:**
    - Visit https://www.nuget.org/packages/UnityCtl.Cli
