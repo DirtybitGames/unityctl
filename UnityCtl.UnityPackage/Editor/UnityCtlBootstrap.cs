@@ -16,6 +16,7 @@ namespace UnityCtl
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             CompilationPipeline.compilationStarted += OnCompilationStarted;
             CompilationPipeline.compilationFinished += OnCompilationFinished;
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
 
             // Initial connection attempt
             EditorApplication.delayCall += () =>
@@ -51,6 +52,12 @@ namespace UnityCtl
             // Check if compilation was successful by checking for compile errors
             var success = !EditorUtility.scriptCompilationFailed;
             UnityCtlClient.Instance.SendCompilationFinishedEvent(success);
+        }
+
+        private static void OnBeforeAssemblyReload()
+        {
+            // This fires RIGHT BEFORE domain reload - send notification to bridge
+            UnityCtlClient.Instance.SendDomainReloadStartingEvent();
         }
     }
 }

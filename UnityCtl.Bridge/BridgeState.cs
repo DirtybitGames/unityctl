@@ -29,6 +29,11 @@ public class BridgeState
     // Track requests waiting for completion events
     private readonly ConcurrentDictionary<string, PendingEventWaiter> _pendingEventWaiters = new();
 
+    // Domain reload grace period tracking
+    private bool _isDomainReloadInProgress = false;
+    private DateTime _domainReloadGracePeriodEnd = DateTime.MinValue;
+    private static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(30);
+
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
 
     public void SetUnityConnection(WebSocket? connection)
@@ -37,10 +42,34 @@ public class BridgeState
         {
             UnityConnection = connection;
 
-            // Cancel all pending operations when Unity disconnects
             if (connection == null)
             {
-                CancelAllPendingOperations();
+                // Unity disconnected - check if we're in domain reload grace period
+                if (_isDomainReloadInProgress)
+                {
+                    Console.WriteLine($"[Bridge] Unity disconnected during domain reload grace period - keeping operations alive");
+                    // Don't cancel operations - wait for reconnection
+                }
+                else
+                {
+                    // Normal disconnection - cancel all pending operations
+                    Console.WriteLine($"[Bridge] Unity disconnected - canceling all pending operations");
+                    CancelAllPendingOperations();
+                }
+            }
+            else
+            {
+                // Unity connected/reconnected
+                if (_isDomainReloadInProgress)
+                {
+                    Console.WriteLine($"[Bridge] Unity reconnected after domain reload - resuming operations");
+                    _isDomainReloadInProgress = false;
+                    _domainReloadGracePeriodEnd = DateTime.MinValue;
+                }
+                else
+                {
+                    Console.WriteLine($"[Bridge] Unity connected");
+                }
             }
         }
     }
@@ -92,6 +121,37 @@ public class BridgeState
             kvp.Value.CompletionSource.TrySetCanceled();
         }
         _pendingEventWaiters.Clear();
+    }
+
+    /// <summary>
+    /// Called when Unity sends DomainReloadStarting event - enter grace period
+    /// </summary>
+    public void OnDomainReloadStarting()
+    {
+        lock (_lock)
+        {
+            _isDomainReloadInProgress = true;
+            _domainReloadGracePeriodEnd = DateTime.UtcNow.Add(DefaultGracePeriod);
+            Console.WriteLine($"[Bridge] Domain reload starting - entering grace period for {DefaultGracePeriod.TotalSeconds}s");
+        }
+    }
+
+    /// <summary>
+    /// Check if grace period has expired and cancel operations if so
+    /// Call this periodically or when operations timeout
+    /// </summary>
+    public void CheckGracePeriodExpired()
+    {
+        lock (_lock)
+        {
+            if (_isDomainReloadInProgress && DateTime.UtcNow > _domainReloadGracePeriodEnd)
+            {
+                Console.WriteLine($"[Bridge] Domain reload grace period expired - Unity did not reconnect in time");
+                _isDomainReloadInProgress = false;
+                _domainReloadGracePeriodEnd = DateTime.MinValue;
+                CancelAllPendingOperations();
+            }
+        }
     }
 
     public void AddLogEntry(LogEntry entry)

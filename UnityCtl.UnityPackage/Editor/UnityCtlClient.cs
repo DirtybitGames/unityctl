@@ -937,6 +937,30 @@ namespace UnityCtl
             _ = SendMessageAsync(eventMessage);
         }
 
+        public void SendDomainReloadStartingEvent()
+        {
+            if (!_isConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.DomainReloadStarting,
+                Payload = new { }
+            };
+
+            try
+            {
+                // Use synchronous wait to ensure delivery before domain unloads
+                // This is critical - the callback is synchronous so Unity waits for us
+                SendMessageAsync(eventMessage).Wait(100);
+            }
+            catch (System.Exception ex)
+            {
+                // Log but don't throw - domain reload will happen anyway
+                DebugLogWarning($"[UnityCtl] Failed to send domain reload event: {ex.Message}");
+            }
+        }
+
         public void SendAssetImportCompleteEvent(string path, bool success)
         {
             if (!_isConnected) return;

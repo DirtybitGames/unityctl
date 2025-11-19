@@ -38,6 +38,7 @@ public static class UnityCtlEvents
     public const string AssetReimportAllComplete = "asset.reimportAllComplete";
     public const string TestStarted = "test.started";
     public const string TestFinished = "test.finished";
+    public const string DomainReloadStarting = "domain.reloadStarting";
 }
 
 public static class MessageOrigin

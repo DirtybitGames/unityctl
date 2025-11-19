@@ -391,6 +391,11 @@ public static class BridgeEndpoints
             case UnityCtlEvents.TestFinished:
                 Console.WriteLine($"[Event] Tests finished");
                 break;
+
+            case UnityCtlEvents.DomainReloadStarting:
+                Console.WriteLine($"[Event] Domain reload starting");
+                state.OnDomainReloadStarting();
+                break;
         }
     }
 }
