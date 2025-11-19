@@ -201,4 +201,70 @@ public class BridgeClient
             return false;
         }
     }
+
+    public static async Task<bool> StopBridgeAsync(string? projectPath)
+    {
+        var projectRoot = projectPath ?? ProjectLocator.FindProjectRoot();
+        if (projectRoot == null)
+        {
+            Console.Error.WriteLine("Error: Not in a Unity project. Use --project to specify project root.");
+            return false;
+        }
+
+        var config = ProjectLocator.ReadBridgeConfig(projectRoot);
+        if (config == null)
+        {
+            Console.Error.WriteLine("Error: Bridge is not running (no config found).");
+            return false;
+        }
+
+        Console.WriteLine($"Stopping bridge (PID: {config.Pid})...");
+
+        try
+        {
+            var process = Process.GetProcessById(config.Pid);
+
+            // Kill the process
+            process.Kill();
+
+            // Wait for process to exit (with timeout)
+            bool exited = process.WaitForExit(5000);
+
+            if (!exited)
+            {
+                Console.Error.WriteLine("Warning: Bridge process did not exit within timeout, forcing termination...");
+                process.Kill(true); // Kill entire process tree
+                process.WaitForExit(2000);
+            }
+
+            // Clean up config file
+            var configPath = Path.Combine(projectRoot, ".unityctl", "bridge.json");
+            if (File.Exists(configPath))
+            {
+                File.Delete(configPath);
+            }
+
+            Console.WriteLine("Bridge stopped successfully");
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            // Process not found
+            Console.Error.WriteLine($"Warning: Bridge process (PID: {config.Pid}) not found. Cleaning up stale config...");
+
+            // Clean up stale config
+            var configPath = Path.Combine(projectRoot, ".unityctl", "bridge.json");
+            if (File.Exists(configPath))
+            {
+                File.Delete(configPath);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: Failed to stop bridge: {ex.Message}");
+            return false;
+        }
+    }
 }

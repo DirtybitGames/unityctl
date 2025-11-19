@@ -81,8 +81,27 @@ public static class BridgeCommands
             await BridgeClient.StartBridgeAsync(projectPath);
         });
 
+        // bridge stop
+        var stopCommand = new Command("stop", "Stop the bridge daemon");
+
+        stopCommand.SetHandler(async (InvocationContext context) =>
+        {
+            // Get project path from global options
+            string? projectPath = null;
+            var parseResult = context.ParseResult;
+            var rootCommand = parseResult.RootCommandResult.Command;
+            var projectOption = rootCommand.Options.FirstOrDefault(o => o.Name == "project") as Option<string>;
+            if (projectOption != null)
+            {
+                projectPath = parseResult.GetValueForOption(projectOption);
+            }
+
+            await BridgeClient.StopBridgeAsync(projectPath);
+        });
+
         bridgeCommand.AddCommand(statusCommand);
         bridgeCommand.AddCommand(startCommand);
+        bridgeCommand.AddCommand(stopCommand);
         return bridgeCommand;
     }
 }
