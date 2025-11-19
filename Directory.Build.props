@@ -7,10 +7,6 @@
     <Version>0.1.0</Version>
     <Authors>Dirtybit</Authors>
 
-    <!-- Deterministic builds for reproducibility -->
-    <Deterministic>true</Deterministic>
-    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-
     <!-- Package metadata for NuGet -->
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/DirtybitGames/unityctl</PackageProjectUrl>
