@@ -43,6 +43,11 @@ public static class BridgeEndpoints
         {
             Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_ASSET", 30),
             CompletionEvent = UnityCtlEvents.AssetReimportAllComplete
+        },
+        [UnityCtlCommands.TestRun] = new CommandConfig
+        {
+            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_TEST", 300),
+            CompletionEvent = UnityCtlEvents.TestFinished
         }
     };
 
@@ -132,7 +137,17 @@ public static class BridgeEndpoints
                 // If command has a completion event, wait for it with cancellation support
                 if (hasConfig && config!.CompletionEvent != null)
                 {
-                    await state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted);
+                    var eventMessage = await state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted);
+
+                    // Create new response with event payload as the result
+                    response = new ResponseMessage
+                    {
+                        Origin = response.Origin,
+                        RequestId = response.RequestId,
+                        Status = response.Status,
+                        Result = eventMessage.Payload,
+                        Error = response.Error
+                    };
                 }
 
                 var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
@@ -370,6 +385,10 @@ public static class BridgeEndpoints
 
             case UnityCtlEvents.AssetReimportAllComplete:
                 Console.WriteLine($"[Event] Asset reimport all complete");
+                break;
+
+            case UnityCtlEvents.TestFinished:
+                Console.WriteLine($"[Event] Tests finished");
                 break;
         }
     }

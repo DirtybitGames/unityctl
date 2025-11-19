@@ -127,3 +127,45 @@ public class MenuExecuteResult
     [JsonProperty("message")]
     public string? Message { get; init; }
 }
+
+public class TestRunResult
+{
+    [JsonProperty("started")]
+    public required bool Started { get; init; }
+
+    [JsonProperty("testRunId")]
+    public string? TestRunId { get; init; }
+}
+
+public class TestFailureInfo
+{
+    [JsonProperty("testName")]
+    public required string TestName { get; init; }
+
+    [JsonProperty("message")]
+    public required string Message { get; init; }
+
+    [JsonProperty("stackTrace")]
+    public string? StackTrace { get; init; }
+}
+
+public class TestFinishedPayload
+{
+    [JsonProperty("testRunId")]
+    public required string TestRunId { get; init; }
+
+    [JsonProperty("passed")]
+    public required int Passed { get; init; }
+
+    [JsonProperty("failed")]
+    public required int Failed { get; init; }
+
+    [JsonProperty("skipped")]
+    public required int Skipped { get; init; }
+
+    [JsonProperty("duration")]
+    public required double Duration { get; init; }
+
+    [JsonProperty("failures")]
+    public TestFailureInfo[]? Failures { get; init; }
+}

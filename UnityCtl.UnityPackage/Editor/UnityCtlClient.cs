@@ -171,7 +171,7 @@ namespace UnityCtl
                 ProjectId = _projectId,
                 UnityVersion = Application.unityVersion,
                 EditorInstanceId = SystemInfo.deviceUniqueIdentifier,
-                Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu" },
+                Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu", "test" },
                 ProtocolVersion = "1.0.0"
             };
 
@@ -388,6 +388,10 @@ namespace UnityCtl
 
                     case UnityCtlCommands.MenuExecute:
                         result = HandleMenuExecute(request);
+                        break;
+
+                    case UnityCtlCommands.TestRun:
+                        result = HandleTestRun(request);
                         break;
 
                     default:
@@ -639,6 +643,141 @@ namespace UnityCtl
                     Message = $"Menu item '{menuPath}' does not exist or could not be executed"
                 };
             }
+        }
+
+        private object HandleTestRun(RequestMessage request)
+        {
+            var mode = GetStringArgument(request, "mode") ?? "editmode";
+            var filter = GetStringArgument(request, "filter");
+            var testRunId = System.Guid.NewGuid().ToString();
+
+            // Use Unity's TestRunner API
+            var testRunnerApi = ScriptableObject.CreateInstance<UnityEditor.TestTools.TestRunner.Api.TestRunnerApi>();
+
+            // Configure test filter
+            var testMode = mode.ToLower() == "playmode"
+                ? UnityEditor.TestTools.TestRunner.Api.TestMode.PlayMode
+                : UnityEditor.TestTools.TestRunner.Api.TestMode.EditMode;
+
+            var testFilter = new UnityEditor.TestTools.TestRunner.Api.Filter
+            {
+                testMode = testMode
+            };
+
+            // Apply name filter if provided
+            if (!string.IsNullOrEmpty(filter))
+            {
+                testFilter.testNames = new[] { filter };
+            }
+
+            // Create callback handler that will send event when done
+            var callback = new TestRunnerCallback(testRunId, this);
+            testRunnerApi.RegisterCallbacks(callback);
+
+            // Run tests (this starts the test run asynchronously and returns immediately)
+            testRunnerApi.Execute(new UnityEditor.TestTools.TestRunner.Api.ExecutionSettings(testFilter));
+
+            // Return immediately - results will be sent via TestFinished event
+            return new TestRunResult
+            {
+                Started = true,
+                TestRunId = testRunId
+            };
+        }
+
+        // Nested class to handle test runner callbacks
+        private class TestRunnerCallback : UnityEditor.TestTools.TestRunner.Api.ICallbacks
+        {
+            private readonly string _testRunId;
+            private readonly UnityCtlClient _client;
+            private readonly System.Collections.Generic.List<TestFailureInfo> _failures = new System.Collections.Generic.List<TestFailureInfo>();
+            private int _passed = 0;
+            private int _failed = 0;
+            private int _skipped = 0;
+            private System.DateTime _startTime;
+
+            public TestRunnerCallback(string testRunId, UnityCtlClient client)
+            {
+                _testRunId = testRunId;
+                _client = client;
+            }
+
+            public void RunStarted(UnityEditor.TestTools.TestRunner.Api.ITestAdaptor testsToRun)
+            {
+                _startTime = System.DateTime.UtcNow;
+                _failures.Clear();
+                _passed = 0;
+                _failed = 0;
+                _skipped = 0;
+            }
+
+            public void RunFinished(UnityEditor.TestTools.TestRunner.Api.ITestResultAdaptor result)
+            {
+                // Send test finished event
+                _client.SendTestFinishedEvent(GetTestFinishedPayload());
+            }
+
+            public void TestStarted(UnityEditor.TestTools.TestRunner.Api.ITestAdaptor test)
+            {
+                // No action needed
+            }
+
+            public void TestFinished(UnityEditor.TestTools.TestRunner.Api.ITestResultAdaptor result)
+            {
+                // Only count leaf nodes (actual test methods), not parent containers
+                if (result.Test.HasChildren)
+                {
+                    return;
+                }
+
+                if (result.TestStatus == UnityEditor.TestTools.TestRunner.Api.TestStatus.Passed)
+                {
+                    _passed++;
+                }
+                else if (result.TestStatus == UnityEditor.TestTools.TestRunner.Api.TestStatus.Failed)
+                {
+                    _failed++;
+                    _failures.Add(new TestFailureInfo
+                    {
+                        TestName = result.Test.FullName,
+                        Message = result.Message ?? "Test failed",
+                        StackTrace = result.StackTrace
+                    });
+                }
+                else if (result.TestStatus == UnityEditor.TestTools.TestRunner.Api.TestStatus.Skipped ||
+                         result.TestStatus == UnityEditor.TestTools.TestRunner.Api.TestStatus.Inconclusive)
+                {
+                    _skipped++;
+                }
+            }
+
+            private TestFinishedPayload GetTestFinishedPayload()
+            {
+                var duration = (System.DateTime.UtcNow - _startTime).TotalSeconds;
+                return new TestFinishedPayload
+                {
+                    TestRunId = _testRunId,
+                    Passed = _passed,
+                    Failed = _failed,
+                    Skipped = _skipped,
+                    Duration = duration,
+                    Failures = _failures.ToArray()
+                };
+            }
+        }
+
+        public void SendTestFinishedEvent(TestFinishedPayload payload)
+        {
+            if (!_isConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.TestFinished,
+                Payload = payload
+            };
+
+            _ = SendMessageAsync(eventMessage);
         }
 
         private void SendResponseOk(string requestId, object result)

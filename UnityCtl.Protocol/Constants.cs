@@ -23,6 +23,9 @@ public static class UnityCtlCommands
     // Menu items
     public const string MenuList = "menu.list";
     public const string MenuExecute = "menu.execute";
+
+    // Tests
+    public const string TestRun = "test.run";
 }
 
 public static class UnityCtlEvents
@@ -33,6 +36,8 @@ public static class UnityCtlEvents
     public const string CompilationFinished = "compilation.finished";
     public const string AssetImportComplete = "asset.importComplete";
     public const string AssetReimportAllComplete = "asset.reimportAllComplete";
+    public const string TestStarted = "test.started";
+    public const string TestFinished = "test.finished";
 }
 
 public static class MessageOrigin
