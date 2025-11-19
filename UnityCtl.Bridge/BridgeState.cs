@@ -46,6 +46,35 @@ public class BridgeState
     }
 
     /// <summary>
+    /// Forcefully abort the Unity WebSocket connection (used during shutdown)
+    /// </summary>
+    public void AbortUnityConnection()
+    {
+        WebSocket? connection;
+        lock (_lock)
+        {
+            connection = UnityConnection;
+            UnityConnection = null;
+        }
+
+        if (connection != null)
+        {
+            try
+            {
+                // Abort forcefully terminates the WebSocket without waiting for graceful closure
+                connection.Abort();
+            }
+            catch
+            {
+                // Ignore errors during abort - we're shutting down anyway
+            }
+        }
+
+        // Cancel all pending operations
+        CancelAllPendingOperations();
+    }
+
+    /// <summary>
     /// Cancel all pending requests and event waiters
     /// </summary>
     public void CancelAllPendingOperations()

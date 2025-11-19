@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using UnityCtl.Bridge;
 using UnityCtl.Protocol;
 
@@ -77,14 +78,29 @@ rootCommand.SetHandler(async (string? projectPath, int port) =>
     var builder = WebApplication.CreateBuilder();
     builder.WebHost.UseUrls($"http://localhost:{port}");
 
+    // Configure fast shutdown
+    builder.Services.Configure<HostOptions>(opts =>
+    {
+        opts.ShutdownTimeout = TimeSpan.FromSeconds(2);
+    });
+
     // Add services
-    builder.Services.AddSingleton(new BridgeState(projectId));
+    var bridgeState = new BridgeState(projectId);
+    builder.Services.AddSingleton(bridgeState);
 
     var app = builder.Build();
 
     // Configure endpoints
     app.UseWebSockets();
     BridgeEndpoints.MapEndpoints(app);
+
+    // Register shutdown handler to forcefully abort WebSocket connections
+    var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+    lifetime.ApplicationStopping.Register(() =>
+    {
+        Console.WriteLine("Shutting down bridge...");
+        bridgeState.AbortUnityConnection();
+    });
 
     Console.WriteLine("Bridge is ready. Press Ctrl+C to stop.");
 

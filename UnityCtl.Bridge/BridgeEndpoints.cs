@@ -240,22 +240,23 @@ public static class BridgeEndpoints
         }
         catch (OperationCanceledException)
         {
-            // Graceful shutdown - try to close the WebSocket cleanly
-            if (webSocket.State == WebSocketState.Open)
+            // Shutdown detected - forcefully abort the WebSocket connection
+            // We use Abort() instead of CloseAsync() because we need immediate termination
+            if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent)
             {
                 try
                 {
-                    await webSocket.CloseAsync(
-                        WebSocketCloseStatus.NormalClosure,
-                        "Bridge shutting down",
-                        CancellationToken.None // Use None here as we're already cancelled
-                    );
+                    webSocket.Abort();
                 }
                 catch
                 {
-                    // Ignore errors during cleanup
+                    // Ignore errors during abort - we're shutting down anyway
                 }
             }
+        }
+        catch (WebSocketException)
+        {
+            // WebSocket was already closed or aborted - this is fine during shutdown
         }
     }
 
