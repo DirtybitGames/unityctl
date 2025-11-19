@@ -237,28 +237,15 @@ public class BridgeClient
                 process.WaitForExit(2000);
             }
 
-            // Clean up config file
-            var configPath = Path.Combine(projectRoot, ".unityctl", "bridge.json");
-            if (File.Exists(configPath))
-            {
-                File.Delete(configPath);
-            }
-
             Console.WriteLine("Bridge stopped successfully");
+            Console.WriteLine("Note: Config file preserved to allow Unity to reconnect when bridge restarts");
             return true;
         }
         catch (ArgumentException)
         {
             // Process not found
-            Console.Error.WriteLine($"Warning: Bridge process (PID: {config.Pid}) not found. Cleaning up stale config...");
-
-            // Clean up stale config
-            var configPath = Path.Combine(projectRoot, ".unityctl", "bridge.json");
-            if (File.Exists(configPath))
-            {
-                File.Delete(configPath);
-            }
-
+            Console.WriteLine($"Bridge process (PID: {config.Pid}) is not running");
+            Console.WriteLine("Note: Config file preserved - bridge may have already stopped");
             return true;
         }
         catch (Exception ex)

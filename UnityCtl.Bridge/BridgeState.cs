@@ -32,7 +32,7 @@ public class BridgeState
     // Domain reload grace period tracking
     private bool _isDomainReloadInProgress = false;
     private DateTime _domainReloadGracePeriodEnd = DateTime.MinValue;
-    private static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(60);
 
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
 
