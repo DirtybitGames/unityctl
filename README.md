@@ -47,7 +47,7 @@ Add to your Unity project's `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#v0.1.0"
+    "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#v0.1.1"
   }
 }
 ```
@@ -100,6 +100,11 @@ unityctl play enter
 Load a scene:
 ```bash
 unityctl scene load Assets/Scenes/SampleScene.unity
+```
+
+Capture a screenshot:
+```bash
+unityctl screenshot capture
 ```
 
 View console logs:
@@ -195,6 +200,24 @@ unityctl test run --mode playmode
 # Run tests with filter pattern
 unityctl test run --filter MyTest
 ```
+
+### Screenshots
+
+```bash
+# Capture screenshot with auto-generated filename
+unityctl screenshot capture
+
+# Capture with custom filename
+unityctl screenshot capture mytest.png
+
+# Capture with custom resolution
+unityctl screenshot capture --width 1920 --height 1080
+
+# Capture with custom filename and resolution
+unityctl screenshot capture high-res.png --width 3840 --height 2160
+```
+
+Screenshots are saved to `Screenshots/` folder in your project root (outside Assets).
 
 ### Global Options
 
