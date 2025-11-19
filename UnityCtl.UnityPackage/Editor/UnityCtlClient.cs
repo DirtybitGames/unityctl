@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEditor.SceneManagement;
@@ -167,7 +171,7 @@ namespace UnityCtl
                 ProjectId = _projectId,
                 UnityVersion = Application.unityVersion,
                 EditorInstanceId = SystemInfo.deviceUniqueIdentifier,
-                Capabilities = new[] { "console", "asset", "scene", "play", "compile" },
+                Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu" },
                 ProtocolVersion = "1.0.0"
             };
 
@@ -177,6 +181,7 @@ namespace UnityCtl
         private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
         {
             var buffer = new byte[1024 * 16];
+            var messageBuilder = new System.Text.StringBuilder();
 
             try
             {
@@ -193,8 +198,17 @@ namespace UnityCtl
 
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
-                        var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        HandleMessageOnBackgroundThread(json);
+                        // Append the received chunk to the message builder
+                        var chunk = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                        messageBuilder.Append(chunk);
+
+                        // Only process when we have the complete message
+                        if (result.EndOfMessage)
+                        {
+                            var json = messageBuilder.ToString();
+                            messageBuilder.Clear();
+                            HandleMessageOnBackgroundThread(json);
+                        }
                     }
                 }
 
@@ -368,6 +382,14 @@ namespace UnityCtl
                         result = new CompileResult { Started = true };
                         break;
 
+                    case UnityCtlCommands.MenuList:
+                        result = HandleMenuList(request);
+                        break;
+
+                    case UnityCtlCommands.MenuExecute:
+                        result = HandleMenuExecute(request);
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
@@ -384,9 +406,7 @@ namespace UnityCtl
 
         private object HandleSceneList(RequestMessage request)
         {
-            var source = request.Args?.ContainsKey("source") == true
-                ? request.Args["source"]?.ToString()
-                : "buildSettings";
+            var source = GetStringArgument(request, "source") ?? "buildSettings";
 
             if (source == "buildSettings")
             {
@@ -422,10 +442,8 @@ namespace UnityCtl
 
         private object HandleSceneLoad(RequestMessage request)
         {
-            var path = request.Args?["path"]?.ToString();
-            var mode = request.Args?.ContainsKey("mode") == true
-                ? request.Args["mode"]?.ToString()
-                : "single";
+            var path = GetStringArgument(request, "path");
+            var mode = GetStringArgument(request, "mode") ?? "single";
 
             if (string.IsNullOrEmpty(path))
             {
@@ -440,7 +458,7 @@ namespace UnityCtl
 
         private object HandleAssetImport(RequestMessage request)
         {
-            var path = request.Args?["path"]?.ToString();
+            var path = GetStringArgument(request, "path");
 
             if (string.IsNullOrEmpty(path))
             {
@@ -461,6 +479,166 @@ namespace UnityCtl
             };
 
             return new AssetImportResult { Success = true };
+        }
+
+        private static string GetStringArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return null;
+
+            try
+            {
+                // Try to access as dictionary
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return null;
+
+                    var valueType = value.GetType().FullName;
+                    DebugLog($"[UnityCtl] Argument '{key}' type: {valueType}, value: {value}");
+
+                    // Direct string
+                    if (value is string str)
+                    {
+                        return str;
+                    }
+
+                    // Handle Newtonsoft.Json types
+                    if (value is JToken jtoken)
+                    {
+                        if (jtoken.Type == JTokenType.String)
+                        {
+                            return jtoken.Value<string>();
+                        }
+                        else
+                        {
+                            // For non-string tokens, convert to string
+                            return jtoken.ToString();
+                        }
+                    }
+
+                    // Check for System.Text.Json JsonElement
+                    if (valueType.Contains("JsonElement"))
+                    {
+                        // Use reflection to get the value
+                        var getStringMethod = value.GetType().GetMethod("GetString");
+                        if (getStringMethod != null)
+                        {
+                            return (string)getStringMethod.Invoke(value, null);
+                        }
+                    }
+
+                    // Last resort: try ToString()
+                    var result = value.ToString();
+                    DebugLog($"[UnityCtl] ToString result: {result}");
+                    return result;
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get argument '{key}': {ex.Message}");
+            }
+
+            return null;
+        }
+
+        private object HandleMenuList(RequestMessage request)
+        {
+            var menuItems = new List<MenuItemInfo>();
+
+            // Scan all loaded assemblies for methods with [MenuItem] attribute
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+
+            foreach (var assembly in assemblies)
+            {
+                try
+                {
+                    foreach (var type in assembly.GetTypes())
+                    {
+                        var methods = type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                        foreach (var method in methods)
+                        {
+                            try
+                            {
+                                var attributes = method.GetCustomAttributes(typeof(MenuItem), false);
+                                if (attributes.Length > 0)
+                                {
+                                    var menuItem = (MenuItem)attributes[0];
+                                    var menuPath = menuItem.menuItem;
+
+                                    // Skip invalid menu items
+                                    if (string.IsNullOrEmpty(menuPath))
+                                    {
+                                        continue;
+                                    }
+
+                                    // Skip context menu items (they start with specific prefixes)
+                                    if (menuPath.StartsWith("CONTEXT/") || menuPath.StartsWith("internal:", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        continue;
+                                    }
+
+                                    menuItems.Add(new MenuItemInfo
+                                    {
+                                        Path = menuPath,
+                                        Priority = menuItem.priority
+                                    });
+                                }
+                            }
+                            catch (Exception methodEx)
+                            {
+                                // Skip individual methods that fail
+                                DebugLogWarning($"[UnityCtl] Skipped method in {type.FullName}: {methodEx.Message}");
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Some assemblies may throw when calling GetTypes(), skip them
+                    DebugLogWarning($"[UnityCtl] Skipped assembly {assembly.FullName}: {ex.Message}");
+                }
+            }
+
+            // Remove duplicates and sort by path for consistent output
+            menuItems = menuItems
+                .GroupBy(m => m.Path)
+                .Select(g => g.First())
+                .OrderBy(m => m.Path)
+                .ToList();
+
+            return new MenuListResult { MenuItems = menuItems.ToArray() };
+        }
+
+        private object HandleMenuExecute(RequestMessage request)
+        {
+            var menuPath = GetStringArgument(request, "menuPath");
+
+            if (string.IsNullOrEmpty(menuPath))
+            {
+                throw new ArgumentException("Menu path is required");
+            }
+
+            // Execute the menu item
+            bool success = EditorApplication.ExecuteMenuItem(menuPath);
+
+            if (success)
+            {
+                return new MenuExecuteResult
+                {
+                    Success = true,
+                    MenuPath = menuPath,
+                    Message = $"Menu item '{menuPath}' executed successfully"
+                };
+            }
+            else
+            {
+                return new MenuExecuteResult
+                {
+                    Success = false,
+                    MenuPath = menuPath,
+                    Message = $"Menu item '{menuPath}' does not exist or could not be executed"
+                };
+            }
         }
 
         private void SendResponseOk(string requestId, object result)

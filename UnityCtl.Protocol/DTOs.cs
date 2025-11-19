@@ -100,3 +100,30 @@ public class AssetReimportCompletePayload
     [JsonProperty("success")]
     public required bool Success { get; init; }
 }
+
+public class MenuItemInfo
+{
+    [JsonProperty("path")]
+    public required string Path { get; init; }
+
+    [JsonProperty("priority")]
+    public int Priority { get; init; }
+}
+
+public class MenuListResult
+{
+    [JsonProperty("menuItems")]
+    public required MenuItemInfo[] MenuItems { get; init; }
+}
+
+public class MenuExecuteResult
+{
+    [JsonProperty("success")]
+    public required bool Success { get; init; }
+
+    [JsonProperty("menuPath")]
+    public required string MenuPath { get; init; }
+
+    [JsonProperty("message")]
+    public string? Message { get; init; }
+}

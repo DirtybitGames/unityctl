@@ -102,13 +102,22 @@ public static class BridgeEndpoints
                 );
             }
 
+            // Convert Args to JToken to avoid System.Text.Json JsonElement issues
+            Dictionary<string, object?>? convertedArgs = null;
+            if (request.Args != null)
+            {
+                // Round-trip through JSON to convert System.Text.Json types to Newtonsoft.Json types
+                var argsJson = System.Text.Json.JsonSerializer.Serialize(request.Args);
+                convertedArgs = JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsJson, JsonHelper.Settings);
+            }
+
             var requestMessage = new RequestMessage
             {
                 Origin = MessageOrigin.Bridge,
                 RequestId = Guid.NewGuid().ToString(),
                 AgentId = request.AgentId,
                 Command = request.Command,
-                Args = request.Args
+                Args = convertedArgs
             };
 
             try
@@ -184,6 +193,7 @@ public static class BridgeEndpoints
     private static async Task HandleUnityConnectionAsync(WebSocket webSocket, BridgeState state, CancellationToken cancellationToken)
     {
         var buffer = new byte[1024 * 16];
+        var messageBuilder = new System.Text.StringBuilder();
 
         try
         {
@@ -199,8 +209,17 @@ public static class BridgeEndpoints
 
                 if (result.MessageType == WebSocketMessageType.Text)
                 {
-                    var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    await HandleUnityMessageAsync(json, webSocket, state, cancellationToken);
+                    // Append the received chunk to the message builder
+                    var chunk = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    messageBuilder.Append(chunk);
+
+                    // Only process when we have the complete message
+                    if (result.EndOfMessage)
+                    {
+                        var json = messageBuilder.ToString();
+                        messageBuilder.Clear();
+                        await HandleUnityMessageAsync(json, webSocket, state, cancellationToken);
+                    }
                 }
             }
         }

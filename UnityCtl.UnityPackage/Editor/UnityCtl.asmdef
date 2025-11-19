@@ -1,9 +1,7 @@
 {
     "name": "UnityCtl",
     "rootNamespace": "UnityCtl",
-    "references": [
-        "Newtonsoft.Json"
-    ],
+    "references": [],
     "includePlatforms": [
         "Editor"
     ],
@@ -11,7 +9,8 @@
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
-        "UnityCtl.Protocol.dll"
+        "UnityCtl.Protocol.dll",
+        "Newtonsoft.Json.dll"
     ],
     "autoReferenced": true,
     "defineConstraints": [],

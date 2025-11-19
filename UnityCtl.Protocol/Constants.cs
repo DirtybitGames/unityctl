@@ -19,6 +19,10 @@ public static class UnityCtlCommands
     public const string PlayExit = "play.exit";
     public const string PlayToggle = "play.toggle";
     public const string PlayStatus = "play.status";
+
+    // Menu items
+    public const string MenuList = "menu.list";
+    public const string MenuExecute = "menu.execute";
 }
 
 public static class UnityCtlEvents
