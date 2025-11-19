@@ -8,6 +8,7 @@ obj/
 # NuGet
 *.nupkg
 packages/
+artifacts/
 
 # Unity
 unity-project/Library/
