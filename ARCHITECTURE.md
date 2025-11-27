@@ -110,9 +110,10 @@ Format output (human or JSON)
 
 **Project Detection:**
 1. Check `--project` flag
-2. Walk up directory tree
-3. Find `ProjectSettings/ProjectVersion.txt`
-4. Read `.unityctl/bridge.json` for connection details
+2. Walk up directory tree looking for:
+   - `.unityctl/config.json` with `projectPath` property (for monorepos)
+   - `ProjectSettings/ProjectVersion.txt` (direct Unity project)
+3. Read `.unityctl/bridge.json` for connection details
 
 ### 4. Unity Plugin (com.dirtybit.unityctl)
 

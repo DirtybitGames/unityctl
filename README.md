@@ -47,7 +47,7 @@ Add to your Unity project's `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#v0.1.1"
+    "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#v0.2"
   }
 }
 ```
@@ -271,6 +271,21 @@ Each Unity project has its own bridge instance. The bridge creates `.unityctl/br
 
 The CLI auto-detects your project by walking up from the current directory to find `ProjectSettings/ProjectVersion.txt`.
 
+### Project Config for Repository Roots
+
+When running unityctl from a repository root where the Unity project is in a subdirectory, you can create `.unityctl/config.json` to point to your Unity project:
+
+```json
+{
+  "projectPath": "unity-project"
+}
+```
+
+This is useful for:
+- Monorepos where Unity is in a subdirectory
+- AI assistants/LLMs that typically run from repo roots
+- Developers who prefer working from the repository root
+
 ### Domain Reload Resilience
 
 Unity's domain reload (triggered by script compilation) normally destroys all Editor objects. UnityCtl's bridge daemon survives these reloads and automatically reconnects, so your workflow isn't interrupted.
@@ -294,11 +309,16 @@ Unity's domain reload (triggered by script compilation) normally destroys all Ed
 
 For detailed troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
+## AI Assistant Integration
+
+UnityCtl includes a Claude Code skill for AI-assisted Unity development. Copy `examples/unity-editor/SKILL.md` to your project's `.claude/skills/` directory to enable AI assistants to effectively use unityctl when working with your Unity project.
+
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical details and architecture
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup and guidelines
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Extended debugging guide
+- [examples/unity-editor/SKILL.md](examples/unity-editor/SKILL.md) - AI skill for Claude Code
 
 ## License
 
