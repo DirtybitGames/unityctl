@@ -151,11 +151,47 @@ public class BridgeClient
 
     public static async Task<bool> StartBridgeAsync(string? projectPath)
     {
-        var projectRoot = projectPath ?? ProjectLocator.FindProjectRoot();
+        // Normalize path to absolute to ensure consistent project identification
+        var projectRoot = projectPath != null
+            ? Path.GetFullPath(projectPath)
+            : ProjectLocator.FindProjectRoot();
+
         if (projectRoot == null)
         {
             Console.Error.WriteLine("Error: Not in a Unity project. Use --project to specify project root.");
             return false;
+        }
+
+        // Check if bridge is already running for this project
+        var existingConfig = ProjectLocator.ReadBridgeConfig(projectRoot);
+        if (existingConfig != null)
+        {
+            try
+            {
+                var process = Process.GetProcessById(existingConfig.Pid);
+                if (!process.HasExited)
+                {
+                    // Verify bridge is responding
+                    var client = new BridgeClient($"http://localhost:{existingConfig.Port}");
+                    var health = await client.GetAsync<HealthResult>("/health");
+
+                    if (health != null)
+                    {
+                        Console.WriteLine($"Bridge already running for project: {projectRoot}");
+                        Console.WriteLine($"  PID: {existingConfig.Pid}");
+                        Console.WriteLine($"  Port: {existingConfig.Port}");
+                        return true;
+                    }
+                }
+            }
+            catch (ArgumentException)
+            {
+                // Process not found - stale config, continue to start new bridge
+            }
+            catch (InvalidOperationException)
+            {
+                // Process has exited - stale config, continue to start new bridge
+            }
         }
 
         Console.WriteLine($"Starting bridge for project: {projectRoot}");
