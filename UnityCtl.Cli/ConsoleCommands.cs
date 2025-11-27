@@ -48,6 +48,9 @@ public static class ConsoleCommands
                         _ => ConsoleColor.Gray
                     };
 
+                    var time = DateTime.Parse(entry.Timestamp).ToLocalTime().ToString("HH:mm:ss");
+                    Console.ForegroundColor = ConsoleColor.DarkCyan;
+                    Console.Write($"[{time}] ");
                     Console.ForegroundColor = levelColor;
                     Console.Write($"[{entry.Level}] ");
                     Console.ResetColor();
