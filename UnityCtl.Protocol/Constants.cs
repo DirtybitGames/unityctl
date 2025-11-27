@@ -29,6 +29,9 @@ public static class UnityCtlCommands
 
     // Screenshots
     public const string ScreenshotCapture = "screenshot.capture";
+
+    // Script execution
+    public const string ScriptExecute = "script.execute";
 }
 
 public static class UnityCtlEvents

@@ -181,3 +181,18 @@ public class ScreenshotCaptureResult
     [JsonProperty("height")]
     public required int Height { get; init; }
 }
+
+public class ScriptExecuteResult
+{
+    [JsonProperty("success")]
+    public required bool Success { get; init; }
+
+    [JsonProperty("result")]
+    public string? Result { get; init; }
+
+    [JsonProperty("error")]
+    public string? Error { get; init; }
+
+    [JsonProperty("diagnostics")]
+    public string[]? Diagnostics { get; init; }
+}

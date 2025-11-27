@@ -219,6 +219,30 @@ unityctl screenshot capture high-res.png --width 3840 --height 2160
 
 Screenshots are saved to `Screenshots/` folder in your project root (outside Assets).
 
+### Script Execution
+
+Execute arbitrary C# code in the Unity Editor at runtime using Roslyn compilation:
+
+```bash
+# Execute inline C# code
+unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { Debug.Log(\"Hello from CLI!\"); return 42; } }"
+
+# Execute from a file
+unityctl script execute -f ./my-script.cs
+
+# Pipe code from stdin
+cat my-script.cs | unityctl script execute
+
+# Custom class/method names
+unityctl script execute -c "..." --class MyClass --method Run
+```
+
+The code must define a class with a static method. The method's return value is JSON-serialized and returned. Example use cases:
+- Debugging in play mode
+- Creating scene hierarchies programmatically
+- Inspecting runtime state
+- Automating editor tasks
+
 ### Global Options
 
 ```bash

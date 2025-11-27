@@ -398,6 +398,10 @@ namespace UnityCtl
                         result = HandleScreenshotCapture(request);
                         break;
 
+                    case UnityCtlCommands.ScriptExecute:
+                        result = HandleScriptExecute(request);
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
@@ -880,6 +884,39 @@ namespace UnityCtl
                 Path = path,
                 Width = actualWidth,
                 Height = actualHeight
+            };
+        }
+
+        private object HandleScriptExecute(RequestMessage request)
+        {
+            var code = GetStringArgument(request, "code");
+            var className = GetStringArgument(request, "className") ?? "Script";
+            var methodName = GetStringArgument(request, "methodName") ?? "Main";
+
+            if (string.IsNullOrEmpty(code))
+            {
+                throw new ArgumentException("C# code is required");
+            }
+
+            DebugLog($"[UnityCtl] Executing script: class={className}, method={methodName}");
+
+            var result = Editor.ScriptExecutor.Execute(code, className, methodName);
+
+            if (result.Success)
+            {
+                DebugLog($"[UnityCtl] Script executed successfully");
+            }
+            else
+            {
+                DebugLogError($"[UnityCtl] Script execution failed: {result.Error}");
+            }
+
+            return new Protocol.ScriptExecuteResult
+            {
+                Success = result.Success,
+                Result = result.Result,
+                Error = result.Error,
+                Diagnostics = result.Diagnostics
             };
         }
 

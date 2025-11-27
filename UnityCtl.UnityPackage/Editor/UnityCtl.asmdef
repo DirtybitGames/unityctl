@@ -10,7 +10,13 @@
     "overrideReferences": true,
     "precompiledReferences": [
         "UnityCtl.Protocol.dll",
-        "Newtonsoft.Json.dll"
+        "Newtonsoft.Json.dll",
+        "Microsoft.CodeAnalysis.dll",
+        "Microsoft.CodeAnalysis.CSharp.dll",
+        "System.Collections.Immutable.dll",
+        "System.Reflection.Metadata.dll",
+        "System.Text.Encoding.CodePages.dll",
+        "System.Runtime.CompilerServices.Unsafe.dll"
     ],
     "autoReferenced": true,
     "defineConstraints": [],
