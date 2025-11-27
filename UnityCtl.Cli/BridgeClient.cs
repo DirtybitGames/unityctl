@@ -28,7 +28,9 @@ public class BridgeClient
         var projectRoot = projectPath ?? ProjectLocator.FindProjectRoot();
         if (projectRoot == null)
         {
-            Console.Error.WriteLine("Error: Not in a Unity project. Use --project to specify project root.");
+            Console.Error.WriteLine("Error: Not in a Unity project.");
+            Console.Error.WriteLine("  Use --project to specify project root, or create .unityctl/config.json");
+            Console.Error.WriteLine("  with: { \"projectPath\": \"path/to/unity/project\" }");
             return null;
         }
 
@@ -158,7 +160,9 @@ public class BridgeClient
 
         if (projectRoot == null)
         {
-            Console.Error.WriteLine("Error: Not in a Unity project. Use --project to specify project root.");
+            Console.Error.WriteLine("Error: Not in a Unity project.");
+            Console.Error.WriteLine("  Use --project to specify project root, or create .unityctl/config.json");
+            Console.Error.WriteLine("  with: { \"projectPath\": \"path/to/unity/project\" }");
             return false;
         }
 
@@ -243,7 +247,9 @@ public class BridgeClient
         var projectRoot = projectPath ?? ProjectLocator.FindProjectRoot();
         if (projectRoot == null)
         {
-            Console.Error.WriteLine("Error: Not in a Unity project. Use --project to specify project root.");
+            Console.Error.WriteLine("Error: Not in a Unity project.");
+            Console.Error.WriteLine("  Use --project to specify project root, or create .unityctl/config.json");
+            Console.Error.WriteLine("  with: { \"projectPath\": \"path/to/unity/project\" }");
             return false;
         }
 

@@ -19,6 +19,6 @@ unity-project/*.csproj
 unity-project/*.sln
 
 # UnityCtl runtime
-.unityctl/
+**/.unityctl/bridge.json
 
 **/.claude/settings.local.json

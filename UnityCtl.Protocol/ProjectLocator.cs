@@ -5,13 +5,50 @@ using System.Text;
 
 namespace UnityCtl.Protocol;
 
+public class UnityCtlConfig
+{
+    public string? ProjectPath { get; set; }
+}
+
 public static class ProjectLocator
 {
     public const string BridgeConfigDir = ".unityctl";
     public const string BridgeConfigFile = "bridge.json";
+    public const string ConfigFile = "config.json";
 
     /// <summary>
-    /// Finds the Unity project root by looking for ProjectSettings/ProjectVersion.txt
+    /// Reads .unityctl/config.json and returns the resolved project path, or null if not found/invalid
+    /// </summary>
+    public static string? ReadProjectFromConfig(string directory)
+    {
+        var configPath = Path.Combine(directory, BridgeConfigDir, ConfigFile);
+        if (!File.Exists(configPath))
+            return null;
+
+        try
+        {
+            var json = File.ReadAllText(configPath);
+            var config = JsonHelper.Deserialize<UnityCtlConfig>(json);
+            if (string.IsNullOrEmpty(config?.ProjectPath))
+                return null;
+
+            var resolvedPath = Path.GetFullPath(Path.Combine(directory, config.ProjectPath));
+
+            // Validate it's actually a Unity project
+            var projectSettings = Path.Combine(resolvedPath, "ProjectSettings", "ProjectVersion.txt");
+            if (!File.Exists(projectSettings))
+                return null;
+
+            return resolvedPath;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Finds the Unity project root by looking for .unityctl/config.json or ProjectSettings/ProjectVersion.txt
     /// </summary>
     public static string? FindProjectRoot(string? startPath = null)
     {
@@ -19,6 +56,12 @@ public static class ProjectLocator
 
         while (current != null)
         {
+            // Check for .unityctl/config.json pointer first
+            var configProject = ReadProjectFromConfig(current.FullName);
+            if (configProject != null)
+                return configProject;
+
+            // Then check if current directory is a Unity project
             var projectSettings = Path.Combine(current.FullName, "ProjectSettings", "ProjectVersion.txt");
             if (File.Exists(projectSettings))
             {

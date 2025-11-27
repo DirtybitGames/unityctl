@@ -36,7 +36,9 @@ rootCommand.SetHandler(async (string? projectPath, int port) =>
 
     if (projectRoot == null)
     {
-        Console.Error.WriteLine("Error: Not in a Unity project. Use --project to specify project root.");
+        Console.Error.WriteLine("Error: Not in a Unity project.");
+        Console.Error.WriteLine("  Use --project to specify project root, or create .unityctl/config.json");
+        Console.Error.WriteLine("  with: { \"projectPath\": \"path/to/unity/project\" }");
         Environment.Exit(1);
         return;
     }
