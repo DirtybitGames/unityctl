@@ -321,7 +321,7 @@ public static class BridgeEndpoints
             Status = ResponseStatus.Ok,
             Result = new
             {
-                bridgeVersion = "0.1.0",
+                bridgeVersion = "0.2.0",
                 projectId = state.ProjectId,
                 protocolVersion = "1.0.0"
             }

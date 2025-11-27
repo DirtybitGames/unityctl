@@ -4,7 +4,7 @@
     <!-- Common properties for all projects -->
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>0.1.2</Version>
+    <Version>0.2.0</Version>
     <Authors>Dirtybit</Authors>
 
     <!-- Package metadata for NuGet -->
