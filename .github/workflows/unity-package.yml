@@ -23,7 +23,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Restore dependencies
         run: dotnet restore
@@ -45,12 +45,15 @@ jobs:
         run: |
           git diff --quiet UnityCtl.UnityPackage/Plugins/UnityCtl.Protocol.dll || echo "changed=true" >> $GITHUB_OUTPUT
 
+      # Note: We don't use [skip ci] because it blocks tag-triggered workflows.
+      # Instead, we use the job-level 'if: github.actor != github-actions[bot]'
+      # condition to prevent infinite loops from bot commits.
       - name: Commit and push updated DLL
         if: steps.check_changes.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add UnityCtl.UnityPackage/Plugins/UnityCtl.Protocol.dll
-          git commit -m "chore: update Unity package Protocol DLL [skip ci]"
+          git commit -m "chore: update Unity package Protocol DLL"
           git push
 
