@@ -13,6 +13,7 @@ permissions:
 jobs:
   build-unity-package:
     runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
 
     steps:
       - name: Checkout repository
@@ -52,7 +53,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add UnityCtl.UnityPackage/Plugins/UnityCtl.Protocol.dll
-          git commit -m "chore: update Unity package Protocol DLL [skip ci]"
+          git commit -m "chore: update Unity package Protocol DLL"
           git push
 
       - name: Update Unity package version from tag
@@ -74,6 +75,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No version changes needed - package.json already at $VERSION"
           else
-            git commit -m "chore: update Unity package version to $VERSION [skip ci]"
+            git commit -m "chore: update Unity package version to $VERSION"
             git push
           fi

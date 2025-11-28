@@ -5,6 +5,9 @@
     <Description>Shared protocol library for UnityCtl</Description>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <EmbedAllSources>false</EmbedAllSources>
   </PropertyGroup>
 
   <ItemGroup>
