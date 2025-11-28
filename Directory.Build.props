@@ -26,4 +26,18 @@
     <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts</PackageOutputPath>
   </PropertyGroup>
 
+  <!-- Sync Unity package.json version when building Protocol (which gets copied to Unity package) -->
+  <Target Name="SyncUnityPackageVersion" AfterTargets="Build" Condition="'$(MSBuildProjectName)' == 'UnityCtl.Protocol'">
+    <PropertyGroup>
+      <UnityPackageJson>$(MSBuildThisFileDirectory)UnityCtl.UnityPackage/package.json</UnityPackageJson>
+    </PropertyGroup>
+    <!-- Windows: use PowerShell script -->
+    <Exec Condition="'$(OS)' == 'Windows_NT'"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\sync-version.ps1&quot; -Version &quot;$(Version)&quot; -PackageJsonPath &quot;$(UnityPackageJson)&quot;" />
+    <!-- Linux/macOS: use bash script -->
+    <Exec Condition="'$(OS)' != 'Windows_NT'"
+          Command="bash &quot;$(MSBuildThisFileDirectory)scripts/sync-version.sh&quot; &quot;$(Version)&quot; &quot;$(UnityPackageJson)&quot;" />
+    <Message Importance="high" Text="Synced Unity package.json version to $(Version)" />
+  </Target>
+
 </Project>
