@@ -43,8 +43,9 @@ unityctl play toggle      # Toggle play mode
 
 **Console:**
 ```bash
-unityctl console tail              # Show recent logs
-unityctl console tail --lines 100  # More logs
+unityctl console tail              # Show recent logs (default: 10 entries)
+unityctl console tail --count 100  # More log entries
+unityctl console tail --stack      # Include stack traces for errors
 ```
 
 **Scenes:**
@@ -86,7 +87,7 @@ unityctl <command> --help    # Command-specific help
 # After editing C# files...
 unityctl compile scripts
 unityctl play enter
-unityctl console tail --lines 50
+unityctl console tail --count 50
 unityctl play exit
 ```
 

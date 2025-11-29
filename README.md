@@ -109,7 +109,7 @@ unityctl screenshot capture
 
 View console logs:
 ```bash
-unityctl console tail --lines 20
+unityctl console tail --count 20
 ```
 
 ## Essential Commands
@@ -156,8 +156,14 @@ unityctl scene load Assets/Scenes/Level1.unity --mode additive
 ### Console Logs
 
 ```bash
-# Show recent console logs
-unityctl console tail --lines 50
+# Show recent console logs (default: 10 entries)
+unityctl console tail
+
+# Show more entries
+unityctl console tail --count 50
+
+# Include stack traces for errors
+unityctl console tail --stack
 
 # Clear the console log buffer
 unityctl console clear
