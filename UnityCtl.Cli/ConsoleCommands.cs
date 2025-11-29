@@ -17,7 +17,7 @@ public static class ConsoleCommands
 
         var tailCommand = new Command("tail", "Show recent console logs");
         var countOption = new Option<int>("--count", getDefaultValue: () => 10, "Number of log entries to show");
-        var stackOption = new Option<bool>("--stack", "Show stack traces for errors");
+        var stackOption = new Option<bool>("--stack", "Show stack traces");
         tailCommand.AddOption(countOption);
         tailCommand.AddOption(stackOption);
 

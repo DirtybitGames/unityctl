@@ -45,7 +45,8 @@ unityctl play toggle      # Toggle play mode
 ```bash
 unityctl console tail              # Show recent logs (default: 10 entries)
 unityctl console tail --count 100  # More log entries
-unityctl console tail --stack      # Include stack traces for errors
+unityctl console tail --stack      # Include stack traces
+unityctl console clear             # Clear the console log buffer
 ```
 
 **Scenes:**

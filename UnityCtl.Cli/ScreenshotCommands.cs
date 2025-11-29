@@ -70,7 +70,8 @@ public static class ScreenshotCommands
                 if (result != null)
                 {
                     var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.Path));
-                    Console.WriteLine($"Screenshot captured: {absolutePath}");
+                    var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
+                    Console.WriteLine($"Screenshot captured: {relativePath}");
                     Console.WriteLine($"Resolution: {result.Width}x{result.Height}");
                 }
             }

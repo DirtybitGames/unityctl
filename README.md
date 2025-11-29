@@ -162,7 +162,7 @@ unityctl console tail
 # Show more entries
 unityctl console tail --count 50
 
-# Include stack traces for errors
+# Include stack traces
 unityctl console tail --stack
 
 # Clear the console log buffer
