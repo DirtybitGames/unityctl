@@ -8,6 +8,8 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <EmbedAllSources>false</EmbedAllSources>
+    <!-- Disable git commit hash embedding for deterministic builds across commits -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
