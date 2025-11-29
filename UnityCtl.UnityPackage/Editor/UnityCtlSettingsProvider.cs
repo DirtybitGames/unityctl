@@ -21,7 +21,30 @@ namespace UnityCtl.Editor
         {
             var settings = UnityCtlSettings.Instance;
 
+            // Connection section
             EditorGUILayout.Space(10);
+            EditorGUILayout.LabelField("Connection", EditorStyles.boldLabel);
+
+            var isConnected = UnityCtl.UnityCtlClient.Instance.IsConnected;
+            var statusText = isConnected ? "Connected" : "Disconnected";
+            var statusStyle = new GUIStyle(EditorStyles.label);
+            statusStyle.normal.textColor = isConnected ? new Color(0.2f, 0.8f, 0.2f) : Color.gray;
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Status:", GUILayout.Width(50));
+            EditorGUILayout.LabelField(statusText, statusStyle);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUI.BeginDisabledGroup(isConnected);
+            if (GUILayout.Button("Connect to Bridge", GUILayout.Height(24)))
+            {
+                UnityCtl.UnityCtlClient.Instance.TryConnectIfBridgePresent();
+            }
+            EditorGUI.EndDisabledGroup();
+
+            EditorGUILayout.Space(15);
+
+            // Debug settings section
             EditorGUILayout.LabelField("Debug Settings", EditorStyles.boldLabel);
 
             EditorGUI.BeginChangeCheck();
@@ -50,7 +73,7 @@ namespace UnityCtl.Editor
         {
             var provider = new UnityCtlSettingsProvider(SettingsPath, SettingsScope.Project)
             {
-                keywords = new System.Collections.Generic.HashSet<string>(new[] { "UnityCtl", "Debug", "Messages", "Console", "Logging" })
+                keywords = new System.Collections.Generic.HashSet<string>(new[] { "UnityCtl", "Debug", "Messages", "Console", "Logging", "Connection", "Bridge" })
             };
 
             return provider;

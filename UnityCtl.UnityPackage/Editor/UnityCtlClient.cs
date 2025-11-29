@@ -35,6 +35,9 @@ namespace UnityCtl
         private float _lastReconnectAttempt;
         private int _reconnectAttempts;
 
+        // Public connection status
+        public bool IsConnected => _isConnected && _webSocket != null && _webSocket.State == WebSocketState.Open;
+
         // Conditional debug logging helpers
         private static void DebugLog(string message)
         {
