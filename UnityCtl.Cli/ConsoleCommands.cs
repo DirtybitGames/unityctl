@@ -16,20 +16,20 @@ public static class ConsoleCommands
         var consoleCommand = new Command("console", "Console log operations");
 
         var tailCommand = new Command("tail", "Show recent console logs");
-        var linesOption = new Option<int>("--lines", getDefaultValue: () => 50, "Number of lines to show");
-        tailCommand.AddOption(linesOption);
+        var countOption = new Option<int>("--count", getDefaultValue: () => 10, "Number of log entries to show");
+        tailCommand.AddOption(countOption);
 
         tailCommand.SetHandler(async (InvocationContext context) =>
         {
             var projectPath = ContextHelper.GetProjectPath(context);
             var agentId = ContextHelper.GetAgentId(context);
             var json = ContextHelper.GetJson(context);
-            var lines = context.ParseResult.GetValueForOption(linesOption);
+            var count = context.ParseResult.GetValueForOption(countOption);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) return;
 
-            var result = await client.GetAsync<ConsoleTailResult>($"/console/tail?lines={lines}");
+            var result = await client.GetAsync<ConsoleTailResult>($"/console/tail?lines={count}");
             if (result == null) return;
 
             if (json)
