@@ -17,7 +17,9 @@ public static class ConsoleCommands
 
         var tailCommand = new Command("tail", "Show recent console logs");
         var countOption = new Option<int>("--count", getDefaultValue: () => 10, "Number of log entries to show");
+        var stackOption = new Option<bool>("--stack", "Show stack traces for errors");
         tailCommand.AddOption(countOption);
+        tailCommand.AddOption(stackOption);
 
         tailCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -25,6 +27,7 @@ public static class ConsoleCommands
             var agentId = ContextHelper.GetAgentId(context);
             var json = ContextHelper.GetJson(context);
             var count = context.ParseResult.GetValueForOption(countOption);
+            var showStack = context.ParseResult.GetValueForOption(stackOption);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) return;
@@ -56,7 +59,7 @@ public static class ConsoleCommands
                     Console.ResetColor();
                     Console.WriteLine(entry.Message);
 
-                    if (!string.IsNullOrEmpty(entry.StackTrace))
+                    if (showStack && !string.IsNullOrEmpty(entry.StackTrace))
                     {
                         Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.WriteLine(entry.StackTrace);
