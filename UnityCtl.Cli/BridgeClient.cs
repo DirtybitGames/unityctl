@@ -15,11 +15,13 @@ public class BridgeClient
     private readonly HttpClient _httpClient;
     private readonly string _baseUrl;
     private readonly string? _agentId;
+    private readonly string? _projectRoot;
 
-    public BridgeClient(string baseUrl, string? agentId = null)
+    public BridgeClient(string baseUrl, string? agentId = null, string? projectRoot = null)
     {
         _baseUrl = baseUrl;
         _agentId = agentId;
+        _projectRoot = projectRoot;
         _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
     }
 
@@ -37,12 +39,23 @@ public class BridgeClient
         var config = ProjectLocator.ReadBridgeConfig(projectRoot);
         if (config == null)
         {
-            Console.Error.WriteLine("Error: Bridge not configured. Run 'unityctl bridge start' first.");
+            // Check if Unity is running to provide better guidance
+            var unityStatus = ProjectLocator.CheckUnityEditorStatus(projectRoot);
+            Console.Error.WriteLine("Error: Bridge not configured.");
+
+            if (unityStatus.Status == UnityEditorStatus.Running)
+            {
+                Console.Error.WriteLine("  Unity Editor is running. Run 'unityctl bridge start' to start the bridge.");
+            }
+            else
+            {
+                Console.Error.WriteLine("  Run 'unityctl bridge start' first, then start Unity Editor.");
+            }
             return null;
         }
 
         var baseUrl = $"http://localhost:{config.Port}";
-        return new BridgeClient(baseUrl, agentId);
+        return new BridgeClient(baseUrl, agentId, projectRoot);
     }
 
     public async Task<T?> GetAsync<T>(string endpoint)
@@ -55,8 +68,7 @@ public class BridgeClient
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
                 {
-                    Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
-                    Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+                    DisplayUnityNotConnectedError();
                     return default;
                 }
 
@@ -71,8 +83,7 @@ public class BridgeClient
         }
         catch (HttpRequestException)
         {
-            Console.Error.WriteLine("Error: Failed to communicate with bridge.");
-            Console.Error.WriteLine("The bridge process may not be running. Try: unityctl bridge start");
+            DisplayBridgeConnectionError();
             return default;
         }
     }
@@ -87,8 +98,7 @@ public class BridgeClient
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
                 {
-                    Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
-                    Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+                    DisplayUnityNotConnectedError();
                     return default;
                 }
 
@@ -103,8 +113,7 @@ public class BridgeClient
         }
         catch (HttpRequestException)
         {
-            Console.Error.WriteLine("Error: Failed to communicate with bridge.");
-            Console.Error.WriteLine("The bridge process may not be running. Try: unityctl bridge start");
+            DisplayBridgeConnectionError();
             return default;
         }
     }
@@ -129,8 +138,7 @@ public class BridgeClient
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
                 {
-                    Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
-                    Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+                    DisplayUnityNotConnectedError();
                     return null;
                 }
 
@@ -145,8 +153,7 @@ public class BridgeClient
         }
         catch (HttpRequestException)
         {
-            Console.Error.WriteLine("Error: Failed to communicate with bridge.");
-            Console.Error.WriteLine("The bridge process may not be running. Try: unityctl bridge start");
+            DisplayBridgeConnectionError();
             return null;
         }
     }
@@ -294,6 +301,54 @@ public class BridgeClient
         {
             Console.Error.WriteLine($"Error: Failed to stop bridge: {ex.Message}");
             return false;
+        }
+    }
+
+    private void DisplayUnityNotConnectedError()
+    {
+        if (_projectRoot != null)
+        {
+            var unityStatus = ProjectLocator.CheckUnityEditorStatus(_projectRoot);
+            if (unityStatus.Status == UnityEditorStatus.NotRunning)
+            {
+                Console.Error.WriteLine("Error: Unity Editor is not running for this project.");
+                Console.Error.WriteLine("Open the project in Unity Editor with the UnityCtl package installed.");
+            }
+            else
+            {
+                Console.Error.WriteLine("Error: Unity Editor is running but not connected to the bridge.");
+                Console.Error.WriteLine("Ensure the UnityCtl package is installed and enabled in Unity.");
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
+            Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+        }
+    }
+
+    private void DisplayBridgeConnectionError()
+    {
+        Console.Error.WriteLine("Error: Failed to communicate with bridge.");
+
+        if (_projectRoot != null)
+        {
+            var unityStatus = ProjectLocator.CheckUnityEditorStatus(_projectRoot);
+            if (unityStatus.Status == UnityEditorStatus.NotRunning)
+            {
+                Console.Error.WriteLine("Unity Editor is not running for this project.");
+                Console.Error.WriteLine("  1. Start the bridge: unityctl bridge start");
+                Console.Error.WriteLine("  2. Open the project in Unity Editor");
+            }
+            else
+            {
+                Console.Error.WriteLine("Unity Editor is running but bridge is not responding.");
+                Console.Error.WriteLine("  Try: unityctl bridge start");
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine("The bridge process may not be running. Try: unityctl bridge start");
         }
     }
 }

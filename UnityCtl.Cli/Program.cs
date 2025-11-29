@@ -26,6 +26,7 @@ rootCommand.AddGlobalOption(agentIdOption);
 rootCommand.AddGlobalOption(jsonOption);
 
 // Add subcommands
+rootCommand.AddCommand(StatusCommand.CreateCommand());
 rootCommand.AddCommand(ConsoleCommands.CreateCommand());
 rootCommand.AddCommand(SceneCommands.CreateCommand());
 rootCommand.AddCommand(PlayCommands.CreateCommand());

@@ -87,9 +87,9 @@ Look for Unity console logs:
 
 ### 3. Use the CLI
 
-Check bridge status:
+Check status:
 ```bash
-unityctl bridge status
+unityctl status
 ```
 
 Enter play mode:
@@ -114,11 +114,11 @@ unityctl console tail --count 20
 
 ## Essential Commands
 
-### Bridge Management
+### Status & Bridge
 
 ```bash
-# Check bridge status
-unityctl bridge status
+# Check project status (Unity running, bridge, connection)
+unityctl status
 
 # Start bridge daemon
 unityctl bridge start [--project <path>]
@@ -300,13 +300,14 @@ Unity's domain reload (triggered by script compilation) normally destroys all Ed
 
 ## Common Issues
 
+Run `unityctl status` first to diagnose issues.
+
 **Bridge not starting?**
 - Check if port is already in use
 - Verify you're in a Unity project directory
 
 **Unity not connecting?**
-- Check `unityctl bridge status`
-- Ensure `.unityctl/bridge.json` exists in project root
+- Check if Unity Editor is running (`unityctl status` will show this)
 - Restart Unity Editor
 
 **Commands timing out?**

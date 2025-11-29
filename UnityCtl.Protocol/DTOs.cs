@@ -196,3 +196,33 @@ public class ScriptExecuteResult
     [JsonProperty("diagnostics")]
     public string[]? Diagnostics { get; init; }
 }
+
+public class ProjectStatusResult
+{
+    [JsonProperty("projectPath")]
+    public required string ProjectPath { get; init; }
+
+    [JsonProperty("projectId")]
+    public required string ProjectId { get; init; }
+
+    [JsonProperty("unityEditorRunning")]
+    public required bool UnityEditorRunning { get; init; }
+
+    [JsonProperty("unityEditorStatus")]
+    public required string UnityEditorStatus { get; init; }
+
+    [JsonProperty("bridgeConfigured")]
+    public required bool BridgeConfigured { get; init; }
+
+    [JsonProperty("bridgeRunning")]
+    public required bool BridgeRunning { get; init; }
+
+    [JsonProperty("bridgePort")]
+    public int? BridgePort { get; init; }
+
+    [JsonProperty("bridgePid")]
+    public int? BridgePid { get; init; }
+
+    [JsonProperty("unityConnectedToBridge")]
+    public required bool UnityConnectedToBridge { get; init; }
+}

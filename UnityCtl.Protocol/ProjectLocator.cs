@@ -5,6 +5,29 @@ using System.Text;
 
 namespace UnityCtl.Protocol;
 
+/// <summary>
+/// Status of the Unity Editor for a project
+/// </summary>
+public enum UnityEditorStatus
+{
+    /// <summary>Unity Editor is not running for this project</summary>
+    NotRunning,
+    /// <summary>Unity Editor is running for this project</summary>
+    Running,
+    /// <summary>Could not determine status (permission error, etc.)</summary>
+    Unknown
+}
+
+/// <summary>
+/// Result of checking Unity Editor status
+/// </summary>
+public class UnityEditorStatusResult
+{
+    public required UnityEditorStatus Status { get; init; }
+    public string? Message { get; init; }
+    public string? LockFilePath { get; init; }
+}
+
 public class UnityCtlConfig
 {
     public string? ProjectPath { get; set; }
@@ -126,5 +149,101 @@ public static class ProjectLocator
         var configPath = GetBridgeConfigPath(projectRoot);
         var json = JsonHelper.Serialize(config);
         File.WriteAllText(configPath, json);
+    }
+
+    /// <summary>
+    /// Checks if Unity Editor is running for the specified project by checking the lock file.
+    /// Unity creates Temp/UnityLockfile and holds an exclusive lock while the project is open.
+    /// </summary>
+    public static UnityEditorStatusResult CheckUnityEditorStatus(string projectRoot)
+    {
+        var lockFilePath = Path.Combine(projectRoot, "Temp", "UnityLockfile");
+
+        // If the lock file doesn't exist, Unity is definitely not running
+        if (!File.Exists(lockFilePath))
+        {
+            return new UnityEditorStatusResult
+            {
+                Status = UnityEditorStatus.NotRunning,
+                Message = "Unity Editor is not running (no lock file)",
+                LockFilePath = lockFilePath
+            };
+        }
+
+        try
+        {
+            // Try to open the file with exclusive access
+            // If Unity is running, it holds a lock and this will fail
+            using (var stream = new FileStream(
+                lockFilePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.None))
+            {
+                // Successfully opened with exclusive access - file exists but not locked
+                // This means Unity crashed or closed without cleaning up
+                return new UnityEditorStatusResult
+                {
+                    Status = UnityEditorStatus.NotRunning,
+                    Message = "Unity Editor is not running (stale lock file)",
+                    LockFilePath = lockFilePath
+                };
+            }
+        }
+        catch (IOException ex) when (IsFileLockedException(ex))
+        {
+            // File is locked - Unity is running
+            return new UnityEditorStatusResult
+            {
+                Status = UnityEditorStatus.Running,
+                Message = "Unity Editor is running",
+                LockFilePath = lockFilePath
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Permission denied - could be locked or permission issue
+            // On some systems, locked files throw UnauthorizedAccessException
+            return new UnityEditorStatusResult
+            {
+                Status = UnityEditorStatus.Running,
+                Message = "Unity Editor is likely running (access denied to lock file)",
+                LockFilePath = lockFilePath
+            };
+        }
+        catch (Exception ex)
+        {
+            return new UnityEditorStatusResult
+            {
+                Status = UnityEditorStatus.Unknown,
+                Message = $"Could not determine Unity status: {ex.Message}",
+                LockFilePath = lockFilePath
+            };
+        }
+    }
+
+    /// <summary>
+    /// Checks if an IOException indicates a file locking error.
+    /// Works cross-platform (Windows, Mac, Linux).
+    /// </summary>
+    private static bool IsFileLockedException(IOException ex)
+    {
+        // Windows: ERROR_SHARING_VIOLATION (32) or ERROR_LOCK_VIOLATION (33)
+        // The HResult contains the error code in the lower 16 bits
+        var errorCode = ex.HResult & 0xFFFF;
+        if (errorCode == 32 || errorCode == 33)
+            return true;
+
+        // Unix/Mac: Check for common locking-related messages
+        var message = ex.Message.ToLowerInvariant();
+        if (message.Contains("being used by another process") ||
+            message.Contains("sharing violation") ||
+            message.Contains("locked") ||
+            message.Contains("in use"))
+        {
+            return true;
+        }
+
+        return false;
     }
 }
