@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.IO;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityCtl.Protocol;
@@ -36,6 +37,9 @@ public static class ScreenshotCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) return;
 
+            // Resolve project path (same logic as BridgeClient.TryCreateFromProject)
+            var resolvedProjectPath = projectPath ?? ProjectLocator.FindProjectRoot()!;
+
             var args = new Dictionary<string, object?>
             {
                 { "path", path },
@@ -65,7 +69,8 @@ public static class ScreenshotCommands
 
                 if (result != null)
                 {
-                    Console.WriteLine($"Screenshot captured: {result.Path}");
+                    var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.Path));
+                    Console.WriteLine($"Screenshot captured: {absolutePath}");
                     Console.WriteLine($"Resolution: {result.Width}x{result.Height}");
                 }
             }
