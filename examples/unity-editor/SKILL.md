@@ -11,9 +11,9 @@ Control a running Unity Editor from the command line without batch mode.
 
 ### Setup (Required First)
 
-1. Start the bridge daemon in the background: `unityctl bridge start &` (blocking command)
+1. Start the bridge daemon in the background: `unityctl bridge start`
 2. Open the Unity project in Unity Editor
-3. Verify connection: `unityctl bridge status`
+3. Verify connection: `unityctl status`
 
 ### Critical: Compile Before Play Mode
 
@@ -30,7 +30,7 @@ This refreshes assets and triggers compilation. Play mode will use stale code ot
 **Status & Bridge:**
 ```bash
 unityctl status           # Check Unity running, bridge, and connection status
-unityctl bridge start &   # Start bridge daemon (run in background)
+unityctl bridge start     # Start bridge daemon (runs in background)
 unityctl bridge stop      # Stop bridge
 ```
 
@@ -111,7 +111,7 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 
 - Run `unityctl status` to check overall project status before running commands
 - Always run `unityctl compile scripts` after modifying C# files before entering play mode
-- Use `unityctl console tail` to monitor logs during play mode
+- Use `unityctl console tail` to monitor logs after compiling and during play mode
 - Script execution requires a class with a static method; return values are JSON-serialized
 - Domain reload after compilation is normal; the bridge auto-reconnects
 
