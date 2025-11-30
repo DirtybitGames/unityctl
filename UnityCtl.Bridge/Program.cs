@@ -1,7 +1,9 @@
 using System;
 using System.CommandLine;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -49,6 +51,45 @@ rootCommand.SetHandler(async (string? projectPath, int port) =>
         Console.Error.WriteLine($"Error: {projectRoot} is not a valid Unity project.");
         Environment.Exit(1);
         return;
+    }
+
+    // Check if bridge is already running for this project
+    var existingConfig = ProjectLocator.ReadBridgeConfig(projectRoot);
+    if (existingConfig != null)
+    {
+        try
+        {
+            var process = Process.GetProcessById(existingConfig.Pid);
+            if (!process.HasExited)
+            {
+                // Verify bridge is responding
+                using var httpClient = new HttpClient();
+                var response = await httpClient.GetAsync($"http://localhost:{existingConfig.Port}/health");
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Console.Error.WriteLine($"Error: Bridge already running for project: {projectRoot}");
+                    Console.Error.WriteLine($"  PID: {existingConfig.Pid}");
+                    Console.Error.WriteLine($"  Port: {existingConfig.Port}");
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("Use 'unityctl bridge stop' to stop the existing bridge first.");
+                    Environment.Exit(1);
+                    return;
+                }
+            }
+        }
+        catch (ArgumentException)
+        {
+            // Process not found - stale config, continue to start new bridge
+        }
+        catch (InvalidOperationException)
+        {
+            // Process has exited - stale config, continue to start new bridge
+        }
+        catch (HttpRequestException)
+        {
+            // Bridge not responding - stale config, continue to start new bridge
+        }
     }
 
     // Compute project ID
