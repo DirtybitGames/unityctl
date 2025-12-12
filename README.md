@@ -43,6 +43,8 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 
 ## Installation
 
+Requires [.NET 10](https://dotnet.microsoft.com/download/dotnet/10.0)+.
+
 ```bash
 dotnet tool install -g UnityCtl.Cli
 dotnet tool install -g UnityCtl.Bridge
