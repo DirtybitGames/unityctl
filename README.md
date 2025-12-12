@@ -86,6 +86,15 @@ Run `unityctl --help` for the full command list.
 
 The bridge daemon survives Unity's domain reloads, so your workflow isn't interrupted when scripts recompile.
 
+## Motivation
+This project comes from a frustration with trying to use claude code to be productive in Unity. It is great at spitting out code that looks OK but doesn't compile. It would try to call unity in batch mode to compile, but Unity refuses since the editor is running.
+Having the editor open is key to being in the loop and getting visual confirmation that things are working.
+
+There are MCP servers for Unity, but they eat a lot of context window for any task that doesn't require driving the editor. By creating a CLI that claude can learn by trying to use it (and can "remember" on demand through the skill.md), claude is able to use the editor on demand without a constant context cost.
+
+The API is kept simple, and leans mostly on the script execution to get work done. Claude is good at writing ad-hoc scripts to achieve a goal in unity, and this seems more flexible and reliable than implementing APIs for managing or editing specific types of assets.
+
+
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical details
