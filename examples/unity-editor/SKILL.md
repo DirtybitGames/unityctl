@@ -11,7 +11,7 @@ Control a running Unity Editor from the command line without batch mode.
 
 ### Setup (Required First)
 
-1. Start the bridge daemon in the background: `unityctl bridge start`
+1. Start the bridge daemon: `unityctl bridge start` (make sure to background this or it will time out)
 2. Open the Unity project in Unity Editor
 3. Verify connection: `unityctl status`
 
