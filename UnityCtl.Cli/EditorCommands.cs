@@ -34,10 +34,15 @@ public static class EditorCommands
             "--unity-path",
             "Override Unity executable path");
 
+        var verboseOption = new Option<bool>(
+            "--verbose",
+            "Show all log output without filtering");
+
         runCommand.AddOption(noBridgeOption);
         runCommand.AddOption(killOnExitOption);
         runCommand.AddOption(noColorOption);
         runCommand.AddOption(unityPathOption);
+        runCommand.AddOption(verboseOption);
 
         runCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -46,8 +51,9 @@ public static class EditorCommands
             var killOnExit = context.ParseResult.GetValueForOption(killOnExitOption);
             var noColor = context.ParseResult.GetValueForOption(noColorOption);
             var unityPath = context.ParseResult.GetValueForOption(unityPathOption);
+            var verbose = context.ParseResult.GetValueForOption(verboseOption);
 
-            await RunEditorAsync(projectPath, noBridge, killOnExit, noColor, unityPath);
+            await RunEditorAsync(projectPath, noBridge, killOnExit, noColor, unityPath, verbose);
         });
 
         editorCommand.AddCommand(runCommand);
@@ -59,7 +65,8 @@ public static class EditorCommands
         bool noBridge,
         bool killOnExit,
         bool noColor,
-        string? unityPath)
+        string? unityPath,
+        bool verbose)
     {
         // 1. Find project root
         var projectRoot = projectPath != null
@@ -194,7 +201,7 @@ public static class EditorCommands
             Console.WriteLine(new string('-', 60));
 
             // 7. Start log tailing
-            var formatter = new SimpleLogFormatter(!noColor);
+            var filter = new LogFilter(!noColor);
 
             using var tailer = new FileLogTailer(logPath);
 
@@ -204,7 +211,20 @@ public static class EditorCommands
                 {
                     await foreach (var line in tailer.TailAsync(cts.Token))
                     {
-                        formatter.WriteFormatted(line);
+                        if (verbose)
+                        {
+                            // In verbose mode, show all lines without filtering
+                            Console.WriteLine(line);
+                        }
+                        else
+                        {
+                            // Apply filtering
+                            var filtered = filter.ProcessLine(line);
+                            if (filtered != null)
+                            {
+                                LogFilter.WriteLine(filtered);
+                            }
+                        }
                     }
                 }
                 catch (OperationCanceledException)
