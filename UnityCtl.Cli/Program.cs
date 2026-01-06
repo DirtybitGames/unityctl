@@ -37,5 +37,6 @@ rootCommand.AddCommand(TestCommands.CreateCommand());
 rootCommand.AddCommand(ScreenshotCommands.CreateCommand());
 rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(BridgeCommands.CreateCommand());
+rootCommand.AddCommand(EditorCommands.CreateCommand());
 
 return await rootCommand.InvokeAsync(args);
