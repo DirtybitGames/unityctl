@@ -15,6 +15,7 @@ namespace UnityCtl.Bridge;
 /// </summary>
 public class UnifiedLogEntry
 {
+    public long SequenceNumber { get; init; }
     public required string Timestamp { get; init; }
     public required string Source { get; init; }  // "editor" or "console"
     public required string Level { get; init; }   // "Log", "Warning", "Error", "Exception", or "Info" for editor
@@ -29,6 +30,12 @@ public class BridgeState
     private readonly List<LogEntry> _logBuffer = new();  // Console logs (backward compat)
     private readonly List<UnifiedLogEntry> _unifiedLogBuffer = new();  // Unified logs
     private const int MaxLogEntries = 1000;
+
+    // Sequence number and watermark for log clearing
+    private long _nextSequenceNumber = 0;
+    private long _clearWatermark = -1;  // -1 = no clear, show all logs
+    private DateTime? _clearTimestamp;
+    private string? _clearReason;
 
     // Channels for log streaming (multiple subscribers supported)
     private readonly List<Channel<UnifiedLogEntry>> _logSubscribers = new();
@@ -259,7 +266,19 @@ public class BridgeState
     {
         lock (_lock)
         {
-            _unifiedLogBuffer.Add(entry);
+            // Assign sequence number
+            var sequencedEntry = new UnifiedLogEntry
+            {
+                SequenceNumber = _nextSequenceNumber++,
+                Timestamp = entry.Timestamp,
+                Source = entry.Source,
+                Level = entry.Level,
+                Message = entry.Message,
+                StackTrace = entry.StackTrace,
+                Color = entry.Color
+            };
+
+            _unifiedLogBuffer.Add(sequencedEntry);
             if (_unifiedLogBuffer.Count > MaxLogEntries)
             {
                 _unifiedLogBuffer.RemoveAt(0);
@@ -269,19 +288,27 @@ public class BridgeState
             foreach (var channel in _logSubscribers.ToArray())
             {
                 // Non-blocking write - if channel is full, skip this entry for that subscriber
-                channel.Writer.TryWrite(entry);
+                channel.Writer.TryWrite(sequencedEntry);
             }
         }
     }
 
     /// <summary>
-    /// Get recent unified logs, optionally filtered by source
+    /// Get recent unified logs, optionally filtered by source.
+    /// By default, only returns logs since the last clear (watermark).
+    /// Set ignoreWatermark=true to get full history.
     /// </summary>
-    public UnifiedLogEntry[] GetRecentUnifiedLogs(int count, string? source = null)
+    public UnifiedLogEntry[] GetRecentUnifiedLogs(int count, string? source = null, bool ignoreWatermark = false)
     {
         lock (_lock)
         {
             IEnumerable<UnifiedLogEntry> filtered = _unifiedLogBuffer;
+
+            // Apply watermark filter unless explicitly ignored
+            if (!ignoreWatermark && _clearWatermark >= 0)
+            {
+                filtered = filtered.Where(e => e.SequenceNumber >= _clearWatermark);
+            }
 
             if (!string.IsNullOrEmpty(source) && source != "all")
             {
@@ -291,6 +318,71 @@ public class BridgeState
             return filtered.TakeLast(count).ToArray();
         }
     }
+
+    #region Log Clearing
+
+    /// <summary>
+    /// Clear logs by setting watermark. Returns the new watermark value.
+    /// Logs before this watermark will be hidden by default (but still available via ignoreWatermark).
+    /// </summary>
+    public long ClearLogWatermark(string? reason = null)
+    {
+        lock (_lock)
+        {
+            _clearWatermark = _nextSequenceNumber;
+            _clearTimestamp = DateTime.Now;
+            _clearReason = reason;
+            return _clearWatermark;
+        }
+    }
+
+    /// <summary>
+    /// Get current watermark value. -1 means no clear applied.
+    /// </summary>
+    public long GetWatermark()
+    {
+        lock (_lock)
+        {
+            return _clearWatermark;
+        }
+    }
+
+    /// <summary>
+    /// Get information about the last clear operation.
+    /// Returns null if logs have never been cleared.
+    /// </summary>
+    public LogClearInfo? GetClearInfo()
+    {
+        lock (_lock)
+        {
+            if (_clearWatermark < 0 || _clearTimestamp == null)
+                return null;
+
+            return new LogClearInfo
+            {
+                Watermark = _clearWatermark,
+                Timestamp = _clearTimestamp.Value,
+                Reason = _clearReason
+            };
+        }
+    }
+
+    /// <summary>
+    /// Handle log events that may trigger auto-clear.
+    /// Called when a log event is detected from editor.log.
+    /// Note: Play mode is handled via WebSocket events in BridgeEndpoints, not here.
+    /// </summary>
+    public void HandleAutoClearEvent(string eventType)
+    {
+        // Auto-clear on compile start
+        if (eventType == LogEvents.CompileRequested)
+        {
+            ClearLogWatermark("compile started");
+            Console.WriteLine($"[Bridge] Auto-cleared logs on {eventType}");
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Subscribe to log stream. Returns a channel reader that yields new log entries.
@@ -624,4 +716,14 @@ public class LogEventWaiterHandle : IDisposable
             _cleanup();
         }
     }
+}
+
+/// <summary>
+/// Information about the last log clear operation
+/// </summary>
+public class LogClearInfo
+{
+    public long Watermark { get; init; }
+    public DateTime Timestamp { get; init; }
+    public string? Reason { get; init; }
 }

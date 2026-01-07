@@ -102,10 +102,24 @@ public static class BridgeEndpoints
         });
 
         // Unified logs tail endpoint
-        app.MapGet("/logs/tail", ([FromQuery] int lines = 50, [FromQuery] string source = "editor") =>
+        app.MapGet("/logs/tail", ([FromQuery] int lines = 50, [FromQuery] string source = "editor", [FromQuery] bool full = false) =>
         {
-            var entries = state.GetRecentUnifiedLogs(lines, source);
-            return new { entries };
+            var entries = state.GetRecentUnifiedLogs(lines, source, ignoreWatermark: full);
+            var clearInfo = full ? null : state.GetClearInfo();
+            return new
+            {
+                entries,
+                watermark = state.GetWatermark(),
+                clearedAt = clearInfo?.Timestamp.ToString("o"),
+                clearReason = clearInfo?.Reason
+            };
+        });
+
+        // Unified logs clear endpoint (sets watermark)
+        app.MapPost("/logs/clear", ([FromQuery] string? reason = null) =>
+        {
+            var watermark = state.ClearLogWatermark(reason ?? "manual clear");
+            return new { success = true, watermark, message = "Logs cleared" };
         });
 
         // Unified logs stream endpoint (SSE)
@@ -506,7 +520,17 @@ public static class BridgeEndpoints
                 break;
 
             case UnityCtlEvents.PlayModeChanged:
-                Console.WriteLine($"[Event] Play mode changed");
+                // Extract play mode state from payload
+                var playModePayload = eventMessage.Payload as Newtonsoft.Json.Linq.JObject;
+                var playModeState = playModePayload?["state"]?.ToString();
+                Console.WriteLine($"[Event] Play mode changed: {playModeState}");
+
+                // Auto-clear on entering play mode
+                if (playModeState == "EnteredPlayMode")
+                {
+                    state.ClearLogWatermark("entered play mode");
+                    Console.WriteLine($"[Bridge] Auto-cleared logs on play mode enter");
+                }
                 break;
 
             case UnityCtlEvents.CompilationStarted:

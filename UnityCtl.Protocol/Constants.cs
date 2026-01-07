@@ -86,4 +86,6 @@ public static class LogEvents
     public const string CompileRequested = "compile.requested";
     public const string CompileSuccess = "compile.success";
     public const string CompileFail = "compile.fail";
+    public const string PlayModeEnter = "playmode.enter";
+    public const string PlayModeExit = "playmode.exit";
 }

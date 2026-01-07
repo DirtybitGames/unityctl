@@ -37,11 +37,16 @@ public static class LogsCommand
             "--verbose",
             "Show all fields including timestamps");
 
+        var fullOption = new Option<bool>(
+            "--full",
+            "Show full log history (ignore clear watermark)");
+
         logsCommand.AddOption(followOption);
         logsCommand.AddOption(linesOption);
         logsCommand.AddOption(sourceOption);
         logsCommand.AddOption(noColorOption);
         logsCommand.AddOption(verboseOption);
+        logsCommand.AddOption(fullOption);
 
         logsCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -51,11 +56,65 @@ public static class LogsCommand
             var source = context.ParseResult.GetValueForOption(sourceOption) ?? "all";
             var noColor = context.ParseResult.GetValueForOption(noColorOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var full = context.ParseResult.GetValueForOption(fullOption);
 
-            await ShowLogsAsync(projectPath, follow, lines, source, noColor, verbose);
+            await ShowLogsAsync(projectPath, follow, lines, source, noColor, verbose, full);
         });
 
+        // Add 'logs clear' subcommand
+        var clearCommand = new Command("clear", "Clear log history (set watermark)");
+        clearCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            await ClearLogsAsync(projectPath);
+        });
+        logsCommand.AddCommand(clearCommand);
+
         return logsCommand;
+    }
+
+    private static async Task ClearLogsAsync(string? projectPath)
+    {
+        var projectRoot = projectPath != null
+            ? Path.GetFullPath(projectPath)
+            : ProjectLocator.FindProjectRoot();
+
+        if (projectRoot == null)
+        {
+            Console.Error.WriteLine("Error: Not in a Unity project.");
+            Console.Error.WriteLine("  Use --project to specify project root");
+            return;
+        }
+
+        var config = ProjectLocator.ReadBridgeConfig(projectRoot);
+        if (config == null)
+        {
+            Console.Error.WriteLine("Error: Bridge not running.");
+            Console.Error.WriteLine("  Start the bridge first: unityctl bridge start");
+            return;
+        }
+
+        var baseUrl = $"http://localhost:{config.Port}";
+
+        using var httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
+
+        try
+        {
+            var response = await httpClient.PostAsync("/logs/clear", null);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
+                return;
+            }
+
+            Console.WriteLine("Logs cleared");
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.Error.WriteLine($"Error: Cannot connect to bridge at {baseUrl}");
+            Console.Error.WriteLine($"  {ex.Message}");
+            Console.Error.WriteLine("  Make sure the bridge is running: unityctl bridge start");
+        }
     }
 
     private static async Task ShowLogsAsync(
@@ -64,7 +123,8 @@ public static class LogsCommand
         int lines,
         string source,
         bool noColor,
-        bool verbose)
+        bool verbose,
+        bool full)
     {
         // Find project and bridge config
         var projectRoot = projectPath != null
@@ -95,7 +155,7 @@ public static class LogsCommand
         {
             try
             {
-                var response = await httpClient.GetAsync($"/logs/tail?lines={lines}&source={source}");
+                var response = await httpClient.GetAsync($"/logs/tail?lines={lines}&source={source}&full={full.ToString().ToLower()}");
                 if (!response.IsSuccessStatusCode)
                 {
                     Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
@@ -104,6 +164,12 @@ public static class LogsCommand
 
                 var json = await response.Content.ReadAsStringAsync();
                 var result = JsonHelper.Deserialize<LogsTailResult>(json);
+
+                // Show clear info if logs were cleared and we're not in --full mode
+                if (!full && result?.ClearedAt != null)
+                {
+                    WriteClearInfo(result.ClearedAt, result.ClearReason, noColor);
+                }
 
                 if (result?.Entries != null)
                 {
@@ -189,6 +255,20 @@ public static class LogsCommand
         }
     }
 
+    private static void WriteClearInfo(string clearedAt, string? reason, bool noColor)
+    {
+        if (!noColor) Console.ForegroundColor = ConsoleColor.DarkGray;
+
+        var timestamp = DateTime.TryParse(clearedAt, out var dt)
+            ? dt.ToString("HH:mm:ss")
+            : clearedAt;
+
+        var reasonText = string.IsNullOrEmpty(reason) ? "cleared" : reason;
+        Console.WriteLine($"--- logs cleared at {timestamp} ({reasonText}) ---");
+
+        if (!noColor) Console.ResetColor();
+    }
+
     private static void WriteLogEntry(UnifiedLogEntry entry, bool noColor, bool verbose)
     {
         // Timestamp
@@ -251,10 +331,14 @@ public static class LogsCommand
 internal class LogsTailResult
 {
     public UnifiedLogEntry[]? Entries { get; set; }
+    public long Watermark { get; set; }
+    public string? ClearedAt { get; set; }
+    public string? ClearReason { get; set; }
 }
 
 internal class UnifiedLogEntry
 {
+    public long SequenceNumber { get; set; }
     public string Timestamp { get; set; } = "";
     public string Source { get; set; } = "";
     public string Level { get; set; } = "";

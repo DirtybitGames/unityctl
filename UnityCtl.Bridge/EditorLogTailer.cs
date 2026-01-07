@@ -97,6 +97,7 @@ public class EditorLogTailer : IDisposable
                     if (logEvent != null)
                     {
                         _state.NotifyLogEvent(logEvent);
+                        _state.HandleAutoClearEvent(logEvent.Type);
                     }
                 }
             }
