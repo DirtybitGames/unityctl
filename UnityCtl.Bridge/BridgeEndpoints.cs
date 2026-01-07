@@ -95,6 +95,45 @@ public static class BridgeEndpoints
             return new { success = true, message = "Console cleared" };
         });
 
+        // Unified logs tail endpoint
+        app.MapGet("/logs/tail", ([FromQuery] int lines = 50, [FromQuery] string source = "editor") =>
+        {
+            var entries = state.GetRecentUnifiedLogs(lines, source);
+            return new { entries };
+        });
+
+        // Unified logs stream endpoint (SSE)
+        app.MapGet("/logs/stream", async (HttpContext context, [FromQuery] string source = "editor") =>
+        {
+            context.Response.Headers["Content-Type"] = "text/event-stream";
+            context.Response.Headers["Cache-Control"] = "no-cache";
+            context.Response.Headers["Connection"] = "keep-alive";
+
+            var reader = state.SubscribeToLogs();
+
+            try
+            {
+                await foreach (var entry in reader.ReadAllAsync(context.RequestAborted))
+                {
+                    // Filter by source if specified
+                    if (source != "all" && entry.Source != source)
+                        continue;
+
+                    var json = JsonConvert.SerializeObject(entry, JsonHelper.Settings);
+                    await context.Response.WriteAsync($"data: {json}\n\n", context.RequestAborted);
+                    await context.Response.Body.FlushAsync(context.RequestAborted);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnected
+            }
+            finally
+            {
+                state.UnsubscribeFromLogs(reader);
+            }
+        });
+
         // RPC endpoint
         app.MapPost("/rpc", async (HttpContext context, [FromBody] RpcRequest request) =>
         {
@@ -364,7 +403,7 @@ public static class BridgeEndpoints
                 );
                 if (logEntry != null)
                 {
-                    state.AddLogEntry(logEntry);
+                    state.AddConsoleLogEntry(logEntry);
                 }
                 break;
 

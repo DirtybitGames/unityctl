@@ -1,0 +1,119 @@
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using UnityCtl.Protocol;
+
+namespace UnityCtl.Bridge;
+
+/// <summary>
+/// Background service that tails the editor.log file and adds entries to BridgeState.
+/// Uses LogFilter to filter noise and determine log levels/colors.
+/// </summary>
+public class EditorLogTailer : IDisposable
+{
+    private readonly string _projectRoot;
+    private readonly BridgeState _state;
+    private readonly CancellationTokenSource _cts = new();
+    private Task? _tailTask;
+    private bool _disposed;
+
+    public EditorLogTailer(string projectRoot, BridgeState state)
+    {
+        _projectRoot = projectRoot;
+        _state = state;
+    }
+
+    /// <summary>
+    /// Start tailing the editor log file in the background.
+    /// </summary>
+    public void Start()
+    {
+        if (_tailTask != null)
+            return;
+
+        _tailTask = Task.Run(() => TailLoopAsync(_cts.Token));
+    }
+
+    private async Task TailLoopAsync(CancellationToken ct)
+    {
+        var logPath = Path.Combine(_projectRoot, ".unityctl", "editor.log");
+        var filter = new LogFilter(useColor: true);
+
+        Console.WriteLine($"[EditorLogTailer] Watching for: {logPath}");
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                // Wait for the log file to exist
+                if (!File.Exists(logPath))
+                {
+                    await Task.Delay(1000, ct);
+                    continue;
+                }
+
+                Console.WriteLine($"[EditorLogTailer] Starting to tail: {logPath}");
+
+                using var tailer = new FileLogTailer(logPath);
+
+                await foreach (var line in tailer.TailAsync(ct))
+                {
+                    // Apply filtering
+                    var filtered = filter.ProcessLine(line);
+
+                    if (filtered != null)
+                    {
+                        // Determine level based on color
+                        var level = filtered.Color switch
+                        {
+                            ConsoleColor.Red => "Error",
+                            ConsoleColor.Yellow => "Warning",
+                            ConsoleColor.Green or ConsoleColor.Cyan => "Info",
+                            _ => "Log"
+                        };
+
+                        _state.AddEditorLogEntry(filtered.Text, level, filtered.Color);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected on shutdown
+                break;
+            }
+            catch (FileNotFoundException)
+            {
+                // File was deleted, wait and try again
+                await Task.Delay(1000, ct);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[EditorLogTailer] Error: {ex.Message}");
+                await Task.Delay(1000, ct);
+            }
+        }
+
+        Console.WriteLine("[EditorLogTailer] Stopped");
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        _cts.Cancel();
+
+        try
+        {
+            _tailTask?.Wait(TimeSpan.FromSeconds(2));
+        }
+        catch
+        {
+            // Ignore errors during shutdown
+        }
+
+        _cts.Dispose();
+    }
+}

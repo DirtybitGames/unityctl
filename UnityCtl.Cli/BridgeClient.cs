@@ -209,14 +209,14 @@ public class BridgeClient
 
         try
         {
+            // Start bridge as fully detached process (survives terminal close, Ctrl+C doesn't affect it)
             var startInfo = new ProcessStartInfo
             {
                 FileName = "unityctl-bridge",
                 Arguments = $"--project \"{projectRoot}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = false
+                UseShellExecute = true,  // Required for full detachment
+                CreateNoWindow = true,   // Run without visible window
+                WindowStyle = ProcessWindowStyle.Hidden
             };
 
             var process = Process.Start(startInfo);

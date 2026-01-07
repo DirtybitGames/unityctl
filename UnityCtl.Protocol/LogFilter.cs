@@ -1,7 +1,7 @@
 using System;
 using System.Text.RegularExpressions;
 
-namespace UnityCtl.Cli.LogFormatting;
+namespace UnityCtl.Protocol;
 
 public class FilteredLine
 {

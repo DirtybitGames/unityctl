@@ -131,17 +131,24 @@ rootCommand.SetHandler(async (string? projectPath, int port) =>
     var bridgeState = new BridgeState(projectId);
     builder.Services.AddSingleton(bridgeState);
 
+    // Create editor log tailer
+    var editorLogTailer = new EditorLogTailer(projectRoot, bridgeState);
+
     var app = builder.Build();
 
     // Configure endpoints
     app.UseWebSockets();
     BridgeEndpoints.MapEndpoints(app);
 
-    // Register shutdown handler to forcefully abort WebSocket connections
+    // Start editor log tailer
+    editorLogTailer.Start();
+
+    // Register shutdown handler to forcefully abort WebSocket connections and stop tailer
     var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
     lifetime.ApplicationStopping.Register(() =>
     {
         Console.WriteLine("Shutting down bridge...");
+        editorLogTailer.Dispose();
         bridgeState.AbortUnityConnection();
     });
 

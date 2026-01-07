@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace UnityCtl.Cli.LogTailing;
+namespace UnityCtl.Bridge;
 
 /// <summary>
 /// Tails a file in real-time, yielding new lines as they are appended.
@@ -60,12 +60,12 @@ public class FileLogTailer : IDisposable
         {
             // Check if file was truncated/rotated (position beyond file end)
             var fileInfo = new FileInfo(_logPath);
-            if (fileInfo.Length < position)
+            if (!fileInfo.Exists || fileInfo.Length < position)
             {
-                // File was truncated, reset to beginning
-                fs.Seek(0, SeekOrigin.Begin);
-                position = 0;
-                reader.DiscardBufferedData();
+                // File was deleted or rotated - exit and let caller create a new tailer
+                // This handles the case where editor.log was moved to editor-prev.log
+                // and a new editor.log was created
+                yield break;
             }
 
             // Read any new content

@@ -4,16 +4,34 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using UnityCtl.Protocol;
 
 namespace UnityCtl.Bridge;
 
+/// <summary>
+/// Unified log entry that can come from either editor.log or console (Debug.Log)
+/// </summary>
+public class UnifiedLogEntry
+{
+    public required string Timestamp { get; init; }
+    public required string Source { get; init; }  // "editor" or "console"
+    public required string Level { get; init; }   // "Log", "Warning", "Error", "Exception", or "Info" for editor
+    public required string Message { get; init; }
+    public string? StackTrace { get; init; }
+    public ConsoleColor? Color { get; init; }
+}
+
 public class BridgeState
 {
     private readonly object _lock = new();
-    private readonly List<LogEntry> _logBuffer = new();
+    private readonly List<LogEntry> _logBuffer = new();  // Console logs (backward compat)
+    private readonly List<UnifiedLogEntry> _unifiedLogBuffer = new();  // Unified logs
     private const int MaxLogEntries = 1000;
+
+    // Channels for log streaming (multiple subscribers supported)
+    private readonly List<Channel<UnifiedLogEntry>> _logSubscribers = new();
 
     public BridgeState(string projectId)
     {
@@ -180,8 +198,135 @@ public class BridgeState
         lock (_lock)
         {
             _logBuffer.Clear();
+            _unifiedLogBuffer.Clear();
         }
     }
+
+    #region Unified Logging
+
+    /// <summary>
+    /// Add an editor log entry (from editor.log file)
+    /// </summary>
+    public void AddEditorLogEntry(string message, string level = "Info", ConsoleColor? color = null)
+    {
+        var entry = new UnifiedLogEntry
+        {
+            Timestamp = DateTime.Now.ToString("o"),
+            Source = "editor",
+            Level = level,
+            Message = message,
+            Color = color
+        };
+
+        AddUnifiedLogEntry(entry);
+    }
+
+    /// <summary>
+    /// Add a console log entry (from Unity Debug.Log) - also adds to unified buffer
+    /// </summary>
+    public void AddConsoleLogEntry(LogEntry logEntry)
+    {
+        // Add to legacy buffer for backward compatibility
+        lock (_lock)
+        {
+            _logBuffer.Add(logEntry);
+            if (_logBuffer.Count > MaxLogEntries)
+            {
+                _logBuffer.RemoveAt(0);
+            }
+        }
+
+        // Also add to unified buffer
+        var unified = new UnifiedLogEntry
+        {
+            Timestamp = logEntry.Timestamp,
+            Source = "console",
+            Level = logEntry.Level,
+            Message = logEntry.Message,
+            StackTrace = logEntry.StackTrace,
+            Color = logEntry.Level switch
+            {
+                "Error" or "Exception" => ConsoleColor.Red,
+                "Warning" => ConsoleColor.Yellow,
+                _ => null
+            }
+        };
+
+        AddUnifiedLogEntry(unified);
+    }
+
+    private void AddUnifiedLogEntry(UnifiedLogEntry entry)
+    {
+        lock (_lock)
+        {
+            _unifiedLogBuffer.Add(entry);
+            if (_unifiedLogBuffer.Count > MaxLogEntries)
+            {
+                _unifiedLogBuffer.RemoveAt(0);
+            }
+
+            // Notify all subscribers
+            foreach (var channel in _logSubscribers.ToArray())
+            {
+                // Non-blocking write - if channel is full, skip this entry for that subscriber
+                channel.Writer.TryWrite(entry);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get recent unified logs, optionally filtered by source
+    /// </summary>
+    public UnifiedLogEntry[] GetRecentUnifiedLogs(int count, string? source = null)
+    {
+        lock (_lock)
+        {
+            IEnumerable<UnifiedLogEntry> filtered = _unifiedLogBuffer;
+
+            if (!string.IsNullOrEmpty(source) && source != "all")
+            {
+                filtered = filtered.Where(e => e.Source == source);
+            }
+
+            return filtered.TakeLast(count).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Subscribe to log stream. Returns a channel reader that yields new log entries.
+    /// </summary>
+    public ChannelReader<UnifiedLogEntry> SubscribeToLogs()
+    {
+        var channel = Channel.CreateBounded<UnifiedLogEntry>(new BoundedChannelOptions(100)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
+        lock (_lock)
+        {
+            _logSubscribers.Add(channel);
+        }
+
+        return channel.Reader;
+    }
+
+    /// <summary>
+    /// Unsubscribe from log stream
+    /// </summary>
+    public void UnsubscribeFromLogs(ChannelReader<UnifiedLogEntry> reader)
+    {
+        lock (_lock)
+        {
+            var channel = _logSubscribers.FirstOrDefault(c => c.Reader == reader);
+            if (channel != null)
+            {
+                _logSubscribers.Remove(channel);
+                channel.Writer.Complete();
+            }
+        }
+    }
+
+    #endregion
 
     public async Task<ResponseMessage> SendCommandToUnityAsync(RequestMessage request, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
