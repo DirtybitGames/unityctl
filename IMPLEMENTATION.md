@@ -63,7 +63,6 @@ Successfully implemented a complete remote control system for Unity Editor based
 - `SceneCommands.cs` - Scene management commands
 - `PlayCommands.cs` - Play mode commands
 - `AssetCommands.cs` - Asset management commands
-- `CompileCommands.cs` - Compilation commands
 - `BridgeCommands.cs` - Bridge management commands
 - `Binders.cs` - Global option binders
 
@@ -77,7 +76,7 @@ unityctl scene load <path>      # Load a scene
 unityctl play enter/exit/toggle # Control play mode
 unityctl play status            # Get play mode status
 unityctl asset import <path>    # Import an asset
-unityctl compile scripts        # Trigger compilation
+unityctl asset refresh          # Refresh assets (triggers compilation if needed)
 ```
 
 **Global Options:**
@@ -103,8 +102,8 @@ unityctl compile scripts        # Trigger compilation
 - `scene.list` - List build settings or all scenes
 - `scene.load` - Load scene (single/additive)
 - `play.enter/exit/toggle/status` - Play mode control
-- `asset.import` - Asset import and refresh
-- `compile.scripts` - Trigger script compilation
+- `asset.import` - Asset import
+- `asset.refresh` - Refresh assets (triggers compilation)
 
 **Events Sent:**
 - `log` - Console log entries (all levels)
@@ -151,7 +150,6 @@ unityctl/
 │   ├── SceneCommands.cs
 │   ├── PlayCommands.cs
 │   ├── AssetCommands.cs
-│   ├── CompileCommands.cs
 │   └── BridgeCommands.cs
 ├── UnityCtl.UnityPackage/        # Unity UPM package
 │   ├── package.json
@@ -317,8 +315,7 @@ The implementation includes a test Unity project at `unity-project/` with the Un
 
 ✅ All wire protocol commands implemented:
 - console.tail
-- asset.import, asset.reimportAll (not exposed in CLI yet)
-- compile.scripts
+- asset.import, asset.reimportAll (not exposed in CLI yet), asset.refresh
 - scene.list, scene.load
 - play.enter, play.exit, play.toggle, play.status
 

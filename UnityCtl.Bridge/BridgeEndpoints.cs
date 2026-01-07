@@ -30,11 +30,6 @@ public static class BridgeEndpoints
             Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_PLAYMODE", 30),
             CompletionEvent = UnityCtlEvents.PlayModeChanged
         },
-        [UnityCtlCommands.CompileScripts] = new CommandConfig
-        {
-            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_COMPILE", 30),
-            CompletionEvent = UnityCtlEvents.CompilationFinished
-        },
         [UnityCtlCommands.AssetImport] = new CommandConfig
         {
             Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_ASSET", 30),

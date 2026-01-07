@@ -9,7 +9,6 @@ public static class UnityCtlCommands
     public const string AssetImport = "asset.import";
     public const string AssetReimportAll = "asset.reimportAll";
     public const string AssetRefresh = "asset.refresh";
-    public const string CompileScripts = "compile.scripts";
 
     // Scenes
     public const string SceneList = "scene.list";
