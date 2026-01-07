@@ -204,8 +204,12 @@ public static class BridgeEndpoints
                     // Send command to Unity with cancellation support
                     var response = await state.SendCommandToUnityAsync(requestMessage, timeout, context.RequestAborted);
 
-                    // If command has a WebSocket completion event, wait for it
-                    if (hasConfig && config!.CompletionEvent != null)
+                    // Check if Unity indicated the command was a no-op (already in desired state)
+                    var resultState = (response.Result as Newtonsoft.Json.Linq.JObject)?["state"]?.ToString();
+                    var isAlreadyInState = resultState == "AlreadyPlaying" || resultState == "AlreadyStopped";
+
+                    // If command has a WebSocket completion event, wait for it (unless already in state)
+                    if (hasConfig && config!.CompletionEvent != null && !isAlreadyInState)
                     {
                         var eventMessage = await state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted);
 

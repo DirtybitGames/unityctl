@@ -350,13 +350,29 @@ namespace UnityCtl
                         break;
 
                     case UnityCtlCommands.PlayEnter:
-                        EditorApplication.isPlaying = true;
-                        result = new PlayModeResult { State = PlayModeState.Playing };
+                        if (EditorApplication.isPlaying)
+                        {
+                            // Already in play mode - return current state immediately
+                            result = new PlayModeResult { State = "AlreadyPlaying" };
+                        }
+                        else
+                        {
+                            EditorApplication.isPlaying = true;
+                            result = new PlayModeResult { State = PlayModeState.Transitioning };
+                        }
                         break;
 
                     case UnityCtlCommands.PlayExit:
-                        EditorApplication.isPlaying = false;
-                        result = new PlayModeResult { State = PlayModeState.Stopped };
+                        if (!EditorApplication.isPlaying)
+                        {
+                            // Already stopped - return current state immediately
+                            result = new PlayModeResult { State = "AlreadyStopped" };
+                        }
+                        else
+                        {
+                            EditorApplication.isPlaying = false;
+                            result = new PlayModeResult { State = PlayModeState.Transitioning };
+                        }
                         break;
 
                     case UnityCtlCommands.PlayToggle:
