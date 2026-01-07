@@ -1,6 +1,6 @@
 ---
 name: unity-editor
-description: Remote control Unity Editor via CLI using unityctl. Use when working with Unity projects to enter/exit play mode, compile scripts, view console logs, load scenes, run tests, capture screenshots, or execute C# code for debugging. Activate when user mentions Unity, play mode, compilation, or needs to interact with a running Unity Editor.
+description: Remote control Unity Editor via CLI using unityctl. Use when working with Unity projects to launch/stop editor, enter/exit play mode, compile scripts, view logs, load scenes, run tests, capture screenshots, or execute C# code for debugging. Activate when user mentions Unity, play mode, compilation, or needs to interact with a running Unity Editor.
 ---
 
 # unityctl - Unity Editor Remote Control
@@ -11,19 +11,25 @@ Control a running Unity Editor from the command line without batch mode.
 
 ### Setup (Required First)
 
-1. Start the bridge daemon: `unityctl bridge start` (make sure to background this or it will time out)
+**Option A - Editor already open:**
+1. Start the bridge daemon: `unityctl bridge start` (background it or it will time out)
 2. Open the Unity project in Unity Editor
 3. Verify connection: `unityctl status`
 
-### Critical: Compile Before Play Mode
+**Option B - Launch editor via CLI:**
+1. Start the bridge daemon: `unityctl bridge start` (background it)
+2. Launch Unity: `unityctl editor run`
+3. Verify connection: `unityctl status`
 
-After modifying ANY C# scripts, you MUST compile before entering play mode:
+### Critical: Refresh Assets After Script Changes
+
+After modifying ANY C# scripts, you MUST refresh assets before entering play mode:
 
 ```bash
-unityctl compile scripts
+unityctl asset refresh
 ```
 
-This refreshes assets and triggers compilation. Play mode will use stale code otherwise.
+This triggers Unity's asset pipeline and script compilation. If there are compile errors, the command returns a non-zero exit code and JSON output includes error details. Play mode will use stale code otherwise.
 
 ### Common Commands
 
@@ -34,6 +40,12 @@ unityctl bridge start     # Start bridge daemon (runs in background)
 unityctl bridge stop      # Stop bridge
 ```
 
+**Editor Lifecycle:**
+```bash
+unityctl editor run         # Launch Unity Editor (auto-detects version)
+unityctl editor stop        # Stop running Unity Editor
+```
+
 **Play Mode:**
 ```bash
 unityctl play enter       # Enter play mode
@@ -41,12 +53,10 @@ unityctl play exit        # Exit play mode
 unityctl play toggle      # Toggle play mode
 ```
 
-**Console:**
+**Logs:**
 ```bash
-unityctl console tail              # Show recent logs (default: 10 entries)
-unityctl console tail --count 100  # More log entries
-unityctl console tail --stack      # Include stack traces
-unityctl console clear             # Clear the console log buffer
+unityctl logs                 # Show recent logs (default: 50 lines)
+unityctl logs -n 100          # More log entries
 ```
 
 **Scenes:**
@@ -86,9 +96,10 @@ unityctl <command> --help    # Command-specific help
 **Workflow: Edit script, compile, and test:**
 ```bash
 # After editing C# files...
-unityctl compile scripts
+unityctl asset refresh
+unityctl logs -n 20          # Check for compilation errors
 unityctl play enter
-unityctl console tail --count 50
+unityctl logs -f             # Stream logs during play mode (Ctrl+C to stop)
 unityctl play exit
 ```
 
@@ -110,8 +121,8 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 ## Best Practices
 
 - Run `unityctl status` to check overall project status before running commands
-- Always run `unityctl compile scripts` after modifying C# files before entering play mode
-- Use `unityctl console tail` to monitor logs after compiling and during play mode
+- Always run `unityctl asset refresh` after modifying C# files before entering play mode
+- Use `unityctl editor run` to launch Unity with automatic version detection
 - Script execution requires a class with a static method; return values are JSON-serialized
 - Domain reload after compilation is normal; the bridge auto-reconnects
 
@@ -125,3 +136,5 @@ Run `unityctl status` first to diagnose issues.
 | Commands timing out | Ensure Unity Editor is responsive |
 | Connection lost after compile | Normal - domain reload. Auto-reconnects. |
 | "Project not found" | Run from project directory or use `--project` flag |
+| Editor not found | Use `--unity-path` to specify Unity executable |
+| Compilation errors after refresh | `unityctl logs -n 50` to see errors |

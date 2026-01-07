@@ -10,8 +10,8 @@ An agent modifies your C# scripts, then sees the results:
 
 ```bash
 # Agent edits PlayerController.cs, then...
-unityctl compile scripts
-unityctl console tail --count 20
+unityctl asset refresh
+unityctl logs -n 20
 ```
 
 The agent sees compiler errors or success, iterates until it works.
@@ -23,7 +23,7 @@ Enter play mode and capture what's happening:
 ```bash
 unityctl play enter
 unityctl screenshot capture
-unityctl console tail --count 50
+unityctl logs -n 50
 unityctl play exit
 ```
 
@@ -62,12 +62,18 @@ Add to your Unity project's `Packages/manifest.json`:
 
 **Quick start:** `unityctl bridge start`, open Unity, `unityctl status`
 
+**Or launch Unity via CLI:** `unityctl bridge start`, `unityctl editor run`, `unityctl status`
+
 **For Claude Code:** Copy [examples/unity-editor/SKILL.md](examples/unity-editor/SKILL.md) to `.claude/skills/` in your project.
 
 ## More Commands
 
 | Command | Description |
 |---------|-------------|
+| `unityctl editor run` | Launch Unity Editor (auto-detects version) |
+| `unityctl editor stop` | Stop running Unity Editor |
+| `unityctl asset refresh` | Refresh assets and trigger compilation |
+| `unityctl logs -n <amount>` | View logs (default 50) |
 | `unityctl scene load <path>` | Load a scene |
 | `unityctl scene list` | List scenes in build settings |
 | `unityctl test run` | Run edit mode tests |
