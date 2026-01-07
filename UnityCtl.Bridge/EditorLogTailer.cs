@@ -2,13 +2,12 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityCtl.Protocol;
 
 namespace UnityCtl.Bridge;
 
 /// <summary>
 /// Background service that tails the editor.log file and adds entries to BridgeState.
-/// Uses LogFilter to filter noise and determine log levels/colors.
+/// Uses LogAnalyzer (u3d-style rule-based filtering) to filter noise and determine log levels/colors.
 /// </summary>
 public class EditorLogTailer : IDisposable
 {
@@ -38,7 +37,7 @@ public class EditorLogTailer : IDisposable
     private async Task TailLoopAsync(CancellationToken ct)
     {
         var logPath = Path.Combine(_projectRoot, ".unityctl", "editor.log");
-        var filter = new LogFilter(useColor: true);
+        var analyzer = new LogAnalyzer();
 
         Console.WriteLine($"[EditorLogTailer] Watching for: {logPath}");
 
@@ -59,8 +58,8 @@ public class EditorLogTailer : IDisposable
 
                 await foreach (var line in tailer.TailAsync(ct))
                 {
-                    // Apply filtering
-                    var filtered = filter.ProcessLine(line);
+                    // Apply rule-based filtering
+                    var filtered = analyzer.ParseLine(line);
 
                     if (filtered != null)
                     {
@@ -69,7 +68,7 @@ public class EditorLogTailer : IDisposable
                         {
                             ConsoleColor.Red => "Error",
                             ConsoleColor.Yellow => "Warning",
-                            ConsoleColor.Green or ConsoleColor.Cyan => "Info",
+                            ConsoleColor.Green => "Info",
                             _ => "Log"
                         };
 

@@ -1,0 +1,181 @@
+{
+  "GENERAL": {
+    "active": true,
+    "comment": "Generic rules applied regardless of phase",
+    "rules": {
+      "exception": {
+        "active": true,
+        "start_pattern": "^(?:(?!\\().)*[eE]xception\\w*: (?<message>.*)$",
+        "end_pattern": "(?:Filename: (?:[\\w/:]+/(?<file>\\w+\\.\\w+))? Line: (?<line>-?\\d+)|(?<fileunknown>filename unknown)>:(?<lineunknown>-?\\d+))",
+        "start_message": false,
+        "end_message": "%{file}%{fileunknown}(line %{line}%{lineunknown}): %{message}",
+        "store_lines": false,
+        "type": "error"
+      },
+      "fail": {
+        "active": true,
+        "start_pattern": "^(?<fail>Failed to .+)$",
+        "end_pattern": "Filename: (?:.+/(?<file>\\w+\\.\\w+))? Line: (?<line>-?\\d+)",
+        "start_message": false,
+        "end_message": "%{file}(line %{line}): %{fail}",
+        "store_lines": false,
+        "type": "error"
+      },
+      "log": {
+        "active": true,
+        "start_pattern": "^UnityEngine\\.Debug:Log(?:Format)? \\(",
+        "fetch_first_line_not_matching": [
+          "^UnityEngine\\.",
+          "^System\\.",
+          "^$"
+        ],
+        "fetched_line_pattern": "(?<message>.+)$",
+        "fetched_line_message": "%{message}",
+        "start_message": false,
+        "end_pattern": "^\\(Filename:",
+        "end_message": false
+      },
+      "log_warning": {
+        "active": true,
+        "start_pattern": "^UnityEngine\\.Debug:LogWarning(?:Format)? \\(",
+        "fetch_first_line_not_matching": [
+          "^UnityEngine\\.",
+          "^System\\.",
+          "^$",
+          "^\\s+"
+        ],
+        "fetched_line_pattern": "(?<message>.+)$",
+        "fetched_line_message": "%{message}",
+        "start_message": false,
+        "end_pattern": "^\\(Filename:",
+        "end_message": false,
+        "type": "warning"
+      },
+      "log_error": {
+        "active": true,
+        "start_pattern": "^UnityEngine\\.Debug:LogError(?:Format)? \\(",
+        "fetch_first_line_not_matching": [
+          "^UnityEngine\\.",
+          "^System\\.",
+          "^$",
+          "^\\t",
+          "^  "
+        ],
+        "fetched_line_pattern": "(?<message>.+)$",
+        "fetched_line_message": "%{message}",
+        "start_message": false,
+        "end_pattern": "^\\(Filename:",
+        "end_message": false,
+        "type": "error"
+      },
+      "log_exception": {
+        "active": true,
+        "start_pattern": "^UnityEngine\\.Debug:LogException \\(",
+        "fetch_first_line_not_matching": [
+          "^UnityEngine\\.",
+          "^System\\.",
+          "^$",
+          "^\\t",
+          "^  "
+        ],
+        "fetched_line_pattern": "(?<message>.+)$",
+        "fetched_line_message": "%{message}",
+        "start_message": false,
+        "end_pattern": "^\\(Filename:",
+        "end_message": false,
+        "type": "error"
+      },
+      "batchmode_exit": {
+        "active": true,
+        "start_pattern": "Exiting batchmode successfully",
+        "type": "success"
+      },
+      "batchmode_abort": {
+        "active": true,
+        "start_pattern": "Aborting batchmode due to failure",
+        "type": "error"
+      },
+      "project_loaded": {
+        "active": true,
+        "start_pattern": "^\\[Project\\] Loading completed",
+        "type": "success"
+      },
+      "domain_reload": {
+        "active": true,
+        "start_pattern": "^Domain Reload Profiling: (?<time>\\d+)ms$",
+        "start_message": "Domain Reload: %{time}ms"
+      }
+    }
+  },
+  "INIT": {
+    "active": true,
+    "comment": "Initialization on editor launch",
+    "phase_start_pattern": "(?:COMMAND LINE|Initialize mono)",
+    "rules": {
+      "engine_version": {
+        "active": true,
+        "start_pattern": "Initialize engine version: (?<version>\\d+\\.\\d+\\.\\d+\\w\\d+) \\((?<hash>\\w*)\\)",
+        "start_message": "Unity %{version}"
+      },
+      "asset_DB_loading": {
+        "active": true,
+        "start_pattern": "Loading Asset Database ?... ?\\d+\\.?\\d*"
+      }
+    }
+  },
+  "COMPILER": {
+    "active": true,
+    "comment": "Script compilation phase",
+    "phase_start_pattern": "- [sS]tarting compile",
+    "phase_end_pattern": "- Finished compile",
+    "rules": {
+      "target": {
+        "active": true,
+        "start_pattern": "- [sS]tarting compile (?<path>.+?)(?:, for buildtarget (?<target>.+))?$",
+        "start_message": "Compiling: %{path}"
+      },
+      "finished": {
+        "active": true,
+        "start_pattern": "- Finished compile (?<path>.+)$",
+        "start_message": "Compiled: %{path}",
+        "type": "success"
+      },
+      "compiler_error": {
+        "active": true,
+        "start_pattern": "/(?<file>\\w+\\.\\w+\\(\\d+,\\d+\\)): error (?<code>CS\\d+): (?<message>.+)$",
+        "start_message": "Error %{code}: %{message} (%{file})",
+        "type": "error"
+      },
+      "compiler_warning": {
+        "active": true,
+        "start_pattern": "/(?<file>\\w+\\.\\w+\\(\\d+,\\d+\\)): warning (?<code>CS\\d+): (?<message>.+)$",
+        "start_message": "Warning %{code}: %{message} (%{file})",
+        "type": "warning"
+      },
+      "tundra_success": {
+        "active": true,
+        "start_pattern": "^\\*\\*\\* Tundra build success",
+        "start_message": "Build succeeded",
+        "type": "success"
+      },
+      "tundra_fail": {
+        "active": true,
+        "start_pattern": "^\\*\\*\\* Tundra build failed",
+        "start_message": "Build failed",
+        "type": "error"
+      }
+    }
+  },
+  "SCRIPT_COMPILATION": {
+    "active": true,
+    "comment": "Script compilation requests",
+    "phase_start_pattern": "^\\[ScriptCompilation\\]",
+    "rules": {
+      "requested": {
+        "active": true,
+        "start_pattern": "^\\[ScriptCompilation\\] Requested",
+        "start_message": "Script compilation requested"
+      }
+    }
+  }
+}
