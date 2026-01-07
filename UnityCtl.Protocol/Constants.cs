@@ -82,4 +82,9 @@ public static class LogLevel
 public static class LogEvents
 {
     public const string RefreshComplete = "refresh.complete";
+    public const string CompilerError = "compiler.error";
+    public const string CompilerWarning = "compiler.warning";
+    public const string CompileRequested = "compile.requested";
+    public const string CompileSuccess = "compile.success";
+    public const string CompileFail = "compile.fail";
 }

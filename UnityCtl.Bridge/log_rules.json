@@ -111,6 +111,34 @@
         "start_message": "Asset refresh completed in %{time}s",
         "type": "success",
         "emit_event": "refresh.complete"
+      },
+      "compiler_error": {
+        "active": true,
+        "start_pattern": "(?<file>[\\w\\\\/]+\\.\\w+\\(\\d+,\\d+\\)): error (?<code>CS\\d+): (?<message>.+)$",
+        "start_message": "Error %{code}: %{message} (%{file})",
+        "type": "error",
+        "emit_event": "compiler.error"
+      },
+      "compiler_warning": {
+        "active": true,
+        "start_pattern": "(?<file>[\\w\\\\/]+\\.\\w+\\(\\d+,\\d+\\)): warning (?<code>CS\\d+): (?<message>.+)$",
+        "start_message": "Warning %{code}: %{message} (%{file})",
+        "type": "warning",
+        "emit_event": "compiler.warning"
+      },
+      "tundra_success": {
+        "active": true,
+        "start_pattern": "^\\*\\*\\* Tundra build success",
+        "start_message": "Build succeeded",
+        "type": "success",
+        "emit_event": "compile.success"
+      },
+      "tundra_fail": {
+        "active": true,
+        "start_pattern": "^\\*\\*\\* Tundra build failed",
+        "start_message": "Build failed",
+        "type": "error",
+        "emit_event": "compile.fail"
       }
     }
   },
@@ -132,7 +160,7 @@
   },
   "COMPILER": {
     "active": true,
-    "comment": "Script compilation phase",
+    "comment": "Script compilation phase (for detailed compile logs)",
     "phase_start_pattern": "- [sS]tarting compile",
     "phase_end_pattern": "- Finished compile",
     "rules": {
@@ -146,30 +174,6 @@
         "start_pattern": "- Finished compile (?<path>.+)$",
         "start_message": "Compiled: %{path}",
         "type": "success"
-      },
-      "compiler_error": {
-        "active": true,
-        "start_pattern": "/(?<file>\\w+\\.\\w+\\(\\d+,\\d+\\)): error (?<code>CS\\d+): (?<message>.+)$",
-        "start_message": "Error %{code}: %{message} (%{file})",
-        "type": "error"
-      },
-      "compiler_warning": {
-        "active": true,
-        "start_pattern": "/(?<file>\\w+\\.\\w+\\(\\d+,\\d+\\)): warning (?<code>CS\\d+): (?<message>.+)$",
-        "start_message": "Warning %{code}: %{message} (%{file})",
-        "type": "warning"
-      },
-      "tundra_success": {
-        "active": true,
-        "start_pattern": "^\\*\\*\\* Tundra build success",
-        "start_message": "Build succeeded",
-        "type": "success"
-      },
-      "tundra_fail": {
-        "active": true,
-        "start_pattern": "^\\*\\*\\* Tundra build failed",
-        "start_message": "Build failed",
-        "type": "error"
       }
     }
   },
@@ -181,7 +185,8 @@
       "requested": {
         "active": true,
         "start_pattern": "^\\[ScriptCompilation\\] Requested",
-        "start_message": "Script compilation requested"
+        "start_message": "Script compilation requested",
+        "emit_event": "compile.requested"
       }
     }
   }

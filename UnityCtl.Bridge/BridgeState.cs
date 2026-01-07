@@ -462,20 +462,33 @@ public class BridgeState
     /// <summary>
     /// Pre-register a waiter for a log event. Returns a handle that can be awaited later.
     /// Use this when you need to register BEFORE triggering the action that will emit the event.
+    /// Optionally specify event types to collect while waiting (e.g., errors and warnings).
     /// </summary>
-    public LogEventWaiterHandle RegisterLogEventWaiter(string eventType)
+    public LogEventWaiterHandle RegisterLogEventWaiter(string eventType, params string[] collectEventTypes)
+    {
+        return RegisterLogEventWaiter(new[] { eventType }, collectEventTypes);
+    }
+
+    /// <summary>
+    /// Pre-register a waiter for any of multiple log events. Returns a handle that can be awaited later.
+    /// The waiter completes when ANY of the specified completion events fires.
+    /// Optionally specify event types to collect while waiting (e.g., errors and warnings).
+    /// </summary>
+    public LogEventWaiterHandle RegisterLogEventWaiter(string[] completionEventTypes, string[] collectEventTypes)
     {
         var tcs = new TaskCompletionSource<LogEvent>();
         var waiterId = Guid.NewGuid().ToString();
         var waiter = new PendingLogEventWaiter
         {
-            EventType = eventType,
-            CompletionSource = tcs
+            EventTypes = new HashSet<string>(completionEventTypes),
+            CompletionSource = tcs,
+            CollectEventTypes = collectEventTypes.Length > 0 ? new HashSet<string>(collectEventTypes) : null,
+            CollectedEvents = collectEventTypes.Length > 0 ? new List<LogEvent>() : null
         };
 
         _pendingLogEventWaiters[waiterId] = waiter;
 
-        return new LogEventWaiterHandle(waiterId, tcs.Task, () => _pendingLogEventWaiters.TryRemove(waiterId, out _));
+        return new LogEventWaiterHandle(waiterId, tcs.Task, waiter.CollectedEvents, () => _pendingLogEventWaiters.TryRemove(waiterId, out _));
     }
 
     /// <summary>
@@ -489,6 +502,7 @@ public class BridgeState
 
     /// <summary>
     /// Notify that a log event was detected. Completes any waiters waiting for this event type.
+    /// Also collects events for waiters that are listening for additional event types.
     /// </summary>
     public void NotifyLogEvent(LogEvent logEvent)
     {
@@ -496,9 +510,21 @@ public class BridgeState
 
         foreach (var kvp in _pendingLogEventWaiters)
         {
-            if (kvp.Value.EventType == logEvent.Type)
+            var waiter = kvp.Value;
+
+            // Check if this is a collectible event for this waiter
+            if (waiter.CollectEventTypes?.Contains(logEvent.Type) == true)
             {
-                kvp.Value.CompletionSource.TrySetResult(logEvent);
+                lock (waiter.CollectedEvents!)
+                {
+                    waiter.CollectedEvents.Add(logEvent);
+                }
+            }
+
+            // Check if this is a completion event (any of the registered event types)
+            if (waiter.EventTypes.Contains(logEvent.Type))
+            {
+                waiter.CompletionSource.TrySetResult(logEvent);
                 completedWaiters.Add(kvp.Key);
             }
         }
@@ -527,8 +553,10 @@ internal class PendingEventWaiter
 /// </summary>
 internal class PendingLogEventWaiter
 {
-    public required string EventType { get; init; }
+    public required HashSet<string> EventTypes { get; init; }
     public required TaskCompletionSource<LogEvent> CompletionSource { get; init; }
+    public HashSet<string>? CollectEventTypes { get; init; }
+    public List<LogEvent>? CollectedEvents { get; init; }
 }
 
 /// <summary>
@@ -538,14 +566,33 @@ public class LogEventWaiterHandle : IDisposable
 {
     private readonly string _waiterId;
     private readonly Task<LogEvent> _task;
+    private readonly List<LogEvent>? _collectedEvents;
     private readonly Action _cleanup;
     private bool _disposed;
 
-    internal LogEventWaiterHandle(string waiterId, Task<LogEvent> task, Action cleanup)
+    internal LogEventWaiterHandle(string waiterId, Task<LogEvent> task, List<LogEvent>? collectedEvents, Action cleanup)
     {
         _waiterId = waiterId;
         _task = task;
+        _collectedEvents = collectedEvents;
         _cleanup = cleanup;
+    }
+
+    /// <summary>
+    /// Gets the events collected while waiting for the completion event.
+    /// Thread-safe snapshot of collected events.
+    /// </summary>
+    public IReadOnlyList<LogEvent> CollectedEvents
+    {
+        get
+        {
+            if (_collectedEvents == null)
+                return Array.Empty<LogEvent>();
+            lock (_collectedEvents)
+            {
+                return _collectedEvents.ToArray();
+            }
+        }
     }
 
     public async Task<LogEvent> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)

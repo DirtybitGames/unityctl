@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -47,7 +48,12 @@ public static class BridgeEndpoints
         [UnityCtlCommands.AssetRefresh] = new CommandConfig
         {
             Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_REFRESH", 60),
-            LogCompletionEvent = LogEvents.RefreshComplete
+            // Two-stage wait: first refresh.complete, then compile result if compilation was requested
+            LogCompletionEvents = [LogEvents.RefreshComplete],
+            // Collect compile.requested to know if we need to wait for compilation
+            LogCollectEvents = [LogEvents.CompilerError, LogEvents.CompilerWarning, LogEvents.CompileRequested],
+            // After refresh.complete, wait for these if compile.requested was collected
+            LogSecondaryCompletionEvents = [LogEvents.CompileSuccess, LogEvents.CompileFail]
         },
         [UnityCtlCommands.TestRun] = new CommandConfig
         {
@@ -178,9 +184,10 @@ public static class BridgeEndpoints
                 // Pre-register log event waiter BEFORE sending command to avoid race condition
                 // (the event might fire before we start waiting)
                 LogEventWaiterHandle? logEventWaiter = null;
-                if (hasConfig && config!.LogCompletionEvent != null)
+                if (hasConfig && config!.LogCompletionEvents != null)
                 {
-                    logEventWaiter = state.RegisterLogEventWaiter(config.LogCompletionEvent);
+                    var collectEvents = config.LogCollectEvents ?? [];
+                    logEventWaiter = state.RegisterLogEventWaiter(config.LogCompletionEvents, collectEvents);
                 }
 
                 try
@@ -208,15 +215,76 @@ public static class BridgeEndpoints
                     {
                         var logEvent = await logEventWaiter.WaitAsync(timeout, context.RequestAborted);
 
-                        // Create new response with log event data as the result
-                        response = new ResponseMessage
+                        // Get collected events (errors, warnings, compile.requested)
+                        var collectedEvents = logEventWaiter.CollectedEvents;
+                        var compileWasRequested = collectedEvents.Any(e => e.Type == LogEvents.CompileRequested);
+
+                        // If compilation was requested and we have secondary completion events, wait for them
+                        if (compileWasRequested && config?.LogSecondaryCompletionEvents != null)
                         {
-                            Origin = response.Origin,
-                            RequestId = response.RequestId,
-                            Status = response.Status,
-                            Result = new { completed = true, eventType = logEvent.Type, data = logEvent.Data },
-                            Error = response.Error
-                        };
+                            // Continue waiting for compile result, still collecting errors/warnings
+                            var collectEvents = new[] { LogEvents.CompilerError, LogEvents.CompilerWarning };
+                            using var secondaryWaiter = state.RegisterLogEventWaiter(config.LogSecondaryCompletionEvents, collectEvents);
+                            var secondaryEvent = await secondaryWaiter.WaitAsync(timeout, context.RequestAborted);
+
+                            // Merge collected events from both waiters
+                            var allCollectedEvents = collectedEvents.Concat(secondaryWaiter.CollectedEvents).ToList();
+
+                            var errors = allCollectedEvents
+                                .Where(e => e.Type == LogEvents.CompilerError)
+                                .Select(e => e.Data)
+                                .ToArray();
+                            var warnings = allCollectedEvents
+                                .Where(e => e.Type == LogEvents.CompilerWarning)
+                                .Select(e => e.Data)
+                                .ToArray();
+
+                            // Create response with compilation results
+                            response = new ResponseMessage
+                            {
+                                Origin = response.Origin,
+                                RequestId = response.RequestId,
+                                Status = errors.Length > 0 ? ResponseStatus.Error : response.Status,
+                                Result = new
+                                {
+                                    completed = true,
+                                    eventType = secondaryEvent.Type,
+                                    data = secondaryEvent.Data,
+                                    errors = errors.Length > 0 ? errors : null,
+                                    warnings = warnings.Length > 0 ? warnings : null
+                                },
+                                Error = errors.Length > 0 ? new ErrorPayload { Code = "COMPILATION_ERROR", Message = $"{errors.Length} compilation error(s) detected" } : response.Error
+                            };
+                        }
+                        else
+                        {
+                            // No compilation requested - just refresh completed
+                            var errors = collectedEvents
+                                .Where(e => e.Type == LogEvents.CompilerError)
+                                .Select(e => e.Data)
+                                .ToArray();
+                            var warnings = collectedEvents
+                                .Where(e => e.Type == LogEvents.CompilerWarning)
+                                .Select(e => e.Data)
+                                .ToArray();
+
+                            // Create response with refresh results
+                            response = new ResponseMessage
+                            {
+                                Origin = response.Origin,
+                                RequestId = response.RequestId,
+                                Status = errors.Length > 0 ? ResponseStatus.Error : response.Status,
+                                Result = new
+                                {
+                                    completed = true,
+                                    eventType = logEvent.Type,
+                                    data = logEvent.Data,
+                                    errors = errors.Length > 0 ? errors : null,
+                                    warnings = warnings.Length > 0 ? warnings : null
+                                },
+                                Error = errors.Length > 0 ? new ErrorPayload { Code = "COMPILATION_ERROR", Message = $"{errors.Length} compilation error(s) detected" } : response.Error
+                            };
+                        }
                     }
 
                     var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
@@ -484,6 +552,8 @@ public class RpcRequest
 internal class CommandConfig
 {
     public required TimeSpan Timeout { get; init; }
-    public string? CompletionEvent { get; init; }        // WebSocket event from Unity
-    public string? LogCompletionEvent { get; init; }     // Log-based event from editor.log
+    public string? CompletionEvent { get; init; }               // WebSocket event from Unity
+    public string[]? LogCompletionEvents { get; init; }         // Log-based completion events from editor.log (first one to fire completes)
+    public string[]? LogCollectEvents { get; init; }            // Additional events to collect while waiting (e.g., errors)
+    public string[]? LogSecondaryCompletionEvents { get; init; } // If compile.requested was collected, wait for these after primary completion
 }

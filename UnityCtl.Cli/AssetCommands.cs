@@ -64,15 +64,19 @@ public static class AssetCommands
             var response = await client.SendCommandAsync(UnityCtlCommands.AssetRefresh, null);
             if (response == null) return;
 
-            if (response.Status == ResponseStatus.Error)
-            {
-                Console.Error.WriteLine($"Error: {response.Error?.Message}");
-                return;
-            }
-
             if (json)
             {
+                // Always output JSON, including errors
                 Console.WriteLine(JsonHelper.Serialize(response.Result));
+                if (response.Status == ResponseStatus.Error)
+                {
+                    Environment.ExitCode = 1;
+                }
+            }
+            else if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                Environment.ExitCode = 1;
             }
             else
             {
