@@ -2,6 +2,7 @@ using System;
 using System.CommandLine;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -15,6 +16,7 @@ using UnityCtl.Protocol;
 
 var rootCommand = new RootCommand("UnityCtl Bridge - WebSocket bridge between CLI and Unity Editor");
 
+// Bridge options
 var projectOption = new Option<string>(
     "--project",
     "Path to Unity project root (optional, will auto-detect if not specified)"
@@ -28,6 +30,18 @@ var portOption = new Option<int>(
 
 rootCommand.AddOption(projectOption);
 rootCommand.AddOption(portOption);
+
+// Add test-log subcommand
+var testLogCommand = new Command("test-log", "Test log filtering against a log file");
+var fileArg = new Argument<string>("file", "Path to the editor.log file to test");
+var showEventsOption = new Option<bool>("--show-events", "Show emitted events (compile.success, etc.)");
+testLogCommand.AddArgument(fileArg);
+testLogCommand.AddOption(showEventsOption);
+testLogCommand.SetHandler((string filePath, bool showEvents) =>
+{
+    TestLogFile(filePath, showEvents);
+}, fileArg, showEventsOption);
+rootCommand.AddCommand(testLogCommand);
 
 rootCommand.SetHandler(async (string? projectPath, int port) =>
 {
@@ -173,4 +187,52 @@ static int FindAvailablePort()
     {
         listener.Stop();
     }
+}
+
+static void TestLogFile(string filePath, bool showEvents)
+{
+    if (!File.Exists(filePath))
+    {
+        Console.Error.WriteLine($"Error: File not found: {filePath}");
+        Environment.Exit(1);
+        return;
+    }
+
+    Console.WriteLine($"Testing: {filePath}");
+    Console.WriteLine();
+
+    var analyzer = new LogAnalyzer();
+    var totalLines = 0;
+    var filteredLines = 0;
+
+    foreach (var line in File.ReadLines(filePath))
+    {
+        totalLines++;
+        var (filtered, evt) = analyzer.ParseLineWithEvent(line);
+
+        if (filtered != null)
+        {
+            filteredLines++;
+            if (filtered.Color.HasValue)
+            {
+                Console.ForegroundColor = filtered.Color.Value;
+            }
+            Console.WriteLine(filtered.Text);
+            Console.ResetColor();
+        }
+
+        if (showEvents && evt != null)
+        {
+            Console.ForegroundColor = ConsoleColor.Magenta;
+            var dataStr = evt.Data != null
+                ? $" ({string.Join(", ", evt.Data.Select(kv => $"{kv.Key}={kv.Value}"))})"
+                : "";
+            Console.WriteLine($"  >> EVENT: {evt.Type}{dataStr}");
+            Console.ResetColor();
+        }
+    }
+
+    Console.WriteLine();
+    var pct = totalLines > 0 ? (double)filteredLines / totalLines : 0;
+    Console.WriteLine($"Summary: {totalLines} lines -> {filteredLines} filtered ({pct:P1})");
 }
