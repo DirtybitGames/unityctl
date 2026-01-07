@@ -58,8 +58,8 @@ public class EditorLogTailer : IDisposable
 
                 await foreach (var line in tailer.TailAsync(ct))
                 {
-                    // Apply rule-based filtering
-                    var filtered = analyzer.ParseLine(line);
+                    // Apply rule-based filtering with event emission
+                    var (filtered, logEvent) = analyzer.ParseLineWithEvent(line);
 
                     if (filtered != null)
                     {
@@ -73,6 +73,12 @@ public class EditorLogTailer : IDisposable
                         };
 
                         _state.AddEditorLogEntry(filtered.Text, level, filtered.Color);
+                    }
+
+                    // Notify any waiters if an event was emitted
+                    if (logEvent != null)
+                    {
+                        _state.NotifyLogEvent(logEvent);
                     }
                 }
             }

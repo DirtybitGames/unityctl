@@ -453,6 +453,64 @@ public class BridgeState
             waiter.CompletionSource.TrySetCanceled();
         }
     }
+
+    #region Log-Based Completion Detection
+
+    // Track requests waiting for log-based completion events
+    private readonly ConcurrentDictionary<string, PendingLogEventWaiter> _pendingLogEventWaiters = new();
+
+    /// <summary>
+    /// Pre-register a waiter for a log event. Returns a handle that can be awaited later.
+    /// Use this when you need to register BEFORE triggering the action that will emit the event.
+    /// </summary>
+    public LogEventWaiterHandle RegisterLogEventWaiter(string eventType)
+    {
+        var tcs = new TaskCompletionSource<LogEvent>();
+        var waiterId = Guid.NewGuid().ToString();
+        var waiter = new PendingLogEventWaiter
+        {
+            EventType = eventType,
+            CompletionSource = tcs
+        };
+
+        _pendingLogEventWaiters[waiterId] = waiter;
+
+        return new LogEventWaiterHandle(waiterId, tcs.Task, () => _pendingLogEventWaiters.TryRemove(waiterId, out _));
+    }
+
+    /// <summary>
+    /// Wait for a specific log event to be detected from editor.log
+    /// </summary>
+    public async Task<LogEvent> WaitForLogEventAsync(string eventType, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        using var handle = RegisterLogEventWaiter(eventType);
+        return await handle.WaitAsync(timeout, cancellationToken);
+    }
+
+    /// <summary>
+    /// Notify that a log event was detected. Completes any waiters waiting for this event type.
+    /// </summary>
+    public void NotifyLogEvent(LogEvent logEvent)
+    {
+        var completedWaiters = new List<string>();
+
+        foreach (var kvp in _pendingLogEventWaiters)
+        {
+            if (kvp.Value.EventType == logEvent.Type)
+            {
+                kvp.Value.CompletionSource.TrySetResult(logEvent);
+                completedWaiters.Add(kvp.Key);
+            }
+        }
+
+        // Remove completed waiters
+        foreach (var waiterId in completedWaiters)
+        {
+            _pendingLogEventWaiters.TryRemove(waiterId, out _);
+        }
+    }
+
+    #endregion
 }
 
 /// <summary>
@@ -462,4 +520,61 @@ internal class PendingEventWaiter
 {
     public required string EventName { get; init; }
     public required TaskCompletionSource<EventMessage> CompletionSource { get; init; }
+}
+
+/// <summary>
+/// Represents a request waiting for a log-based completion event
+/// </summary>
+internal class PendingLogEventWaiter
+{
+    public required string EventType { get; init; }
+    public required TaskCompletionSource<LogEvent> CompletionSource { get; init; }
+}
+
+/// <summary>
+/// Handle for a pre-registered log event waiter. Dispose to cancel/cleanup.
+/// </summary>
+public class LogEventWaiterHandle : IDisposable
+{
+    private readonly string _waiterId;
+    private readonly Task<LogEvent> _task;
+    private readonly Action _cleanup;
+    private bool _disposed;
+
+    internal LogEventWaiterHandle(string waiterId, Task<LogEvent> task, Action cleanup)
+    {
+        _waiterId = waiterId;
+        _task = task;
+        _cleanup = cleanup;
+    }
+
+    public async Task<LogEvent> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+
+        using var registration = cancellationToken.Register(() =>
+        {
+            // If cancelled, we need to handle it
+        });
+
+        var timeoutTask = Task.Delay(timeout, cts.Token);
+        var completedTask = await Task.WhenAny(_task, timeoutTask);
+
+        if (completedTask == timeoutTask && !_task.IsCompleted)
+        {
+            throw new TimeoutException($"Waiting for log event timed out after {timeout.TotalSeconds}s");
+        }
+
+        return await _task;
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _disposed = true;
+            _cleanup();
+        }
+    }
 }

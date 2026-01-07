@@ -44,6 +44,11 @@ public static class BridgeEndpoints
             Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_ASSET", 30),
             CompletionEvent = UnityCtlEvents.AssetReimportAllComplete
         },
+        [UnityCtlCommands.AssetRefresh] = new CommandConfig
+        {
+            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_REFRESH", 60),
+            LogCompletionEvent = LogEvents.RefreshComplete
+        },
         [UnityCtlCommands.TestRun] = new CommandConfig
         {
             Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_TEST", 300),
@@ -170,27 +175,57 @@ public static class BridgeEndpoints
                 var hasConfig = CommandConfigs.TryGetValue(request.Command, out var config);
                 var timeout = hasConfig ? config!.Timeout : GetDefaultTimeout();
 
-                // Send command to Unity with cancellation support
-                var response = await state.SendCommandToUnityAsync(requestMessage, timeout, context.RequestAborted);
-
-                // If command has a completion event, wait for it with cancellation support
-                if (hasConfig && config!.CompletionEvent != null)
+                // Pre-register log event waiter BEFORE sending command to avoid race condition
+                // (the event might fire before we start waiting)
+                LogEventWaiterHandle? logEventWaiter = null;
+                if (hasConfig && config!.LogCompletionEvent != null)
                 {
-                    var eventMessage = await state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted);
-
-                    // Create new response with event payload as the result
-                    response = new ResponseMessage
-                    {
-                        Origin = response.Origin,
-                        RequestId = response.RequestId,
-                        Status = response.Status,
-                        Result = eventMessage.Payload,
-                        Error = response.Error
-                    };
+                    logEventWaiter = state.RegisterLogEventWaiter(config.LogCompletionEvent);
                 }
 
-                var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
-                return Results.Content(json, "application/json");
+                try
+                {
+                    // Send command to Unity with cancellation support
+                    var response = await state.SendCommandToUnityAsync(requestMessage, timeout, context.RequestAborted);
+
+                    // If command has a WebSocket completion event, wait for it
+                    if (hasConfig && config!.CompletionEvent != null)
+                    {
+                        var eventMessage = await state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted);
+
+                        // Create new response with event payload as the result
+                        response = new ResponseMessage
+                        {
+                            Origin = response.Origin,
+                            RequestId = response.RequestId,
+                            Status = response.Status,
+                            Result = eventMessage.Payload,
+                            Error = response.Error
+                        };
+                    }
+                    // If command has a log-based completion event, wait for it
+                    else if (logEventWaiter != null)
+                    {
+                        var logEvent = await logEventWaiter.WaitAsync(timeout, context.RequestAborted);
+
+                        // Create new response with log event data as the result
+                        response = new ResponseMessage
+                        {
+                            Origin = response.Origin,
+                            RequestId = response.RequestId,
+                            Status = response.Status,
+                            Result = new { completed = true, eventType = logEvent.Type, data = logEvent.Data },
+                            Error = response.Error
+                        };
+                    }
+
+                    var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
+                    return Results.Content(json, "application/json");
+                }
+                finally
+                {
+                    logEventWaiter?.Dispose();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -449,5 +484,6 @@ public class RpcRequest
 internal class CommandConfig
 {
     public required TimeSpan Timeout { get; init; }
-    public string? CompletionEvent { get; init; }
+    public string? CompletionEvent { get; init; }        // WebSocket event from Unity
+    public string? LogCompletionEvent { get; init; }     // Log-based event from editor.log
 }

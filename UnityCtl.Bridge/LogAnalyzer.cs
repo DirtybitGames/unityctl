@@ -19,13 +19,23 @@ public class FilteredLine
 }
 
 /// <summary>
+/// Represents a structured event emitted when a log pattern matches.
+/// Used for log-based completion detection.
+/// </summary>
+public class LogEvent
+{
+    public required string Type { get; init; }
+    public Dictionary<string, string>? Data { get; init; }
+}
+
+/// <summary>
 /// Rule-based log analyzer inspired by u3d's log filtering system.
 /// Uses a whitelist approach - only matching rules produce output.
 /// Supports phases, multi-line patterns, memory buffer backtracking, and template injection.
 /// </summary>
 public class LogAnalyzer
 {
-    private const int MemorySize = 10;
+    private const int MemorySize = 50;
 
     // Circular buffer for backtracking (Debug.Log message extraction)
     private readonly string?[] _linesMemory = new string?[MemorySize];
@@ -44,6 +54,9 @@ public class LogAnalyzer
 
     // Output queue (for multi-line rules that output multiple lines)
     private readonly Queue<FilteredLine> _outputQueue = new();
+
+    // Pending event to emit (set during parsing, cleared after retrieval)
+    private LogEvent? _pendingEvent;
 
     public LogAnalyzer(string? rulesPath = null)
     {
@@ -105,6 +118,19 @@ public class LogAnalyzer
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Process a log line, returning both filtered output and any emitted event.
+    /// Use this for log-based completion detection.
+    /// </summary>
+    public (FilteredLine? Line, LogEvent? Event) ParseLineWithEvent(string line)
+    {
+        _pendingEvent = null;
+        var result = ParseLine(line);
+        var evt = _pendingEvent;
+        _pendingEvent = null;
+        return (result, evt);
     }
 
     private void LoadRules(string? rulesPath)
@@ -307,6 +333,11 @@ public class LogAnalyzer
                 rule.FetchedMessageTemplate = fetchedMsgEl.GetString();
         }
 
+        if (element.TryGetProperty("emit_event", out var emitEventEl))
+        {
+            rule.EmitEvent = emitEventEl.GetString();
+        }
+
         return rule;
     }
 
@@ -340,6 +371,16 @@ public class LogAnalyzer
                     {
                         Text = $"[{header}] {message}",
                         Color = GetColor(_activeRule.Type)
+                    };
+                }
+
+                // Emit event if configured (before clearing state)
+                if (!string.IsNullOrEmpty(_activeRule.EmitEvent))
+                {
+                    _pendingEvent = new LogEvent
+                    {
+                        Type = _activeRule.EmitEvent,
+                        Data = _context.Count > 0 ? new Dictionary<string, string>(_context) : null
                     };
                 }
 
@@ -434,6 +475,16 @@ public class LogAnalyzer
                         Color = GetColor(rule.Type)
                     };
                 }
+            }
+
+            // Emit event if configured (for single-line rules without end pattern)
+            if (rule.EndRegex == null && !string.IsNullOrEmpty(rule.EmitEvent))
+            {
+                _pendingEvent = new LogEvent
+                {
+                    Type = rule.EmitEvent,
+                    Data = _context.Count > 0 ? new Dictionary<string, string>(_context) : null
+                };
             }
 
             // Output start message
@@ -566,6 +617,9 @@ internal class LogRule
     public int? FetchLineAtIndex { get; set; }
     public List<Regex> FetchFirstLineNotMatchingRegexes { get; } = new();
     public Regex? FetchedLineRegex { get; set; }
+
+    // Event emission for log-based completion detection
+    public string? EmitEvent { get; set; }
 }
 
 internal class LogPhase

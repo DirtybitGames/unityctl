@@ -8,6 +8,7 @@ public static class UnityCtlCommands
     // Assets & compilation
     public const string AssetImport = "asset.import";
     public const string AssetReimportAll = "asset.reimportAll";
+    public const string AssetRefresh = "asset.refresh";
     public const string CompileScripts = "compile.scripts";
 
     // Scenes
@@ -72,4 +73,13 @@ public static class LogLevel
     public const string Warning = "Warning";
     public const string Error = "Error";
     public const string Exception = "Exception";
+}
+
+/// <summary>
+/// Log-based events detected from editor.log patterns.
+/// These are defined in log_rules.json with emit_event.
+/// </summary>
+public static class LogEvents
+{
+    public const string RefreshComplete = "refresh.complete";
 }

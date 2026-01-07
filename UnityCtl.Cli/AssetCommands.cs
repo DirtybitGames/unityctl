@@ -49,6 +49,38 @@ public static class AssetCommands
         });
 
         assetCommand.AddCommand(importCommand);
+
+        // asset refresh
+        var refreshCommand = new Command("refresh", "Refresh all assets (like focusing the editor)");
+        refreshCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) return;
+
+            var response = await client.SendCommandAsync(UnityCtlCommands.AssetRefresh, null);
+            if (response == null) return;
+
+            if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                return;
+            }
+
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(response.Result));
+            }
+            else
+            {
+                Console.WriteLine("Asset refresh completed");
+            }
+        });
+        assetCommand.AddCommand(refreshCommand);
+
         return assetCommand;
     }
 }

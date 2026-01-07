@@ -104,6 +104,13 @@
         "active": true,
         "start_pattern": "^Domain Reload Profiling: (?<time>\\d+)ms$",
         "start_message": "Domain Reload: %{time}ms"
+      },
+      "refresh_complete": {
+        "active": true,
+        "start_pattern": "^Asset Pipeline Refresh \\(id=[a-f0-9]+\\): Total: (?<time>[\\d.]+) seconds",
+        "start_message": "Asset refresh completed in %{time}s",
+        "type": "success",
+        "emit_event": "refresh.complete"
       }
     }
   },

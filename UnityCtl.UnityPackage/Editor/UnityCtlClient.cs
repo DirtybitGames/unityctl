@@ -378,6 +378,12 @@ namespace UnityCtl
                         result = HandleAssetImport(request);
                         break;
 
+                    case UnityCtlCommands.AssetRefresh:
+                        // Lightweight refresh (like focusing editor) - completion detected via log
+                        AssetDatabase.Refresh();
+                        result = new { started = true };
+                        break;
+
                     case UnityCtlCommands.CompileScripts:
                         // Refresh asset database first to pick up new scripts
                         AssetDatabase.Refresh();
