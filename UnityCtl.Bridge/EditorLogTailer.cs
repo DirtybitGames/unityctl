@@ -16,6 +16,7 @@ public class EditorLogTailer : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task? _tailTask;
     private bool _disposed;
+    private bool _warningPrinted;
 
     public EditorLogTailer(string projectRoot, BridgeState state)
     {
@@ -36,15 +37,32 @@ public class EditorLogTailer : IDisposable
 
     private async Task TailLoopAsync(CancellationToken ct)
     {
-        var logPath = Path.Combine(_projectRoot, ".unityctl", "editor.log");
         var analyzer = new LogAnalyzer();
-
-        Console.WriteLine($"[EditorLogTailer] Watching for: {logPath}");
+        string? lastResolvedPath = null;
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
+                // Resolve log path - re-check each iteration until we find a valid file
+                // This handles the case where Unity starts after the bridge
+                var resolution = EditorLogPathResolver.Resolve(_projectRoot);
+                var logPath = resolution.LogPath;
+
+                // Print warning once if using default global log
+                if (resolution.IsDefaultGlobalLog && !_warningPrinted && resolution.WarningMessage != null)
+                {
+                    Console.WriteLine($"[EditorLogTailer] {resolution.WarningMessage}");
+                    _warningPrinted = true;
+                }
+
+                // Log path change detection
+                if (logPath != lastResolvedPath)
+                {
+                    Console.WriteLine($"[EditorLogTailer] Watching for: {logPath}");
+                    lastResolvedPath = logPath;
+                }
+
                 // Wait for the log file to exist
                 if (!File.Exists(logPath))
                 {
