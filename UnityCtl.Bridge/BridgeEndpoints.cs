@@ -90,7 +90,7 @@ public static class BridgeEndpoints
         });
 
         // Unified logs tail endpoint (lines=0 means all logs since clear)
-        app.MapGet("/logs/tail", ([FromQuery] int lines = 0, [FromQuery] string source = "editor", [FromQuery] bool full = false) =>
+        app.MapGet("/logs/tail", ([FromQuery] int lines = 0, [FromQuery] string source = "console", [FromQuery] bool full = false) =>
         {
             var entries = state.GetRecentUnifiedLogs(lines, source, ignoreWatermark: full);
             var clearInfo = full ? null : state.GetClearInfo();
@@ -111,7 +111,7 @@ public static class BridgeEndpoints
         });
 
         // Unified logs stream endpoint (SSE)
-        app.MapGet("/logs/stream", async (HttpContext context, [FromQuery] string source = "editor") =>
+        app.MapGet("/logs/stream", async (HttpContext context, [FromQuery] string source = "console") =>
         {
             context.Response.Headers["Content-Type"] = "text/event-stream";
             context.Response.Headers["Cache-Control"] = "no-cache";

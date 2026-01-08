@@ -13,7 +13,7 @@ public static class LogsCommand
 {
     public static Command CreateCommand()
     {
-        var logsCommand = new Command("logs", "View logs from the bridge (editor.log + console)");
+        var logsCommand = new Command("logs", "View Unity console logs");
 
         var followOption = new Option<bool>(
             new[] { "-f", "--follow" },
@@ -21,13 +21,7 @@ public static class LogsCommand
 
         var linesOption = new Option<int>(
             new[] { "-n", "--lines" },
-            getDefaultValue: () => 0,
-            "Number of lines to show (0 = all since last clear)");
-
-        var sourceOption = new Option<string>(
-            "--source",
-            getDefaultValue: () => "editor",
-            "Filter by source: editor, console, all");
+            "Limit to N most recent lines (default: all since last clear)");
 
         var noColorOption = new Option<bool>(
             "--no-color",
@@ -43,7 +37,6 @@ public static class LogsCommand
 
         logsCommand.AddOption(followOption);
         logsCommand.AddOption(linesOption);
-        logsCommand.AddOption(sourceOption);
         logsCommand.AddOption(noColorOption);
         logsCommand.AddOption(verboseOption);
         logsCommand.AddOption(fullOption);
@@ -53,12 +46,11 @@ public static class LogsCommand
             var projectPath = ContextHelper.GetProjectPath(context);
             var follow = context.ParseResult.GetValueForOption(followOption);
             var lines = context.ParseResult.GetValueForOption(linesOption);
-            var source = context.ParseResult.GetValueForOption(sourceOption) ?? "console";
             var noColor = context.ParseResult.GetValueForOption(noColorOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var full = context.ParseResult.GetValueForOption(fullOption);
 
-            await ShowLogsAsync(projectPath, follow, lines, source, noColor, verbose, full);
+            await ShowLogsAsync(projectPath, follow, lines, noColor, verbose, full);
         });
 
         // Add 'logs clear' subcommand
@@ -121,7 +113,6 @@ public static class LogsCommand
         string? projectPath,
         bool follow,
         int lines,
-        string source,
         bool noColor,
         bool verbose,
         bool full)
@@ -154,7 +145,7 @@ public static class LogsCommand
         // lines=0 means all logs since clear, lines>0 limits to N lines
         try
         {
-            var response = await httpClient.GetAsync($"/logs/tail?lines={lines}&source={source}&full={full.ToString().ToLower()}");
+            var response = await httpClient.GetAsync($"/logs/tail?lines={lines}&source=console&full={full.ToString().ToLower()}");
             if (!response.IsSuccessStatusCode)
             {
                 Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
@@ -200,7 +191,7 @@ public static class LogsCommand
 
             try
             {
-                await StreamLogsAsync(httpClient, source, noColor, verbose, cts.Token);
+                await StreamLogsAsync(httpClient, noColor, verbose, cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -216,13 +207,12 @@ public static class LogsCommand
 
     private static async Task StreamLogsAsync(
         HttpClient httpClient,
-        string source,
         bool noColor,
         bool verbose,
         CancellationToken ct)
     {
         using var response = await httpClient.GetAsync(
-            $"/logs/stream?source={source}",
+            "/logs/stream?source=console",
             HttpCompletionOption.ResponseHeadersRead,
             ct);
 
