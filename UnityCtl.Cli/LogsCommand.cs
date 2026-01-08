@@ -21,8 +21,8 @@ public static class LogsCommand
 
         var linesOption = new Option<int>(
             new[] { "-n", "--lines" },
-            getDefaultValue: () => 50,
-            "Number of lines to show");
+            getDefaultValue: () => 0,
+            "Number of lines to show (0 = all since last clear)");
 
         var sourceOption = new Option<string>(
             "--source",
@@ -151,50 +151,45 @@ public static class LogsCommand
         using var httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
 
         // First, show recent logs (tail)
-        if (lines > 0)
+        // lines=0 means all logs since clear, lines>0 limits to N lines
+        try
         {
-            try
+            var response = await httpClient.GetAsync($"/logs/tail?lines={lines}&source={source}&full={full.ToString().ToLower()}");
+            if (!response.IsSuccessStatusCode)
             {
-                var response = await httpClient.GetAsync($"/logs/tail?lines={lines}&source={source}&full={full.ToString().ToLower()}");
-                if (!response.IsSuccessStatusCode)
-                {
-                    Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
-                    return;
-                }
-
-                var json = await response.Content.ReadAsStringAsync();
-                var result = JsonHelper.Deserialize<LogsTailResult>(json);
-
-                // Show clear info if logs were cleared and we're not in --full mode
-                if (!full && result?.ClearedAt != null)
-                {
-                    WriteClearInfo(result.ClearedAt, result.ClearReason, noColor);
-                }
-
-                if (result?.Entries != null)
-                {
-                    foreach (var entry in result.Entries)
-                    {
-                        WriteLogEntry(entry, noColor, verbose);
-                    }
-                }
-            }
-            catch (HttpRequestException ex)
-            {
-                Console.Error.WriteLine($"Error: Cannot connect to bridge at {baseUrl}");
-                Console.Error.WriteLine($"  {ex.Message}");
-                Console.Error.WriteLine("  Make sure the bridge is running: unityctl bridge start");
+                Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
                 return;
             }
+
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonHelper.Deserialize<LogsTailResult>(json);
+
+            // Show clear info if logs were cleared and we're not in --full mode
+            if (!full && result?.ClearedAt != null)
+            {
+                WriteClearInfo(result.ClearedAt, result.ClearReason, noColor);
+            }
+
+            if (result?.Entries != null)
+            {
+                foreach (var entry in result.Entries)
+                {
+                    WriteLogEntry(entry, noColor, verbose);
+                }
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.Error.WriteLine($"Error: Cannot connect to bridge at {baseUrl}");
+            Console.Error.WriteLine($"  {ex.Message}");
+            Console.Error.WriteLine("  Make sure the bridge is running: unityctl bridge start");
+            return;
         }
 
         // If follow mode, stream new logs
         if (follow)
         {
-            if (lines > 0)
-            {
-                Console.WriteLine("--- streaming new logs (Ctrl+C to stop) ---");
-            }
+            Console.WriteLine("--- streaming new logs (Ctrl+C to stop) ---");
 
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (sender, e) =>

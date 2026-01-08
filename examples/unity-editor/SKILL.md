@@ -55,8 +55,9 @@ unityctl play toggle      # Toggle play mode
 
 **Logs:**
 ```bash
-unityctl logs                 # Show recent logs (default: 50 lines)
-unityctl logs -n 100          # More log entries
+unityctl logs                 # Show all logs since last clear (auto-clears on play enter and compile)
+unityctl logs -n 50           # Limit to last 50 entries
+unityctl logs --full          # Show full history (ignore clear boundary)
 ```
 
 **Scenes:**
@@ -98,7 +99,7 @@ unityctl <command> --help    # Command-specific help
 # After editing C# files...
 unityctl asset refresh       # Returns compilation errors if any
 unityctl play enter
-unityctl logs -n 50          # Check runtime logs
+unityctl logs                # Check runtime logs (shows all since play enter)
 unityctl play exit
 ```
 

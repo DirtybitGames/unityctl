@@ -89,8 +89,8 @@ public static class BridgeEndpoints
             };
         });
 
-        // Unified logs tail endpoint
-        app.MapGet("/logs/tail", ([FromQuery] int lines = 50, [FromQuery] string source = "editor", [FromQuery] bool full = false) =>
+        // Unified logs tail endpoint (lines=0 means all logs since clear)
+        app.MapGet("/logs/tail", ([FromQuery] int lines = 0, [FromQuery] string source = "editor", [FromQuery] bool full = false) =>
         {
             var entries = state.GetRecentUnifiedLogs(lines, source, ignoreWatermark: full);
             var clearInfo = full ? null : state.GetClearInfo();

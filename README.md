@@ -22,7 +22,7 @@ Enter play mode and capture what's happening:
 ```bash
 unityctl play enter
 unityctl screenshot capture
-unityctl logs -n 50
+unityctl logs                 # shows all logs since last clear
 unityctl play exit
 ```
 
@@ -72,7 +72,7 @@ Add to your Unity project's `Packages/manifest.json`:
 | `unityctl editor run` | Launch Unity Editor (auto-detects version) |
 | `unityctl editor stop` | Stop running Unity Editor |
 | `unityctl asset refresh` | Refresh assets and trigger compilation |
-| `unityctl logs -n <amount>` | View logs (default 50) |
+| `unityctl logs` | View logs since last clear (use `-n` to limit, `--full` for all history) |
 | `unityctl scene load <path>` | Load a scene |
 | `unityctl scene list` | List scenes in build settings |
 | `unityctl test run` | Run edit mode tests |

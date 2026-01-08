@@ -217,6 +217,7 @@ public class BridgeState
     /// Get recent unified logs, optionally filtered by source.
     /// By default, only returns logs since the last clear (watermark).
     /// Set ignoreWatermark=true to get full history.
+    /// Set count=0 to get all matching logs (no limit).
     /// </summary>
     public UnifiedLogEntry[] GetRecentUnifiedLogs(int count, string? source = null, bool ignoreWatermark = false)
     {
@@ -235,7 +236,12 @@ public class BridgeState
                 filtered = filtered.Where(e => e.Source == source);
             }
 
-            return filtered.TakeLast(count).ToArray();
+            // count=0 means return all matching logs
+            if (count > 0)
+            {
+                return filtered.TakeLast(count).ToArray();
+            }
+            return filtered.ToArray();
         }
     }
 
