@@ -21,15 +21,15 @@ Control a running Unity Editor from the command line without batch mode.
 2. Launch Unity: `unityctl editor run`
 3. Verify connection: `unityctl status`
 
-### Critical: Refresh Assets After Script Changes
+### Refresh Assets After Script Changes
 
-After modifying ANY C# scripts, you MUST refresh assets before entering play mode:
+After modifying C# scripts, refresh assets to compile:
 
 ```bash
 unityctl asset refresh
 ```
 
-This triggers Unity's asset pipeline and script compilation. If there are compile errors, the command returns a non-zero exit code and JSON output includes error details. Play mode will use stale code otherwise.
+Returns compilation errors directly in the output (non-zero exit code on failure). Fix errors and re-run until compilation succeeds before entering play mode.
 
 ### Common Commands
 
@@ -96,10 +96,9 @@ unityctl <command> --help    # Command-specific help
 **Workflow: Edit script, compile, and test:**
 ```bash
 # After editing C# files...
-unityctl asset refresh
-unityctl logs -n 20          # Check for compilation errors
+unityctl asset refresh       # Returns compilation errors if any
 unityctl play enter
-unityctl logs -f             # Stream logs during play mode (Ctrl+C to stop)
+unityctl logs -n 50          # Check runtime logs
 unityctl play exit
 ```
 
@@ -122,9 +121,7 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 
 - Run `unityctl status` to check overall project status before running commands
 - Always run `unityctl asset refresh` after modifying C# files before entering play mode
-- Use `unityctl editor run` to launch Unity with automatic version detection
 - Script execution requires a class with a static method; return values are JSON-serialized
-- Domain reload after compilation is normal; the bridge auto-reconnects
 
 ## Troubleshooting
 
@@ -133,8 +130,7 @@ Run `unityctl status` first to diagnose issues.
 | Problem | Solution |
 |---------|----------|
 | Bridge not responding | `unityctl bridge stop` then `unityctl bridge start` |
-| Commands timing out | Ensure Unity Editor is responsive |
+| Editor not connected to newly started bridge | Normal, editor plugin uses exponential backoff, up to 30 seconds |
 | Connection lost after compile | Normal - domain reload. Auto-reconnects. |
 | "Project not found" | Run from project directory or use `--project` flag |
 | Editor not found | Use `--unity-path` to specify Unity executable |
-| Compilation errors after refresh | `unityctl logs -n 50` to see errors |

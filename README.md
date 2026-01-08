@@ -4,17 +4,16 @@ Let AI agents drive the Unity Editor. Edit scripts, compile, play, screenshot, d
 
 ## What Can AI Do With This?
 
-### Edit, Compile, Check Logs
+### Edit and Compile
 
-An agent modifies your C# scripts, then sees the results:
+An agent modifies your C# scripts, then compiles:
 
 ```bash
 # Agent edits PlayerController.cs, then...
 unityctl asset refresh
-unityctl logs -n 20
 ```
 
-The agent sees compiler errors or success, iterates until it works.
+Compilation errors appear directly in the output. The agent iterates until it compiles.
 
 ### Play Mode + Screenshots
 
