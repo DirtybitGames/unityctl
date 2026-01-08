@@ -336,11 +336,6 @@ namespace UnityCtl
 
                 switch (request.Command)
                 {
-                    case UnityCtlCommands.ConsoleTail:
-                        // Console logs are buffered in the bridge
-                        result = new { };
-                        break;
-
                     case UnityCtlCommands.SceneList:
                         result = HandleSceneList(request);
                         break;
@@ -350,13 +345,29 @@ namespace UnityCtl
                         break;
 
                     case UnityCtlCommands.PlayEnter:
-                        EditorApplication.isPlaying = true;
-                        result = new PlayModeResult { State = PlayModeState.Playing };
+                        if (EditorApplication.isPlaying)
+                        {
+                            // Already in play mode - return current state immediately
+                            result = new PlayModeResult { State = "AlreadyPlaying" };
+                        }
+                        else
+                        {
+                            EditorApplication.isPlaying = true;
+                            result = new PlayModeResult { State = PlayModeState.Transitioning };
+                        }
                         break;
 
                     case UnityCtlCommands.PlayExit:
-                        EditorApplication.isPlaying = false;
-                        result = new PlayModeResult { State = PlayModeState.Stopped };
+                        if (!EditorApplication.isPlaying)
+                        {
+                            // Already stopped - return current state immediately
+                            result = new PlayModeResult { State = "AlreadyStopped" };
+                        }
+                        else
+                        {
+                            EditorApplication.isPlaying = false;
+                            result = new PlayModeResult { State = PlayModeState.Transitioning };
+                        }
                         break;
 
                     case UnityCtlCommands.PlayToggle:
@@ -378,11 +389,15 @@ namespace UnityCtl
                         result = HandleAssetImport(request);
                         break;
 
-                    case UnityCtlCommands.CompileScripts:
-                        // Refresh asset database first to pick up new scripts
+                    case UnityCtlCommands.AssetRefresh:
+                        // Lightweight refresh (like focusing editor)
                         AssetDatabase.Refresh();
-                        CompilationPipeline.RequestScriptCompilation();
-                        result = new CompileResult { Started = true };
+                        // Check if compilation was triggered after refresh
+                        var compilationTriggered = EditorApplication.isCompiling;
+                        // Check if there are existing compilation errors
+                        var hasCompilationErrors = EditorUtility.scriptCompilationFailed;
+                        SendAssetRefreshCompleteEvent(compilationTriggered, hasCompilationErrors);
+                        result = new { started = true, compilationTriggered, hasCompilationErrors };
                         break;
 
                     case UnityCtlCommands.MenuList:
@@ -1164,11 +1179,14 @@ namespace UnityCtl
                 _ => stateChange.ToString()
             };
 
+            // Check if compilation is triggered when entering edit mode (after exiting play mode with pending changes)
+            var compilationTriggered = stateChange == PlayModeStateChange.EnteredEditMode && EditorApplication.isCompiling;
+
             var eventMessage = new EventMessage
             {
                 Origin = MessageOrigin.Unity,
                 Event = UnityCtlEvents.PlayModeChanged,
-                Payload = new PlayModeChangedPayload { State = state }
+                Payload = new PlayModeChangedPayload { State = state, CompilationTriggered = compilationTriggered }
             };
 
             _ = SendMessageAsync(eventMessage);
@@ -1188,15 +1206,49 @@ namespace UnityCtl
             _ = SendMessageAsync(eventMessage);
         }
 
-        public void SendCompilationFinishedEvent(bool success)
+        public void SendCompilationFinishedEvent(bool success, System.Collections.Generic.List<UnityEditor.Compilation.CompilerMessage> messages = null)
         {
             if (!_isConnected) return;
+
+            // Convert CompilerMessages to our DTO format
+            CompilationMessageInfo[] errors = null;
+            CompilationMessageInfo[] warnings = null;
+
+            if (messages != null && messages.Count > 0)
+            {
+                var errorList = new System.Collections.Generic.List<CompilationMessageInfo>();
+                var warningList = new System.Collections.Generic.List<CompilationMessageInfo>();
+
+                foreach (var msg in messages)
+                {
+                    var info = new CompilationMessageInfo
+                    {
+                        File = msg.file,
+                        Line = msg.line,
+                        Column = msg.column,
+                        Message = msg.message
+                    };
+
+                    if (msg.type == UnityEditor.Compilation.CompilerMessageType.Error)
+                        errorList.Add(info);
+                    else
+                        warningList.Add(info);
+                }
+
+                if (errorList.Count > 0) errors = errorList.ToArray();
+                if (warningList.Count > 0) warnings = warningList.ToArray();
+            }
 
             var eventMessage = new EventMessage
             {
                 Origin = MessageOrigin.Unity,
                 Event = UnityCtlEvents.CompilationFinished,
-                Payload = new CompilationFinishedPayload { Success = success }
+                Payload = new CompilationFinishedPayload
+                {
+                    Success = success,
+                    Errors = errors,
+                    Warnings = warnings
+                }
             };
 
             _ = SendMessageAsync(eventMessage);
@@ -1249,6 +1301,24 @@ namespace UnityCtl
                 Origin = MessageOrigin.Unity,
                 Event = UnityCtlEvents.AssetReimportAllComplete,
                 Payload = new AssetReimportCompletePayload { Success = success }
+            };
+
+            _ = SendMessageAsync(eventMessage);
+        }
+
+        public void SendAssetRefreshCompleteEvent(bool compilationTriggered, bool hasCompilationErrors = false)
+        {
+            if (!_isConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.AssetRefreshComplete,
+                Payload = new AssetRefreshCompletePayload
+                {
+                    CompilationTriggered = compilationTriggered,
+                    HasCompilationErrors = hasCompilationErrors
+                }
             };
 
             _ = SendMessageAsync(eventMessage);

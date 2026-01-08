@@ -27,15 +27,15 @@ rootCommand.AddGlobalOption(jsonOption);
 
 // Add subcommands
 rootCommand.AddCommand(StatusCommand.CreateCommand());
-rootCommand.AddCommand(ConsoleCommands.CreateCommand());
 rootCommand.AddCommand(SceneCommands.CreateCommand());
 rootCommand.AddCommand(PlayCommands.CreateCommand());
 rootCommand.AddCommand(AssetCommands.CreateCommand());
-rootCommand.AddCommand(CompileCommands.CreateCommand());
 rootCommand.AddCommand(MenuCommands.CreateCommand());
 rootCommand.AddCommand(TestCommands.CreateCommand());
 rootCommand.AddCommand(ScreenshotCommands.CreateCommand());
 rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(BridgeCommands.CreateCommand());
+rootCommand.AddCommand(EditorCommands.CreateCommand());
+rootCommand.AddCommand(LogsCommand.CreateCommand());
 
 return await rootCommand.InvokeAsync(args);

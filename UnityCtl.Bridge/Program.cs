@@ -2,6 +2,7 @@ using System;
 using System.CommandLine;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -15,6 +16,7 @@ using UnityCtl.Protocol;
 
 var rootCommand = new RootCommand("UnityCtl Bridge - WebSocket bridge between CLI and Unity Editor");
 
+// Bridge options
 var projectOption = new Option<string>(
     "--project",
     "Path to Unity project root (optional, will auto-detect if not specified)"

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using UnityCtl.Protocol;
 
@@ -12,8 +13,17 @@ namespace UnityCtl.Bridge;
 public class BridgeState
 {
     private readonly object _lock = new();
-    private readonly List<LogEntry> _logBuffer = new();
+    private readonly List<UnifiedLogEntry> _unifiedLogBuffer = new();
     private const int MaxLogEntries = 1000;
+
+    // Sequence number and watermark for log clearing
+    private long _nextSequenceNumber = 0;
+    private long _clearWatermark = -1;  // -1 = no clear, show all logs
+    private DateTime? _clearTimestamp;
+    private string? _clearReason;
+
+    // Channels for log streaming (multiple subscribers supported)
+    private readonly List<Channel<UnifiedLogEntry>> _logSubscribers = new();
 
     public BridgeState(string projectId)
     {
@@ -35,6 +45,17 @@ public class BridgeState
     private static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(60);
 
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
+
+    public bool IsDomainReloadInProgress
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _isDomainReloadInProgress;
+            }
+        }
+    }
 
     public void SetUnityConnection(WebSocket? connection)
     {
@@ -136,52 +157,179 @@ public class BridgeState
         }
     }
 
+    #region Unified Logging
+
     /// <summary>
-    /// Check if grace period has expired and cancel operations if so
-    /// Call this periodically or when operations timeout
+    /// Add a console log entry (from Unity Debug.Log)
     /// </summary>
-    public void CheckGracePeriodExpired()
+    public void AddConsoleLogEntry(LogEntry logEntry)
+    {
+        var unified = new UnifiedLogEntry
+        {
+            Timestamp = logEntry.Timestamp,
+            Source = "console",
+            Level = logEntry.Level,
+            Message = logEntry.Message,
+            StackTrace = logEntry.StackTrace,
+            Color = logEntry.Level switch
+            {
+                "Error" or "Exception" => ConsoleColor.Red,
+                "Warning" => ConsoleColor.Yellow,
+                _ => null
+            }
+        };
+
+        AddUnifiedLogEntry(unified);
+    }
+
+    private void AddUnifiedLogEntry(UnifiedLogEntry entry)
     {
         lock (_lock)
         {
-            if (_isDomainReloadInProgress && DateTime.UtcNow > _domainReloadGracePeriodEnd)
+            // Assign sequence number
+            var sequencedEntry = new UnifiedLogEntry
             {
-                Console.WriteLine($"[Bridge] Domain reload grace period expired - Unity did not reconnect in time");
-                _isDomainReloadInProgress = false;
-                _domainReloadGracePeriodEnd = DateTime.MinValue;
-                CancelAllPendingOperations();
+                SequenceNumber = _nextSequenceNumber++,
+                Timestamp = entry.Timestamp,
+                Source = entry.Source,
+                Level = entry.Level,
+                Message = entry.Message,
+                StackTrace = entry.StackTrace,
+                Color = entry.Color
+            };
+
+            _unifiedLogBuffer.Add(sequencedEntry);
+            if (_unifiedLogBuffer.Count > MaxLogEntries)
+            {
+                _unifiedLogBuffer.RemoveAt(0);
+            }
+
+            // Notify all subscribers
+            foreach (var channel in _logSubscribers.ToArray())
+            {
+                // Non-blocking write - if channel is full, skip this entry for that subscriber
+                channel.Writer.TryWrite(sequencedEntry);
             }
         }
     }
 
-    public void AddLogEntry(LogEntry entry)
+    /// <summary>
+    /// Get recent unified logs, optionally filtered by source.
+    /// By default, only returns logs since the last clear (watermark).
+    /// Set ignoreWatermark=true to get full history.
+    /// Set count=0 to get all matching logs (no limit).
+    /// </summary>
+    public UnifiedLogEntry[] GetRecentUnifiedLogs(int count, string? source = null, bool ignoreWatermark = false)
     {
         lock (_lock)
         {
-            _logBuffer.Add(entry);
-            if (_logBuffer.Count > MaxLogEntries)
+            IEnumerable<UnifiedLogEntry> filtered = _unifiedLogBuffer;
+
+            // Apply watermark filter unless explicitly ignored
+            if (!ignoreWatermark && _clearWatermark >= 0)
             {
-                _logBuffer.RemoveAt(0);
+                filtered = filtered.Where(e => e.SequenceNumber >= _clearWatermark);
+            }
+
+            if (!string.IsNullOrEmpty(source) && source != "all")
+            {
+                filtered = filtered.Where(e => e.Source == source);
+            }
+
+            // count=0 means return all matching logs
+            if (count > 0)
+            {
+                return filtered.TakeLast(count).ToArray();
+            }
+            return filtered.ToArray();
+        }
+    }
+
+    #region Log Clearing
+
+    /// <summary>
+    /// Clear logs by setting watermark. Returns the new watermark value.
+    /// Logs before this watermark will be hidden by default (but still available via ignoreWatermark).
+    /// </summary>
+    public long ClearLogWatermark(string? reason = null)
+    {
+        lock (_lock)
+        {
+            _clearWatermark = _nextSequenceNumber;
+            _clearTimestamp = DateTime.Now;
+            _clearReason = reason;
+            return _clearWatermark;
+        }
+    }
+
+    /// <summary>
+    /// Get current watermark value. -1 means no clear applied.
+    /// </summary>
+    public long GetWatermark()
+    {
+        lock (_lock)
+        {
+            return _clearWatermark;
+        }
+    }
+
+    /// <summary>
+    /// Get information about the last clear operation.
+    /// Returns null if logs have never been cleared.
+    /// </summary>
+    public LogClearInfo? GetClearInfo()
+    {
+        lock (_lock)
+        {
+            if (_clearWatermark < 0 || _clearTimestamp == null)
+                return null;
+
+            return new LogClearInfo
+            {
+                Watermark = _clearWatermark,
+                Timestamp = _clearTimestamp.Value,
+                Reason = _clearReason
+            };
+        }
+    }
+
+    #endregion
+
+    /// <summary>
+    /// Subscribe to log stream. Returns a channel reader that yields new log entries.
+    /// </summary>
+    public ChannelReader<UnifiedLogEntry> SubscribeToLogs()
+    {
+        var channel = Channel.CreateBounded<UnifiedLogEntry>(new BoundedChannelOptions(100)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
+        lock (_lock)
+        {
+            _logSubscribers.Add(channel);
+        }
+
+        return channel.Reader;
+    }
+
+    /// <summary>
+    /// Unsubscribe from log stream
+    /// </summary>
+    public void UnsubscribeFromLogs(ChannelReader<UnifiedLogEntry> reader)
+    {
+        lock (_lock)
+        {
+            var channel = _logSubscribers.FirstOrDefault(c => c.Reader == reader);
+            if (channel != null)
+            {
+                _logSubscribers.Remove(channel);
+                channel.Writer.Complete();
             }
         }
     }
 
-    public LogEntry[] GetRecentLogs(int count)
-    {
-        lock (_lock)
-        {
-            var skip = Math.Max(0, _logBuffer.Count - count);
-            return _logBuffer.Skip(skip).ToArray();
-        }
-    }
-
-    public void ClearLogs()
-    {
-        lock (_lock)
-        {
-            _logBuffer.Clear();
-        }
-    }
+    #endregion
 
     public async Task<ResponseMessage> SendCommandToUnityAsync(RequestMessage request, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
@@ -239,12 +387,13 @@ public class BridgeState
     /// <summary>
     /// Wait for a specific event to be received from Unity
     /// </summary>
-    public async Task<EventMessage> WaitForEventAsync(string requestId, string eventName, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public async Task<EventMessage> WaitForEventAsync(string requestId, string eventName, TimeSpan timeout, CancellationToken cancellationToken = default, string? expectedState = null)
     {
         var tcs = new TaskCompletionSource<EventMessage>();
         var waiter = new PendingEventWaiter
         {
             EventName = eventName,
+            ExpectedState = expectedState,
             CompletionSource = tcs
         };
 
@@ -286,6 +435,18 @@ public class BridgeState
         {
             if (kvp.Value.EventName == eventMessage.Event)
             {
+                // If waiter has an expected state, check it matches
+                if (kvp.Value.ExpectedState != null)
+                {
+                    var payload = eventMessage.Payload as Newtonsoft.Json.Linq.JObject;
+                    var actualState = payload?["state"]?.ToString();
+                    if (actualState != kvp.Value.ExpectedState)
+                    {
+                        // State doesn't match, skip this event
+                        continue;
+                    }
+                }
+
                 kvp.Value.CompletionSource.TrySetResult(eventMessage);
                 completedWaiters.Add(kvp.Key);
             }
@@ -308,6 +469,7 @@ public class BridgeState
             waiter.CompletionSource.TrySetCanceled();
         }
     }
+
 }
 
 /// <summary>
@@ -316,5 +478,16 @@ public class BridgeState
 internal class PendingEventWaiter
 {
     public required string EventName { get; init; }
+    public string? ExpectedState { get; init; }  // Optional: only complete when payload.state matches
     public required TaskCompletionSource<EventMessage> CompletionSource { get; init; }
+}
+
+/// <summary>
+/// Information about the last log clear operation
+/// </summary>
+public class LogClearInfo
+{
+    public long Watermark { get; init; }
+    public DateTime Timestamp { get; init; }
+    public string? Reason { get; init; }
 }

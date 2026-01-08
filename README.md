@@ -4,17 +4,16 @@ Let AI agents drive the Unity Editor. Edit scripts, compile, play, screenshot, d
 
 ## What Can AI Do With This?
 
-### Edit, Compile, Check Logs
+### Edit and Compile
 
-An agent modifies your C# scripts, then sees the results:
+An agent modifies your C# scripts, then compiles:
 
 ```bash
 # Agent edits PlayerController.cs, then...
-unityctl compile scripts
-unityctl console tail --count 20
+unityctl asset refresh
 ```
 
-The agent sees compiler errors or success, iterates until it works.
+Compilation errors appear directly in the output. The agent iterates until it compiles.
 
 ### Play Mode + Screenshots
 
@@ -23,7 +22,7 @@ Enter play mode and capture what's happening:
 ```bash
 unityctl play enter
 unityctl screenshot capture
-unityctl console tail --count 50
+unityctl logs                 # shows all logs since last clear
 unityctl play exit
 ```
 
@@ -62,12 +61,18 @@ Add to your Unity project's `Packages/manifest.json`:
 
 **Quick start:** `unityctl bridge start`, open Unity, `unityctl status`
 
+**Or launch Unity via CLI:** `unityctl bridge start`, `unityctl editor run`, `unityctl status`
+
 **For Claude Code:** Copy [examples/unity-editor/SKILL.md](examples/unity-editor/SKILL.md) to `.claude/skills/` in your project.
 
 ## More Commands
 
 | Command | Description |
 |---------|-------------|
+| `unityctl editor run` | Launch Unity Editor (auto-detects version) |
+| `unityctl editor stop` | Stop running Unity Editor |
+| `unityctl asset refresh` | Refresh assets and trigger compilation |
+| `unityctl logs` | View logs since last clear (use `-n` to limit, `--full` for all history) |
 | `unityctl scene load <path>` | Load a scene |
 | `unityctl scene list` | List scenes in build settings |
 | `unityctl test run` | Run edit mode tests |

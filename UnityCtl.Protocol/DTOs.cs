@@ -1,3 +1,4 @@
+using System;
 using Newtonsoft.Json;
 
 namespace UnityCtl.Protocol;
@@ -12,12 +13,6 @@ public class HealthResult
 
     [JsonProperty("unityConnected")]
     public required bool UnityConnected { get; init; }
-}
-
-public class ConsoleTailResult
-{
-    [JsonProperty("entries")]
-    public required LogEntry[] Entries { get; init; }
 }
 
 public class LogEntry
@@ -68,22 +63,40 @@ public class AssetImportResult
     public required bool Success { get; init; }
 }
 
-public class CompileResult
-{
-    [JsonProperty("started")]
-    public required bool Started { get; init; }
-}
-
 public class CompilationFinishedPayload
 {
     [JsonProperty("success")]
     public required bool Success { get; init; }
+
+    [JsonProperty("errors")]
+    public CompilationMessageInfo[]? Errors { get; init; }
+
+    [JsonProperty("warnings")]
+    public CompilationMessageInfo[]? Warnings { get; init; }
+}
+
+public class CompilationMessageInfo
+{
+    [JsonProperty("file")]
+    public string? File { get; init; }
+
+    [JsonProperty("line")]
+    public int Line { get; init; }
+
+    [JsonProperty("column")]
+    public int Column { get; init; }
+
+    [JsonProperty("message")]
+    public string? Message { get; init; }
 }
 
 public class PlayModeChangedPayload
 {
     [JsonProperty("state")]
     public required string State { get; init; }
+
+    [JsonProperty("compilationTriggered")]
+    public bool CompilationTriggered { get; init; }
 }
 
 public class AssetImportCompletePayload
@@ -99,6 +112,15 @@ public class AssetReimportCompletePayload
 {
     [JsonProperty("success")]
     public required bool Success { get; init; }
+}
+
+public class AssetRefreshCompletePayload
+{
+    [JsonProperty("compilationTriggered")]
+    public bool CompilationTriggered { get; init; }
+
+    [JsonProperty("hasCompilationErrors")]
+    public bool HasCompilationErrors { get; init; }
 }
 
 public class MenuItemInfo
@@ -225,4 +247,31 @@ public class ProjectStatusResult
 
     [JsonProperty("unityConnectedToBridge")]
     public required bool UnityConnectedToBridge { get; init; }
+}
+
+/// <summary>
+/// Unified log entry that can come from either editor.log or console (Debug.Log)
+/// </summary>
+public class UnifiedLogEntry
+{
+    [JsonProperty("sequenceNumber")]
+    public long SequenceNumber { get; set; }
+
+    [JsonProperty("timestamp")]
+    public string Timestamp { get; set; } = "";
+
+    [JsonProperty("source")]
+    public string Source { get; set; } = "";  // "editor" or "console"
+
+    [JsonProperty("level")]
+    public string Level { get; set; } = "";   // "Log", "Warning", "Error", "Exception", or "Info" for editor
+
+    [JsonProperty("message")]
+    public string Message { get; set; } = "";
+
+    [JsonProperty("stackTrace")]
+    public string? StackTrace { get; set; }
+
+    [JsonProperty("color")]
+    public ConsoleColor? Color { get; set; }
 }

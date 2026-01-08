@@ -20,5 +20,7 @@ unity-project/*.sln
 
 # UnityCtl runtime
 **/.unityctl/bridge.json
+**/.unityctl/editor.log
+**/.unityctl/editor-prev.log
 
 **/.claude/settings.local.json

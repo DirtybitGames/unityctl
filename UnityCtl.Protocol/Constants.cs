@@ -2,13 +2,10 @@ namespace UnityCtl.Protocol;
 
 public static class UnityCtlCommands
 {
-    // Console
-    public const string ConsoleTail = "console.tail";
-
     // Assets & compilation
     public const string AssetImport = "asset.import";
     public const string AssetReimportAll = "asset.reimportAll";
-    public const string CompileScripts = "compile.scripts";
+    public const string AssetRefresh = "asset.refresh";
 
     // Scenes
     public const string SceneList = "scene.list";
@@ -42,6 +39,7 @@ public static class UnityCtlEvents
     public const string CompilationFinished = "compilation.finished";
     public const string AssetImportComplete = "asset.importComplete";
     public const string AssetReimportAllComplete = "asset.reimportAllComplete";
+    public const string AssetRefreshComplete = "asset.refreshComplete";
     public const string TestStarted = "test.started";
     public const string TestFinished = "test.finished";
     public const string DomainReloadStarting = "domain.reloadStarting";
