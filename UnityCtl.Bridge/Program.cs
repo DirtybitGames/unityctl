@@ -31,18 +31,6 @@ var portOption = new Option<int>(
 rootCommand.AddOption(projectOption);
 rootCommand.AddOption(portOption);
 
-// Add test-log subcommand
-var testLogCommand = new Command("test-log", "Test log filtering against a log file");
-var fileArg = new Argument<string>("file", "Path to the editor.log file to test");
-var showEventsOption = new Option<bool>("--show-events", "Show emitted events (compile.success, etc.)");
-testLogCommand.AddArgument(fileArg);
-testLogCommand.AddOption(showEventsOption);
-testLogCommand.SetHandler((string filePath, bool showEvents) =>
-{
-    TestLogFile(filePath, showEvents);
-}, fileArg, showEventsOption);
-rootCommand.AddCommand(testLogCommand);
-
 rootCommand.SetHandler(async (string? projectPath, int port) =>
 {
     // Find project root
@@ -145,24 +133,17 @@ rootCommand.SetHandler(async (string? projectPath, int port) =>
     var bridgeState = new BridgeState(projectId);
     builder.Services.AddSingleton(bridgeState);
 
-    // Editor log tailer disabled - using WebSocket events for completion detection instead
-    // var editorLogTailer = new EditorLogTailer(projectRoot, bridgeState);
-
     var app = builder.Build();
 
     // Configure endpoints
     app.UseWebSockets();
     BridgeEndpoints.MapEndpoints(app);
 
-    // Editor log tailer disabled
-    // editorLogTailer.Start();
-
     // Register shutdown handler to forcefully abort WebSocket connections
     var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
     lifetime.ApplicationStopping.Register(() =>
     {
         Console.WriteLine("Shutting down bridge...");
-        // editorLogTailer.Dispose();
         bridgeState.AbortUnityConnection();
     });
 
@@ -187,52 +168,4 @@ static int FindAvailablePort()
     {
         listener.Stop();
     }
-}
-
-static void TestLogFile(string filePath, bool showEvents)
-{
-    if (!File.Exists(filePath))
-    {
-        Console.Error.WriteLine($"Error: File not found: {filePath}");
-        Environment.Exit(1);
-        return;
-    }
-
-    Console.WriteLine($"Testing: {filePath}");
-    Console.WriteLine();
-
-    var analyzer = new LogAnalyzer();
-    var totalLines = 0;
-    var filteredLines = 0;
-
-    foreach (var line in File.ReadLines(filePath))
-    {
-        totalLines++;
-        var (filtered, evt) = analyzer.ParseLineWithEvent(line);
-
-        if (filtered != null)
-        {
-            filteredLines++;
-            if (filtered.Color.HasValue)
-            {
-                Console.ForegroundColor = filtered.Color.Value;
-            }
-            Console.WriteLine(filtered.Text);
-            Console.ResetColor();
-        }
-
-        if (showEvents && evt != null)
-        {
-            Console.ForegroundColor = ConsoleColor.Magenta;
-            var dataStr = evt.Data != null
-                ? $" ({string.Join(", ", evt.Data.Select(kv => $"{kv.Key}={kv.Value}"))})"
-                : "";
-            Console.WriteLine($"  >> EVENT: {evt.Type}{dataStr}");
-            Console.ResetColor();
-        }
-    }
-
-    Console.WriteLine();
-    var pct = totalLines > 0 ? (double)filteredLines / totalLines : 0;
-    Console.WriteLine($"Summary: {totalLines} lines -> {filteredLines} filtered ({pct:P1})");
 }

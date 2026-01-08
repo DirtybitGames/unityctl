@@ -187,15 +187,6 @@ public static class BridgeEndpoints
                 var hasConfig = CommandConfigs.TryGetValue(request.Command, out var config);
                 var timeout = hasConfig ? config!.Timeout : GetDefaultTimeout();
 
-                // Pre-register event waiters BEFORE sending command to avoid race condition
-                // (the event might fire before we start waiting)
-                LogEventWaiterHandle? logEventWaiter = null;
-                if (hasConfig && config!.LogCompletionEvents != null)
-                {
-                    var collectEvents = config.LogCollectEvents ?? [];
-                    logEventWaiter = state.RegisterLogEventWaiter(config.LogCompletionEvents, collectEvents);
-                }
-
                 // Special handling for play.enter - do asset refresh BEFORE entering play mode
                 if (request.Command == UnityCtlCommands.PlayEnter)
                 {
@@ -679,90 +670,12 @@ public static class BridgeEndpoints
                             Error = response.Error
                         };
                     }
-                    // If command has a log-based completion event, wait for it
-                    else if (logEventWaiter != null)
-                    {
-                        var logEvent = await logEventWaiter.WaitAsync(timeout, context.RequestAborted);
-
-                        // Get collected events (errors, warnings, compile.requested)
-                        var collectedEvents = logEventWaiter.CollectedEvents;
-                        var compileWasRequested = collectedEvents.Any(e => e.Type == LogEvents.CompileRequested);
-
-                        // If compilation was requested and we have secondary completion events, wait for them
-                        if (compileWasRequested && config?.LogSecondaryCompletionEvents != null)
-                        {
-                            // Continue waiting for compile result, still collecting errors/warnings
-                            var collectEvents = new[] { LogEvents.CompilerError, LogEvents.CompilerWarning };
-                            using var secondaryWaiter = state.RegisterLogEventWaiter(config.LogSecondaryCompletionEvents, collectEvents);
-                            var secondaryEvent = await secondaryWaiter.WaitAsync(timeout, context.RequestAborted);
-
-                            // Merge collected events from both waiters
-                            var allCollectedEvents = collectedEvents.Concat(secondaryWaiter.CollectedEvents).ToList();
-
-                            var errors = allCollectedEvents
-                                .Where(e => e.Type == LogEvents.CompilerError)
-                                .Select(e => e.Data)
-                                .ToArray();
-                            var warnings = allCollectedEvents
-                                .Where(e => e.Type == LogEvents.CompilerWarning)
-                                .Select(e => e.Data)
-                                .ToArray();
-
-                            // Create response with compilation results
-                            response = new ResponseMessage
-                            {
-                                Origin = response.Origin,
-                                RequestId = response.RequestId,
-                                Status = errors.Length > 0 ? ResponseStatus.Error : response.Status,
-                                Result = new
-                                {
-                                    completed = true,
-                                    eventType = secondaryEvent.Type,
-                                    data = secondaryEvent.Data,
-                                    errors = errors.Length > 0 ? errors : null,
-                                    warnings = warnings.Length > 0 ? warnings : null
-                                },
-                                Error = errors.Length > 0 ? new ErrorPayload { Code = "COMPILATION_ERROR", Message = $"{errors.Length} compilation error(s) detected" } : response.Error
-                            };
-                        }
-                        else
-                        {
-                            // No compilation requested - just refresh completed
-                            var errors = collectedEvents
-                                .Where(e => e.Type == LogEvents.CompilerError)
-                                .Select(e => e.Data)
-                                .ToArray();
-                            var warnings = collectedEvents
-                                .Where(e => e.Type == LogEvents.CompilerWarning)
-                                .Select(e => e.Data)
-                                .ToArray();
-
-                            // Create response with refresh results
-                            response = new ResponseMessage
-                            {
-                                Origin = response.Origin,
-                                RequestId = response.RequestId,
-                                Status = errors.Length > 0 ? ResponseStatus.Error : response.Status,
-                                Result = new
-                                {
-                                    completed = true,
-                                    eventType = logEvent.Type,
-                                    data = logEvent.Data,
-                                    errors = errors.Length > 0 ? errors : null,
-                                    warnings = warnings.Length > 0 ? warnings : null
-                                },
-                                Error = errors.Length > 0 ? new ErrorPayload { Code = "COMPILATION_ERROR", Message = $"{errors.Length} compilation error(s) detected" } : response.Error
-                            };
-                        }
-                    }
 
                     var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
                     return Results.Content(json, "application/json");
                 }
                 finally
                 {
-                    logEventWaiter?.Dispose();
-
                     // Clean up pre-registered compilation waiter if not used
                     if (compilationWaitTask != null && !compilationWaitTask.IsCompleted)
                     {
@@ -1039,7 +952,4 @@ internal class CommandConfig
     public required TimeSpan Timeout { get; init; }
     public string? CompletionEvent { get; init; }               // WebSocket event from Unity
     public string? CompletionEventState { get; init; }          // Expected state in payload to consider event complete (e.g., "EnteredPlayMode")
-    public string[]? LogCompletionEvents { get; init; }         // Log-based completion events from editor.log (first one to fire completes)
-    public string[]? LogCollectEvents { get; init; }            // Additional events to collect while waiting (e.g., errors)
-    public string[]? LogSecondaryCompletionEvents { get; init; } // If compile.requested was collected, wait for these after primary completion
 }

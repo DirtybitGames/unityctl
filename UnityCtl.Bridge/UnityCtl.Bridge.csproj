@@ -21,8 +21,4 @@
     <ProjectReference Include="..\UnityCtl.Protocol\UnityCtl.Protocol.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="log_rules.json" />
-  </ItemGroup>
-
 </Project>

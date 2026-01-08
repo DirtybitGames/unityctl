@@ -74,19 +74,3 @@ public static class LogLevel
     public const string Error = "Error";
     public const string Exception = "Exception";
 }
-
-/// <summary>
-/// Log-based events detected from editor.log patterns.
-/// These are defined in log_rules.json with emit_event.
-/// </summary>
-public static class LogEvents
-{
-    public const string RefreshComplete = "refresh.complete";
-    public const string CompilerError = "compiler.error";
-    public const string CompilerWarning = "compiler.warning";
-    public const string CompileRequested = "compile.requested";
-    public const string CompileSuccess = "compile.success";
-    public const string CompileFail = "compile.fail";
-    public const string PlayModeEnter = "playmode.enter";
-    public const string PlayModeExit = "playmode.exit";
-}
