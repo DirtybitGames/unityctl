@@ -42,6 +42,7 @@ public static class UnityCtlEvents
     public const string CompilationFinished = "compilation.finished";
     public const string AssetImportComplete = "asset.importComplete";
     public const string AssetReimportAllComplete = "asset.reimportAllComplete";
+    public const string AssetRefreshComplete = "asset.refreshComplete";
     public const string TestStarted = "test.started";
     public const string TestFinished = "test.finished";
     public const string DomainReloadStarting = "domain.reloadStarting";

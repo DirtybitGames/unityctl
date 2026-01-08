@@ -78,12 +78,36 @@ public class CompilationFinishedPayload
 {
     [JsonProperty("success")]
     public required bool Success { get; init; }
+
+    [JsonProperty("errors")]
+    public CompilationMessageInfo[]? Errors { get; init; }
+
+    [JsonProperty("warnings")]
+    public CompilationMessageInfo[]? Warnings { get; init; }
+}
+
+public class CompilationMessageInfo
+{
+    [JsonProperty("file")]
+    public string? File { get; init; }
+
+    [JsonProperty("line")]
+    public int Line { get; init; }
+
+    [JsonProperty("column")]
+    public int Column { get; init; }
+
+    [JsonProperty("message")]
+    public string? Message { get; init; }
 }
 
 public class PlayModeChangedPayload
 {
     [JsonProperty("state")]
     public required string State { get; init; }
+
+    [JsonProperty("compilationTriggered")]
+    public bool CompilationTriggered { get; init; }
 }
 
 public class AssetImportCompletePayload
@@ -99,6 +123,15 @@ public class AssetReimportCompletePayload
 {
     [JsonProperty("success")]
     public required bool Success { get; init; }
+}
+
+public class AssetRefreshCompletePayload
+{
+    [JsonProperty("compilationTriggered")]
+    public bool CompilationTriggered { get; init; }
+
+    [JsonProperty("hasCompilationErrors")]
+    public bool HasCompilationErrors { get; init; }
 }
 
 public class MenuItemInfo

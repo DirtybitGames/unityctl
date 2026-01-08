@@ -26,7 +26,7 @@ public static class LogsCommand
 
         var sourceOption = new Option<string>(
             "--source",
-            getDefaultValue: () => "editor",
+            getDefaultValue: () => "console",
             "Filter by source: editor, console, all");
 
         var noColorOption = new Option<bool>(
@@ -53,7 +53,7 @@ public static class LogsCommand
             var projectPath = ContextHelper.GetProjectPath(context);
             var follow = context.ParseResult.GetValueForOption(followOption);
             var lines = context.ParseResult.GetValueForOption(linesOption);
-            var source = context.ParseResult.GetValueForOption(sourceOption) ?? "all";
+            var source = context.ParseResult.GetValueForOption(sourceOption) ?? "console";
             var noColor = context.ParseResult.GetValueForOption(noColorOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var full = context.ParseResult.GetValueForOption(fullOption);

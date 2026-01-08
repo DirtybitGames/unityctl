@@ -395,9 +395,14 @@ namespace UnityCtl
                         break;
 
                     case UnityCtlCommands.AssetRefresh:
-                        // Lightweight refresh (like focusing editor) - completion detected via log
+                        // Lightweight refresh (like focusing editor)
                         AssetDatabase.Refresh();
-                        result = new { started = true };
+                        // Check if compilation was triggered after refresh
+                        var compilationTriggered = EditorApplication.isCompiling;
+                        // Check if there are existing compilation errors
+                        var hasCompilationErrors = EditorUtility.scriptCompilationFailed;
+                        SendAssetRefreshCompleteEvent(compilationTriggered, hasCompilationErrors);
+                        result = new { started = true, compilationTriggered, hasCompilationErrors };
                         break;
 
                     case UnityCtlCommands.MenuList:
@@ -1179,11 +1184,14 @@ namespace UnityCtl
                 _ => stateChange.ToString()
             };
 
+            // Check if compilation is triggered when entering edit mode (after exiting play mode with pending changes)
+            var compilationTriggered = stateChange == PlayModeStateChange.EnteredEditMode && EditorApplication.isCompiling;
+
             var eventMessage = new EventMessage
             {
                 Origin = MessageOrigin.Unity,
                 Event = UnityCtlEvents.PlayModeChanged,
-                Payload = new PlayModeChangedPayload { State = state }
+                Payload = new PlayModeChangedPayload { State = state, CompilationTriggered = compilationTriggered }
             };
 
             _ = SendMessageAsync(eventMessage);
@@ -1203,15 +1211,49 @@ namespace UnityCtl
             _ = SendMessageAsync(eventMessage);
         }
 
-        public void SendCompilationFinishedEvent(bool success)
+        public void SendCompilationFinishedEvent(bool success, System.Collections.Generic.List<UnityEditor.Compilation.CompilerMessage> messages = null)
         {
             if (!_isConnected) return;
+
+            // Convert CompilerMessages to our DTO format
+            CompilationMessageInfo[] errors = null;
+            CompilationMessageInfo[] warnings = null;
+
+            if (messages != null && messages.Count > 0)
+            {
+                var errorList = new System.Collections.Generic.List<CompilationMessageInfo>();
+                var warningList = new System.Collections.Generic.List<CompilationMessageInfo>();
+
+                foreach (var msg in messages)
+                {
+                    var info = new CompilationMessageInfo
+                    {
+                        File = msg.file,
+                        Line = msg.line,
+                        Column = msg.column,
+                        Message = msg.message
+                    };
+
+                    if (msg.type == UnityEditor.Compilation.CompilerMessageType.Error)
+                        errorList.Add(info);
+                    else
+                        warningList.Add(info);
+                }
+
+                if (errorList.Count > 0) errors = errorList.ToArray();
+                if (warningList.Count > 0) warnings = warningList.ToArray();
+            }
 
             var eventMessage = new EventMessage
             {
                 Origin = MessageOrigin.Unity,
                 Event = UnityCtlEvents.CompilationFinished,
-                Payload = new CompilationFinishedPayload { Success = success }
+                Payload = new CompilationFinishedPayload
+                {
+                    Success = success,
+                    Errors = errors,
+                    Warnings = warnings
+                }
             };
 
             _ = SendMessageAsync(eventMessage);
@@ -1264,6 +1306,24 @@ namespace UnityCtl
                 Origin = MessageOrigin.Unity,
                 Event = UnityCtlEvents.AssetReimportAllComplete,
                 Payload = new AssetReimportCompletePayload { Success = success }
+            };
+
+            _ = SendMessageAsync(eventMessage);
+        }
+
+        public void SendAssetRefreshCompleteEvent(bool compilationTriggered, bool hasCompilationErrors = false)
+        {
+            if (!_isConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.AssetRefreshComplete,
+                Payload = new AssetRefreshCompletePayload
+                {
+                    CompilationTriggered = compilationTriggered,
+                    HasCompilationErrors = hasCompilationErrors
+                }
             };
 
             _ = SendMessageAsync(eventMessage);

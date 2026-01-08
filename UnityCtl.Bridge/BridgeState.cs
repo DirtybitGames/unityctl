@@ -61,6 +61,17 @@ public class BridgeState
 
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
 
+    public bool IsDomainReloadInProgress
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _isDomainReloadInProgress;
+            }
+        }
+    }
+
     public void SetUnityConnection(WebSocket? connection)
     {
         lock (_lock)
@@ -476,12 +487,13 @@ public class BridgeState
     /// <summary>
     /// Wait for a specific event to be received from Unity
     /// </summary>
-    public async Task<EventMessage> WaitForEventAsync(string requestId, string eventName, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public async Task<EventMessage> WaitForEventAsync(string requestId, string eventName, TimeSpan timeout, CancellationToken cancellationToken = default, string? expectedState = null)
     {
         var tcs = new TaskCompletionSource<EventMessage>();
         var waiter = new PendingEventWaiter
         {
             EventName = eventName,
+            ExpectedState = expectedState,
             CompletionSource = tcs
         };
 
@@ -523,6 +535,18 @@ public class BridgeState
         {
             if (kvp.Value.EventName == eventMessage.Event)
             {
+                // If waiter has an expected state, check it matches
+                if (kvp.Value.ExpectedState != null)
+                {
+                    var payload = eventMessage.Payload as Newtonsoft.Json.Linq.JObject;
+                    var actualState = payload?["state"]?.ToString();
+                    if (actualState != kvp.Value.ExpectedState)
+                    {
+                        // State doesn't match, skip this event
+                        continue;
+                    }
+                }
+
                 kvp.Value.CompletionSource.TrySetResult(eventMessage);
                 completedWaiters.Add(kvp.Key);
             }
@@ -637,6 +661,7 @@ public class BridgeState
 internal class PendingEventWaiter
 {
     public required string EventName { get; init; }
+    public string? ExpectedState { get; init; }  // Optional: only complete when payload.state matches
     public required TaskCompletionSource<EventMessage> CompletionSource { get; init; }
 }
 
