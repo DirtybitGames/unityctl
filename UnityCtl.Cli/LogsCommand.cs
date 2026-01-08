@@ -26,7 +26,7 @@ public static class LogsCommand
 
         var sourceOption = new Option<string>(
             "--source",
-            getDefaultValue: () => "console",
+            getDefaultValue: () => "editor",
             "Filter by source: editor, console, all");
 
         var noColorOption = new Option<bool>(
@@ -334,15 +334,4 @@ internal class LogsTailResult
     public long Watermark { get; set; }
     public string? ClearedAt { get; set; }
     public string? ClearReason { get; set; }
-}
-
-internal class UnifiedLogEntry
-{
-    public long SequenceNumber { get; set; }
-    public string Timestamp { get; set; } = "";
-    public string Source { get; set; } = "";
-    public string Level { get; set; } = "";
-    public string Message { get; set; } = "";
-    public string? StackTrace { get; set; }
-    public ConsoleColor? Color { get; set; }
 }

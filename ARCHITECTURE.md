@@ -52,7 +52,8 @@ Shared library (netstandard2.1) containing all message types and shared logic.
 1. **HTTP Server** - Handles CLI requests
    - `GET /health` - Health check
    - `POST /rpc` - Execute commands
-   - `GET /console/tail?lines=N` - Get recent logs
+   - `GET /logs/tail?lines=N&source=S` - Get recent logs
+   - `GET /logs/stream` - SSE log streaming
 
 2. **WebSocket Server** - Maintains connection with Unity
    - `WS /unity` - Persistent connection

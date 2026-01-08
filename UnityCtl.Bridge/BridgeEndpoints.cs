@@ -17,6 +17,11 @@ namespace UnityCtl.Bridge;
 
 public static class BridgeEndpoints
 {
+    // Internal timeout constants (not user-configurable)
+    private static readonly TimeSpan StatusCheckTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ShortEventTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan CompilationWaitTimeout = TimeSpan.FromSeconds(2);
+
     // Command timeout configuration (in seconds, configurable via environment variables)
     private static readonly Dictionary<string, CommandConfig> CommandConfigs = new()
     {
@@ -82,20 +87,6 @@ public static class BridgeEndpoints
                 ProjectId = state.ProjectId,
                 UnityConnected = state.IsUnityConnected
             };
-        });
-
-        // Console tail endpoint
-        app.MapGet("/console/tail", ([FromQuery] int lines = 50) =>
-        {
-            var entries = state.GetRecentLogs(lines);
-            return new ConsoleTailResult { Entries = entries };
-        });
-
-        // Console clear endpoint
-        app.MapPost("/console/clear", () =>
-        {
-            state.ClearLogs();
-            return new { success = true, message = "Console cleared" };
         });
 
         // Unified logs tail endpoint
@@ -345,7 +336,7 @@ public static class BridgeEndpoints
                                 Command = UnityCtlCommands.PlayStatus,
                                 Args = null
                             };
-                            var loopStatusResponse = await state.SendCommandToUnityAsync(loopStatusRequest, TimeSpan.FromSeconds(5), context.RequestAborted);
+                            var loopStatusResponse = await state.SendCommandToUnityAsync(loopStatusRequest, StatusCheckTimeout, context.RequestAborted);
                             var currentPlayState = (loopStatusResponse.Result as JObject)?["state"]?.ToString();
 
                             Console.WriteLine($"[Bridge] Current play status: {currentPlayState}");
@@ -374,7 +365,7 @@ public static class BridgeEndpoints
                         }
 
                         // Pre-register event waiter for play mode changes
-                        var shortTimeout = TimeSpan.FromSeconds(10);
+                        var shortTimeout = ShortEventTimeout;
                         var playEnterWaitTask = state.WaitForEventAsync(
                             requestMessage.RequestId + "_" + Guid.NewGuid().ToString("N")[..8],
                             UnityCtlEvents.PlayModeChanged,
@@ -386,7 +377,7 @@ public static class BridgeEndpoints
                         ResponseMessage playEnterResponse;
                         try
                         {
-                            playEnterResponse = await state.SendCommandToUnityAsync(requestMessage, TimeSpan.FromSeconds(5), context.RequestAborted);
+                            playEnterResponse = await state.SendCommandToUnityAsync(requestMessage, StatusCheckTimeout, context.RequestAborted);
                         }
                         catch (TimeoutException)
                         {
@@ -564,9 +555,9 @@ public static class BridgeEndpoints
                         // (compilation events come AFTER ExitingPlayMode but BEFORE DomainReloadStarting)
                         if (!compilationTriggered && compilationWaitTask != null)
                         {
-                            // Wait up to 2 seconds for compilation.finished to arrive
+                            // Wait briefly for compilation.finished to arrive
                             // (compilation events come shortly after ExitingPlayMode)
-                            var waitTask = Task.Delay(2000, context.RequestAborted);
+                            var waitTask = Task.Delay(CompilationWaitTimeout, context.RequestAborted);
                             var completedTask = await Task.WhenAny(compilationWaitTask, waitTask);
 
                             if (completedTask == compilationWaitTask && compilationWaitTask.IsCompletedSuccessfully)

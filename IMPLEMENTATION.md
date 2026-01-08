@@ -39,7 +39,9 @@ Successfully implemented a complete remote control system for Unity Editor based
 
 **Endpoints:**
 - `GET /health` - Health check with Unity connection status
-- `GET /console/tail?lines=N` - Recent console logs
+- `GET /logs/tail?lines=N&source=S` - Recent logs (source: editor, console, all)
+- `POST /logs/clear` - Clear log watermark
+- `GET /logs/stream` - SSE log streaming
 - `POST /rpc` - RPC commands to Unity
 - `GET /unity` (WebSocket) - Unity Editor connection endpoint
 
@@ -59,18 +61,21 @@ Successfully implemented a complete remote control system for Unity Editor based
 **Files:**
 - `Program.cs` - Main CLI with global options
 - `BridgeClient.cs` - HTTP client for bridge communication
-- `ConsoleCommands.cs` - Console log commands
+- `LogsCommand.cs` - Unified log viewing commands
 - `SceneCommands.cs` - Scene management commands
 - `PlayCommands.cs` - Play mode commands
 - `AssetCommands.cs` - Asset management commands
 - `BridgeCommands.cs` - Bridge management commands
+- `EditorCommands.cs` - Editor run/stop commands
 - `Binders.cs` - Global option binders
 
 **Commands Implemented:**
 ```bash
 unityctl bridge status          # Check bridge status
 unityctl bridge start           # Start bridge daemon
-unityctl console tail           # View console logs
+unityctl logs -n 50             # View logs (editor/console)
+unityctl logs -f                # Stream logs
+unityctl logs clear             # Clear log history
 unityctl scene list             # List scenes
 unityctl scene load <path>      # Load a scene
 unityctl play enter/exit/toggle # Control play mode
@@ -98,7 +103,6 @@ unityctl asset refresh          # Refresh assets (triggers compilation if needed
 - `Plugins/UnityCtl.Protocol.dll` - Protocol library
 
 **Commands Handled:**
-- `console.tail` - Log buffering
 - `scene.list` - List build settings or all scenes
 - `scene.load` - Load scene (single/additive)
 - `play.enter/exit/toggle/status` - Play mode control
@@ -146,10 +150,11 @@ unityctl/
 │   ├── Program.cs
 │   ├── BridgeClient.cs
 │   ├── Binders.cs
-│   ├── ConsoleCommands.cs
+│   ├── LogsCommand.cs
 │   ├── SceneCommands.cs
 │   ├── PlayCommands.cs
 │   ├── AssetCommands.cs
+│   ├── EditorCommands.cs
 │   └── BridgeCommands.cs
 ├── UnityCtl.UnityPackage/        # Unity UPM package
 │   ├── package.json
@@ -246,7 +251,7 @@ dotnet tool install -g UnityCtl.Bridge --add-source ./artifacts
    unityctl --project ./unity-project bridge status
    unityctl --project ./unity-project play enter
    unityctl --project ./unity-project scene list
-   unityctl --project ./unity-project console tail --lines 20
+   unityctl --project ./unity-project logs -n 20
    ```
 
 ## Testing
@@ -304,7 +309,7 @@ The implementation includes a test Unity project at `unity-project/` with the Un
 
 ✅ All goals from bootstrap.md achieved:
 - Control running Unity 6.0 editor from CLI
-- Read console logs
+- Read console and editor logs
 - Trigger asset import and script compilation
 - List and load scenes
 - Enter / exit / toggle play mode
@@ -314,7 +319,6 @@ The implementation includes a test Unity project at `unity-project/` with the Un
 - Non-intrusive to teammates
 
 ✅ All wire protocol commands implemented:
-- console.tail
 - asset.import, asset.reimportAll (not exposed in CLI yet), asset.refresh
 - scene.list, scene.load
 - play.enter, play.exit, play.toggle, play.status

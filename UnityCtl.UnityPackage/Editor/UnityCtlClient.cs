@@ -336,11 +336,6 @@ namespace UnityCtl
 
                 switch (request.Command)
                 {
-                    case UnityCtlCommands.ConsoleTail:
-                        // Console logs are buffered in the bridge
-                        result = new { };
-                        break;
-
                     case UnityCtlCommands.SceneList:
                         result = HandleSceneList(request);
                         break;

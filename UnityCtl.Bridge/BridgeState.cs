@@ -10,25 +10,10 @@ using UnityCtl.Protocol;
 
 namespace UnityCtl.Bridge;
 
-/// <summary>
-/// Unified log entry that can come from either editor.log or console (Debug.Log)
-/// </summary>
-public class UnifiedLogEntry
-{
-    public long SequenceNumber { get; init; }
-    public required string Timestamp { get; init; }
-    public required string Source { get; init; }  // "editor" or "console"
-    public required string Level { get; init; }   // "Log", "Warning", "Error", "Exception", or "Info" for editor
-    public required string Message { get; init; }
-    public string? StackTrace { get; init; }
-    public ConsoleColor? Color { get; init; }
-}
-
 public class BridgeState
 {
     private readonly object _lock = new();
-    private readonly List<LogEntry> _logBuffer = new();  // Console logs (backward compat)
-    private readonly List<UnifiedLogEntry> _unifiedLogBuffer = new();  // Unified logs
+    private readonly List<UnifiedLogEntry> _unifiedLogBuffer = new();
     private const int MaxLogEntries = 1000;
 
     // Sequence number and watermark for log clearing
@@ -172,77 +157,13 @@ public class BridgeState
         }
     }
 
-    /// <summary>
-    /// Check if grace period has expired and cancel operations if so
-    /// Call this periodically or when operations timeout
-    /// </summary>
-    public void CheckGracePeriodExpired()
-    {
-        lock (_lock)
-        {
-            if (_isDomainReloadInProgress && DateTime.UtcNow > _domainReloadGracePeriodEnd)
-            {
-                Console.WriteLine($"[Bridge] Domain reload grace period expired - Unity did not reconnect in time");
-                _isDomainReloadInProgress = false;
-                _domainReloadGracePeriodEnd = DateTime.MinValue;
-                CancelAllPendingOperations();
-            }
-        }
-    }
-
-    public LogEntry[] GetRecentLogs(int count)
-    {
-        lock (_lock)
-        {
-            var skip = Math.Max(0, _logBuffer.Count - count);
-            return _logBuffer.Skip(skip).ToArray();
-        }
-    }
-
-    public void ClearLogs()
-    {
-        lock (_lock)
-        {
-            _logBuffer.Clear();
-            _unifiedLogBuffer.Clear();
-        }
-    }
-
     #region Unified Logging
 
     /// <summary>
-    /// Add an editor log entry (from editor.log file)
-    /// </summary>
-    public void AddEditorLogEntry(string message, string level = "Info", ConsoleColor? color = null)
-    {
-        var entry = new UnifiedLogEntry
-        {
-            Timestamp = DateTime.Now.ToString("o"),
-            Source = "editor",
-            Level = level,
-            Message = message,
-            Color = color
-        };
-
-        AddUnifiedLogEntry(entry);
-    }
-
-    /// <summary>
-    /// Add a console log entry (from Unity Debug.Log) - also adds to unified buffer
+    /// Add a console log entry (from Unity Debug.Log)
     /// </summary>
     public void AddConsoleLogEntry(LogEntry logEntry)
     {
-        // Add to legacy buffer for backward compatibility
-        lock (_lock)
-        {
-            _logBuffer.Add(logEntry);
-            if (_logBuffer.Count > MaxLogEntries)
-            {
-                _logBuffer.RemoveAt(0);
-            }
-        }
-
-        // Also add to unified buffer
         var unified = new UnifiedLogEntry
         {
             Timestamp = logEntry.Timestamp,

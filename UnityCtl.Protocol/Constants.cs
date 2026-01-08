@@ -2,9 +2,6 @@ namespace UnityCtl.Protocol;
 
 public static class UnityCtlCommands
 {
-    // Console
-    public const string ConsoleTail = "console.tail";
-
     // Assets & compilation
     public const string AssetImport = "asset.import";
     public const string AssetReimportAll = "asset.reimportAll";
