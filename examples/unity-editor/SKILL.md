@@ -58,6 +58,7 @@ unityctl play toggle      # Toggle play mode
 unityctl logs                 # Show all logs since last clear (auto-clears on play enter and compile)
 unityctl logs -n 50           # Limit to last 50 entries
 unityctl logs --full          # Show full history (ignore clear boundary)
+unityctl logs --stack         # Show stack traces for log entries
 ```
 
 **Scenes:**
