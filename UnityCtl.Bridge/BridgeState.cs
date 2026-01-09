@@ -34,6 +34,28 @@ public class BridgeState
 
     public WebSocket? UnityConnection { get; private set; }
 
+    // Store Unity's HelloMessage for version info queries
+    private HelloMessage? _unityHelloMessage;
+
+    public HelloMessage? UnityHelloMessage
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _unityHelloMessage;
+            }
+        }
+    }
+
+    public void SetUnityHelloMessage(HelloMessage? hello)
+    {
+        lock (_lock)
+        {
+            _unityHelloMessage = hello;
+        }
+    }
+
     public ConcurrentDictionary<string, TaskCompletionSource<ResponseMessage>> PendingRequests { get; } = new();
 
     // Track requests waiting for completion events
@@ -65,6 +87,9 @@ public class BridgeState
 
             if (connection == null)
             {
+                // Clear hello message when Unity disconnects
+                _unityHelloMessage = null;
+
                 // Unity disconnected - check if we're in domain reload grace period
                 if (_isDomainReloadInProgress)
                 {

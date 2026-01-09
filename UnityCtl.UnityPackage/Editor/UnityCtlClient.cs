@@ -175,10 +175,29 @@ namespace UnityCtl
                 UnityVersion = Application.unityVersion,
                 EditorInstanceId = SystemInfo.deviceUniqueIdentifier,
                 Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu", "test" },
-                ProtocolVersion = "1.0.0"
+                ProtocolVersion = "1.0.0",
+                PluginVersion = GetPluginVersion()
             };
 
             await SendMessageAsync(hello);
+        }
+
+        private static string GetPluginVersion()
+        {
+            try
+            {
+                // Use Unity's PackageManager API to get the package version
+                var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(UnityCtlClient).Assembly);
+                if (packageInfo != null)
+                {
+                    return packageInfo.version;
+                }
+            }
+            catch
+            {
+                // Ignore errors
+            }
+            return "unknown";
         }
 
         private async Task ReceiveLoopAsync(CancellationToken cancellationToken)

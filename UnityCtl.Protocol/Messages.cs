@@ -33,6 +33,9 @@ public class HelloMessage : BaseMessage
 
     [JsonProperty("protocolVersion")]
     public string? ProtocolVersion { get; init; }
+
+    [JsonProperty("pluginVersion")]
+    public string? PluginVersion { get; init; }
 }
 
 public class RequestMessage : BaseMessage
@@ -108,7 +111,8 @@ public class BaseMessageConverter : JsonConverter<BaseMessage>
                 UnityVersion = jObject["unityVersion"]?.ToString(),
                 EditorInstanceId = jObject["editorInstanceId"]?.ToString(),
                 Capabilities = jObject["capabilities"]?.ToObject<string[]>(),
-                ProtocolVersion = jObject["protocolVersion"]?.ToString()
+                ProtocolVersion = jObject["protocolVersion"]?.ToString(),
+                PluginVersion = jObject["pluginVersion"]?.ToString()
             },
             "request" => new RequestMessage
             {
@@ -182,6 +186,11 @@ public class BaseMessageConverter : JsonConverter<BaseMessage>
                 {
                     writer.WritePropertyName("protocolVersion");
                     writer.WriteValue(hello.ProtocolVersion);
+                }
+                if (hello.PluginVersion != null)
+                {
+                    writer.WritePropertyName("pluginVersion");
+                    writer.WriteValue(hello.PluginVersion);
                 }
                 break;
 

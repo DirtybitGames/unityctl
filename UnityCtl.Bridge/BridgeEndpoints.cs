@@ -81,11 +81,14 @@ public static class BridgeEndpoints
         // Health endpoint
         app.MapGet("/health", () =>
         {
+            var unityHello = state.UnityHelloMessage;
             return new HealthResult
             {
                 Status = "ok",
                 ProjectId = state.ProjectId,
-                UnityConnected = state.IsUnityConnected
+                UnityConnected = state.IsUnityConnected,
+                BridgeVersion = VersionInfo.Version,
+                UnityPluginVersion = unityHello?.PluginVersion
             };
         });
 
@@ -829,10 +832,14 @@ public static class BridgeEndpoints
             return;
         }
 
+        // Store hello message for version info queries
+        state.SetUnityHelloMessage(hello);
+
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Hello from Unity");
         Console.WriteLine($"  Project ID: {hello.ProjectId}");
         Console.WriteLine($"  Unity Version: {hello.UnityVersion}");
         Console.WriteLine($"  Protocol Version: {hello.ProtocolVersion}");
+        Console.WriteLine($"  Plugin Version: {hello.PluginVersion ?? "unknown"}");
 
         // Send hello response
         var response = new ResponseMessage

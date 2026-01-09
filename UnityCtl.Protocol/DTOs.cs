@@ -13,6 +13,12 @@ public class HealthResult
 
     [JsonProperty("unityConnected")]
     public required bool UnityConnected { get; init; }
+
+    [JsonProperty("bridgeVersion")]
+    public string? BridgeVersion { get; init; }
+
+    [JsonProperty("unityPluginVersion")]
+    public string? UnityPluginVersion { get; init; }
 }
 
 public class LogEntry

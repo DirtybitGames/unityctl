@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
@@ -38,6 +39,7 @@ public static class StatusCommand
             var bridgeConfigured = bridgeConfig != null;
             var bridgeRunning = false;
             var unityConnected = false;
+            HealthResult? health = null;
 
             if (bridgeConfig != null)
             {
@@ -64,7 +66,7 @@ public static class StatusCommand
                     try
                     {
                         var client = new BridgeClient($"http://localhost:{bridgeConfig.Port}");
-                        var health = await client.GetAsync<HealthResult>("/health");
+                        health = await client.GetAsync<HealthResult>("/health");
                         if (health != null)
                         {
                             unityConnected = health.UnityConnected;
@@ -93,18 +95,37 @@ public static class StatusCommand
 
             if (json)
             {
-                Console.WriteLine(JsonHelper.Serialize(result));
+                // Include version info in JSON output
+                var jsonResult = new
+                {
+                    result.ProjectPath,
+                    result.ProjectId,
+                    result.UnityEditorRunning,
+                    result.UnityEditorStatus,
+                    result.BridgeConfigured,
+                    result.BridgeRunning,
+                    result.BridgePort,
+                    result.BridgePid,
+                    result.UnityConnectedToBridge,
+                    Versions = health != null ? new
+                    {
+                        Cli = VersionInfo.Version,
+                        Bridge = health.BridgeVersion,
+                        UnityPlugin = health.UnityPluginVersion
+                    } : null
+                };
+                Console.WriteLine(JsonHelper.Serialize(jsonResult));
             }
             else
             {
-                PrintHumanReadableStatus(result, unityStatus.Message);
+                PrintHumanReadableStatus(result, unityStatus.Message, health);
             }
         });
 
         return statusCommand;
     }
 
-    private static void PrintHumanReadableStatus(ProjectStatusResult status, string? unityStatusMessage)
+    private static void PrintHumanReadableStatus(ProjectStatusResult status, string? unityStatusMessage, HealthResult? health)
     {
         Console.WriteLine("Project Status:");
         Console.WriteLine($"  Path: {status.ProjectPath}");
@@ -170,5 +191,72 @@ public static class StatusCommand
                 }
             }
         }
+
+        // Version information
+        if (health != null)
+        {
+            Console.WriteLine();
+            PrintVersionInfo(health);
+        }
+    }
+
+    private static void PrintVersionInfo(HealthResult health)
+    {
+        var cliVersion = VersionInfo.Version;
+        var bridgeVersion = health.BridgeVersion;
+        var pluginVersion = health.UnityPluginVersion;
+
+        // Compare base versions (strip build metadata after '+')
+        var cliBase = GetBaseVersion(cliVersion);
+        var bridgeBase = GetBaseVersion(bridgeVersion);
+        var pluginBase = GetBaseVersion(pluginVersion);
+
+        // Check for mismatches
+        var hasMismatch = false;
+
+        if (bridgeBase != null && bridgeBase != cliBase)
+        {
+            hasMismatch = true;
+        }
+
+        if (pluginBase != null && pluginBase != cliBase)
+        {
+            hasMismatch = true;
+        }
+
+        if (pluginBase != null && bridgeBase != null && pluginBase != bridgeBase)
+        {
+            hasMismatch = true;
+        }
+
+        if (!hasMismatch)
+        {
+            // All versions match - show single line
+            if (pluginBase != null)
+            {
+                Console.WriteLine($"Versions: {cliBase} (all match)");
+            }
+            else
+            {
+                Console.WriteLine($"Versions: {cliBase} (plugin not connected)");
+            }
+        }
+        else
+        {
+            // Version mismatch - show warning
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("WARNING: Version mismatch!");
+            Console.ResetColor();
+            Console.WriteLine($"  CLI: {cliBase ?? "N/A"}, Bridge: {bridgeBase ?? "N/A"}, Plugin: {pluginBase ?? "N/A"}");
+            Console.WriteLine("  Consider updating all components to the same version.");
+        }
+    }
+
+    private static string? GetBaseVersion(string? version)
+    {
+        if (version == null) return null;
+        // Strip build metadata (everything after '+')
+        var plusIndex = version.IndexOf('+');
+        return plusIndex >= 0 ? version.Substring(0, plusIndex) : version;
     }
 }
