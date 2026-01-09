@@ -390,8 +390,8 @@ namespace UnityCtl
                         break;
 
                     case UnityCtlCommands.AssetRefresh:
-                        // Lightweight refresh (like focusing editor)
-                        AssetDatabase.Refresh();
+                        // Force refresh to ensure assets are reimported even without editor focus
+                        AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
                         // Check if compilation was triggered after refresh
                         var compilationTriggered = EditorApplication.isCompiling;
                         // Check if there are existing compilation errors
@@ -495,18 +495,11 @@ namespace UnityCtl
                 throw new ArgumentException("Asset path is required");
             }
 
-            // Start the import - this will complete asynchronously
+            // ImportAsset is synchronous - it blocks until complete
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
 
-            // Register callback to send completion event when done
-            EditorApplication.delayCall += () =>
-            {
-                // Wait one frame for the import to fully complete
-                EditorApplication.delayCall += () =>
-                {
-                    SendAssetImportCompleteEvent(path, true);
-                };
-            };
+            // Send completion event immediately since import is synchronous
+            SendAssetImportCompleteEvent(path, true);
 
             return new AssetImportResult { Success = true };
         }
