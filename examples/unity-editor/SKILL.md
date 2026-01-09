@@ -10,15 +10,8 @@ Control a running Unity Editor from the command line without batch mode.
 ## Instructions
 
 ### Setup (Required First)
-
-**Option A - Editor already open:**
-1. Start the bridge daemon: `unityctl bridge start` (background it or it will time out)
-2. Open the Unity project in Unity Editor
-3. Verify connection: `unityctl status`
-
-**Option B - Launch editor via CLI:**
-1. Start the bridge daemon: `unityctl bridge start` (background it)
-2. Launch Unity: `unityctl editor run`
+1. Start the bridge daemon: `unityctl bridge start`
+2. Launch Unity: `unityctl editor run` or manually open the project in Unity Editor
 3. Verify connection: `unityctl status`
 
 ### Refresh Assets After Script Changes
@@ -50,15 +43,14 @@ unityctl editor stop        # Stop running Unity Editor
 ```bash
 unityctl play enter       # Enter play mode
 unityctl play exit        # Exit play mode
-unityctl play toggle      # Toggle play mode
 ```
 
 **Logs:**
 ```bash
 unityctl logs                 # Show all logs since last clear (auto-clears on play enter and compile)
 unityctl logs -n 50           # Limit to last 50 entries
-unityctl logs --full          # Show full history (ignore clear boundary)
 unityctl logs --stack         # Show stack traces for log entries
+unityctl logs --full          # Show full history (ignore clear boundary)
 ```
 
 **Scenes:**
@@ -82,9 +74,29 @@ unityctl screenshot capture          # Capture screenshot
 
 Execute arbitrary C# in the running editor via Roslyn. Invaluable for debugging and automation.
 
+```cs
+// tmp/get-version.cs
+using UnityEngine;
+
+public class Script
+{
+    public static object Main()
+    {
+        return Application.version;
+    }
+}
+```
+
+```bash
+unityctl script execute -f tmp/get-version.cs
+```
+
+You can also execute code directly with `-c`:
 ```bash
 unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { return Application.version; } }"
 ```
+
+Scripts must define a class with a `public static object Main()` method. The return value is JSON-serialized.
 
 ### Getting Help
 
@@ -105,25 +117,63 @@ unityctl play exit
 ```
 
 **Debug: Find all GameObjects in scene:**
+```cs
+// tmp/find-objects.cs
+using UnityEngine;
+
+public class Script
+{
+    public static object Main()
+    {
+        return GameObject.FindObjectsOfType<GameObject>().Length;
+    }
+}
+```
 ```bash
-unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { return GameObject.FindObjectsOfType<GameObject>().Length; } }"
+unityctl script execute -f tmp/find-objects.cs
 ```
 
 **Debug: Inspect Player position:**
+```cs
+// tmp/find-player.cs
+using UnityEngine;
+
+public class Script
+{
+    public static object Main()
+    {
+        var go = GameObject.Find("Player");
+        return go?.transform.position.ToString() ?? "not found";
+    }
+}
+```
 ```bash
-unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { var go = GameObject.Find(\"Player\"); return go?.transform.position.ToString() ?? \"not found\"; } }"
+unityctl script execute -f tmp/find-player.cs
 ```
 
 **Debug: Log message to Unity console:**
+```cs
+// tmp/log-message.cs
+using UnityEngine;
+
+public class Script
+{
+    public static object Main()
+    {
+        Debug.Log("Hello from CLI");
+        return "logged";
+    }
+}
+```
 ```bash
-unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { Debug.Log(\"Hello from CLI\"); return \"logged\"; } }"
+unityctl script execute -f tmp/log-message.cs
 ```
 
 ## Best Practices
 
 - Run `unityctl status` to check overall project status before running commands
 - Always run `unityctl asset refresh` after modifying C# files before entering play mode
-- Script execution requires a class with a static method; return values are JSON-serialized
+- For script execution, write scripts to `tmp/<scriptname>.cs` and execute with `-f`
 
 ## Troubleshooting
 
