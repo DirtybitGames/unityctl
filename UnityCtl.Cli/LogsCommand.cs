@@ -35,11 +35,16 @@ public static class LogsCommand
             "--full",
             "Show full log history (ignore clear watermark)");
 
+        var stackOption = new Option<bool>(
+            "--stack",
+            "Show stack traces for log entries");
+
         logsCommand.AddOption(followOption);
         logsCommand.AddOption(linesOption);
         logsCommand.AddOption(noColorOption);
         logsCommand.AddOption(verboseOption);
         logsCommand.AddOption(fullOption);
+        logsCommand.AddOption(stackOption);
 
         logsCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -49,8 +54,9 @@ public static class LogsCommand
             var noColor = context.ParseResult.GetValueForOption(noColorOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var full = context.ParseResult.GetValueForOption(fullOption);
+            var stack = context.ParseResult.GetValueForOption(stackOption);
 
-            await ShowLogsAsync(projectPath, follow, lines, noColor, verbose, full);
+            await ShowLogsAsync(projectPath, follow, lines, noColor, verbose, full, stack);
         });
 
         // Add 'logs clear' subcommand
@@ -115,7 +121,8 @@ public static class LogsCommand
         int lines,
         bool noColor,
         bool verbose,
-        bool full)
+        bool full,
+        bool stack)
     {
         // Find project and bridge config
         var projectRoot = projectPath != null
@@ -165,7 +172,7 @@ public static class LogsCommand
             {
                 foreach (var entry in result.Entries)
                 {
-                    WriteLogEntry(entry, noColor, verbose);
+                    WriteLogEntry(entry, noColor, verbose, stack);
                 }
             }
         }
@@ -191,7 +198,7 @@ public static class LogsCommand
 
             try
             {
-                await StreamLogsAsync(httpClient, noColor, verbose, cts.Token);
+                await StreamLogsAsync(httpClient, noColor, verbose, stack, cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -209,6 +216,7 @@ public static class LogsCommand
         HttpClient httpClient,
         bool noColor,
         bool verbose,
+        bool stack,
         CancellationToken ct)
     {
         using var response = await httpClient.GetAsync(
@@ -234,7 +242,7 @@ public static class LogsCommand
                 var entry = JsonHelper.Deserialize<UnifiedLogEntry>(json);
                 if (entry != null)
                 {
-                    WriteLogEntry(entry, noColor, verbose);
+                    WriteLogEntry(entry, noColor, verbose, stack);
                 }
             }
         }
@@ -254,7 +262,7 @@ public static class LogsCommand
         if (!noColor) Console.ResetColor();
     }
 
-    private static void WriteLogEntry(UnifiedLogEntry entry, bool noColor, bool verbose)
+    private static void WriteLogEntry(UnifiedLogEntry entry, bool noColor, bool verbose, bool showStack)
     {
         // Timestamp
         if (verbose)
@@ -290,6 +298,14 @@ public static class LogsCommand
         if (!noColor)
         {
             Console.ResetColor();
+        }
+
+        // Stack trace (if enabled and present)
+        if (showStack && !string.IsNullOrEmpty(entry.StackTrace))
+        {
+            if (!noColor) Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(entry.StackTrace);
+            if (!noColor) Console.ResetColor();
         }
     }
 
