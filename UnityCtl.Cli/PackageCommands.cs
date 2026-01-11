@@ -137,27 +137,34 @@ public static class PackageCommands
         return Path.Combine(projectRoot, "Packages", "manifest.json");
     }
 
-    private static async Task<JsonObject?> ReadManifestAsync(string manifestPath)
+    private static async Task<(JsonObject? manifest, string lineEnding, bool hasTrailingNewline)> ReadManifestAsync(string manifestPath)
     {
         if (!File.Exists(manifestPath))
         {
             Console.Error.WriteLine($"Error: manifest.json not found at {manifestPath}");
-            return null;
+            return (null, Environment.NewLine, false);
         }
 
         try
         {
             var content = await File.ReadAllTextAsync(manifestPath);
-            return JsonNode.Parse(content)?.AsObject();
+
+            // Detect line ending style
+            var lineEnding = content.Contains("\r\n") ? "\r\n" : "\n";
+
+            // Check if file ends with a newline
+            var hasTrailingNewline = content.EndsWith("\n") || content.EndsWith("\r\n");
+
+            return (JsonNode.Parse(content)?.AsObject(), lineEnding, hasTrailingNewline);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error reading manifest.json: {ex.Message}");
-            return null;
+            return (null, Environment.NewLine, false);
         }
     }
 
-    private static async Task WriteManifestAsync(string manifestPath, JsonObject manifest)
+    private static async Task WriteManifestAsync(string manifestPath, JsonObject manifest, string lineEnding = "\n", bool hasTrailingNewline = true)
     {
         var options = new JsonSerializerOptions
         {
@@ -165,6 +172,22 @@ public static class PackageCommands
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
         var content = manifest.ToJsonString(options);
+
+        // Normalize to LF first (JsonSerializer may use platform-specific endings)
+        content = content.Replace("\r\n", "\n");
+
+        // Convert to target line ending style
+        if (lineEnding == "\r\n")
+        {
+            content = content.Replace("\n", "\r\n");
+        }
+
+        // Add trailing newline if original had one
+        if (hasTrailingNewline && !content.EndsWith("\n"))
+        {
+            content += lineEnding;
+        }
+
         await File.WriteAllTextAsync(manifestPath, content);
     }
 
@@ -189,7 +212,7 @@ public static class PackageCommands
         if (projectRoot == null) return;
 
         var manifestPath = GetManifestPath(projectRoot);
-        var manifest = await ReadManifestAsync(manifestPath);
+        var (manifest, lineEnding, hasTrailingNewline) = await ReadManifestAsync(manifestPath);
         if (manifest == null) return;
 
         var dependencies = manifest["dependencies"]?.AsObject();
@@ -273,7 +296,7 @@ public static class PackageCommands
         }
 
         dependencies[PackageName] = packageValue;
-        await WriteManifestAsync(manifestPath, manifest);
+        await WriteManifestAsync(manifestPath, manifest, lineEnding, hasTrailingNewline);
 
         if (json)
         {
@@ -301,7 +324,7 @@ public static class PackageCommands
         if (projectRoot == null) return;
 
         var manifestPath = GetManifestPath(projectRoot);
-        var manifest = await ReadManifestAsync(manifestPath);
+        var (manifest, lineEnding, hasTrailingNewline) = await ReadManifestAsync(manifestPath);
         if (manifest == null) return;
 
         var dependencies = manifest["dependencies"]?.AsObject();
@@ -319,7 +342,7 @@ public static class PackageCommands
         }
 
         dependencies.Remove(PackageName);
-        await WriteManifestAsync(manifestPath, manifest);
+        await WriteManifestAsync(manifestPath, manifest, lineEnding, hasTrailingNewline);
 
         if (json)
         {
@@ -338,7 +361,7 @@ public static class PackageCommands
         if (projectRoot == null) return;
 
         var manifestPath = GetManifestPath(projectRoot);
-        var manifest = await ReadManifestAsync(manifestPath);
+        var (manifest, lineEnding, hasTrailingNewline) = await ReadManifestAsync(manifestPath);
         if (manifest == null) return;
 
         var dependencies = manifest["dependencies"]?.AsObject();
@@ -401,7 +424,7 @@ public static class PackageCommands
         }
 
         dependencies[PackageName] = newValue;
-        await WriteManifestAsync(manifestPath, manifest);
+        await WriteManifestAsync(manifestPath, manifest, lineEnding, hasTrailingNewline);
 
         if (json)
         {
@@ -430,7 +453,7 @@ public static class PackageCommands
         if (projectRoot == null) return;
 
         var manifestPath = GetManifestPath(projectRoot);
-        var manifest = await ReadManifestAsync(manifestPath);
+        var (manifest, _, _) = await ReadManifestAsync(manifestPath);
         if (manifest == null) return;
 
         var dependencies = manifest["dependencies"]?.AsObject();
