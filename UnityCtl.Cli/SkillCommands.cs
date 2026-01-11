@@ -11,7 +11,8 @@ namespace UnityCtl.Cli;
 
 public static class SkillCommands
 {
-    private const string SkillFileName = "unity-editor.md";
+    private const string SkillFolderName = "unity-editor";
+    private const string SkillFileName = "SKILL.md";
     private const string EmbeddedResourceName = "UnityCtl.Cli.Resources.SKILL.md";
 
     public static Command CreateCommand()
@@ -164,7 +165,8 @@ public static class SkillCommands
     public static async Task AddSkillAsync(bool global, string? claudeDir, bool force, bool json)
     {
         var skillsDir = GetSkillsDirectory(global, claudeDir);
-        var skillPath = Path.Combine(skillsDir, SkillFileName);
+        var skillFolderPath = Path.Combine(skillsDir, SkillFolderName);
+        var skillPath = Path.Combine(skillFolderPath, SkillFileName);
 
         // Check if skill already exists
         if (File.Exists(skillPath) && !force)
@@ -213,7 +215,7 @@ public static class SkillCommands
         }
 
         // Create directory if needed
-        Directory.CreateDirectory(skillsDir);
+        Directory.CreateDirectory(skillFolderPath);
 
         // Write skill file
         await File.WriteAllTextAsync(skillPath, skillContent);
@@ -249,7 +251,8 @@ public static class SkillCommands
     private static void RemoveSkill(bool global, string? claudeDir, bool json)
     {
         var skillsDir = GetSkillsDirectory(global, claudeDir);
-        var skillPath = Path.Combine(skillsDir, SkillFileName);
+        var skillFolderPath = Path.Combine(skillsDir, SkillFolderName);
+        var skillPath = Path.Combine(skillFolderPath, SkillFileName);
 
         if (!File.Exists(skillPath))
         {
@@ -274,6 +277,10 @@ public static class SkillCommands
         // Try to clean up empty directories
         try
         {
+            if (Directory.Exists(skillFolderPath) && !Directory.EnumerateFileSystemEntries(skillFolderPath).Any())
+            {
+                Directory.Delete(skillFolderPath);
+            }
             if (Directory.Exists(skillsDir) && !Directory.EnumerateFileSystemEntries(skillsDir).Any())
             {
                 Directory.Delete(skillsDir);
@@ -300,8 +307,8 @@ public static class SkillCommands
         var globalSkillsDir = Path.Combine(home, ".claude", "skills");
         var localSkillsDir = Path.Combine(Directory.GetCurrentDirectory(), ".claude", "skills");
 
-        var globalPath = Path.Combine(globalSkillsDir, SkillFileName);
-        var localPath = Path.Combine(localSkillsDir, SkillFileName);
+        var globalPath = Path.Combine(globalSkillsDir, SkillFolderName, SkillFileName);
+        var localPath = Path.Combine(localSkillsDir, SkillFolderName, SkillFileName);
 
         var globalExists = File.Exists(globalPath);
         var localExists = File.Exists(localPath);
