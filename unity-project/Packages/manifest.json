@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "com.dirtybit.unityctl": "file:../../UnityCtl.UnityPackage",
     "com.unity.collab-proxy": "2.10.2",
     "com.unity.feature.2d": "2.0.1",
     "com.unity.ide.rider": "3.0.38",
@@ -43,6 +42,7 @@
     "com.unity.modules.video": "1.0.0",
     "com.unity.modules.vr": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
-    "com.unity.modules.xr": "1.0.0"
+    "com.unity.modules.xr": "1.0.0",
+    "com.dirtybit.unityctl": "file:../../UnityCtl.UnityPackage"
   }
 }
