@@ -20,4 +20,9 @@
     <ProjectReference Include="..\UnityCtl.Protocol\UnityCtl.Protocol.csproj" />
   </ItemGroup>
 
+  <!-- Embed SKILL.md as a resource for skill installation -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\examples\unity-editor\SKILL.md" Link="Resources\SKILL.md" LogicalName="UnityCtl.Cli.Resources.SKILL.md" />
+  </ItemGroup>
+
 </Project>
