@@ -42,33 +42,43 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 
 ## Installation
 
-Requires [.NET 10](https://dotnet.microsoft.com/download/dotnet/10.0)+.
+Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or newer.
 
+**Linux/macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/DirtybitGames/unityctl/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr https://raw.githubusercontent.com/DirtybitGames/unityctl/main/scripts/install.ps1 | iex
+```
+
+**Or install manually:**
 ```bash
 dotnet tool install -g UnityCtl.Cli
 dotnet tool install -g UnityCtl.Bridge
 ```
 
-Add to your Unity project's `Packages/manifest.json`:
+### Project Setup
 
-```json
-{
-  "dependencies": {
-    "com.dirtybit.unityctl": "https://github.com/DirtybitGames/unityctl.git?path=UnityCtl.UnityPackage#v0.2"
-  }
-}
+Run setup from your Unity project directory (or any parent folder like a monorepo root):
+```bash
+unityctl setup
 ```
+
+This installs the Unity package and Claude Code skill. If run outside a Unity project, it will prompt for the project path and save it to `.unityctl/config.json` for future commands.
 
 **Quick start:** `unityctl bridge start`, open Unity, `unityctl status`
 
 **Or launch Unity via CLI:** `unityctl bridge start`, `unityctl editor run`, `unityctl status`
 
-**For Claude Code:** Copy [examples/unity-editor/SKILL.md](examples/unity-editor/SKILL.md) to `.claude/skills/` in your project.
-
 ## More Commands
 
 | Command | Description |
 |---------|-------------|
+| `unityctl setup` | One-command project setup (config + package + skill) |
+| `unityctl update` | Update CLI, bridge, and Unity package |
 | `unityctl editor run` | Launch Unity Editor (auto-detects version) |
 | `unityctl editor stop` | Stop running Unity Editor |
 | `unityctl asset refresh` | Refresh assets and trigger compilation |
@@ -79,6 +89,9 @@ Add to your Unity project's `Packages/manifest.json`:
 | `unityctl test run --mode playmode` | Run play mode tests |
 | `unityctl menu execute <path>` | Execute Unity menu item |
 | `unityctl asset import <path>` | Import an asset |
+| `unityctl config set/get/list` | Manage configuration |
+| `unityctl package add/remove/status` | Manage Unity package |
+| `unityctl skill add/remove/status` | Manage Claude Code skill |
 
 Run `unityctl --help` for the full command list.
 

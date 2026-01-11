@@ -184,5 +184,5 @@ Run `unityctl status` first to diagnose issues.
 | Bridge not responding | `unityctl bridge stop` then `unityctl bridge start` |
 | Editor not connected to newly started bridge | Normal, editor plugin uses exponential backoff, up to 30 seconds |
 | Connection lost after compile | Normal - domain reload. Auto-reconnects. |
-| "Project not found" | Run from project directory or use `--project` flag |
+| "Project not found" | Run `unityctl setup` or `unityctl config set project-path <path>` |
 | Editor not found | Use `--unity-path` to specify Unity executable |
