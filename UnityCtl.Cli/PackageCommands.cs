@@ -170,6 +170,21 @@ public static class PackageCommands
 
     public static async Task AddPackageAsync(string? projectPath, string method, string? version, string? localPath, bool json)
     {
+        // Validate method parameter
+        if (!method.Equals("upm", StringComparison.OrdinalIgnoreCase) &&
+            !method.Equals("local", StringComparison.OrdinalIgnoreCase))
+        {
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(new { success = false, error = "invalid_method", message = $"Invalid method '{method}'. Use 'upm' or 'local'." }));
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: Invalid method '{method}'. Use 'upm' or 'local'.");
+            }
+            return;
+        }
+
         var projectRoot = FindProjectRoot(projectPath);
         if (projectRoot == null) return;
 

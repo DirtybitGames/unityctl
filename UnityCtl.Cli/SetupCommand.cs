@@ -260,7 +260,11 @@ public static class SetupCommand
     {
         var normalized1 = Path.GetFullPath(path1).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var normalized2 = Path.GetFullPath(path2).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return string.Equals(normalized1, normalized2, StringComparison.OrdinalIgnoreCase);
+        // Use case-insensitive comparison on Windows, case-sensitive on Unix
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return string.Equals(normalized1, normalized2, comparison);
     }
 
     private class SetupStepResult
