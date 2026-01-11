@@ -27,11 +27,11 @@ public static class SkillCommands
 
     private static Command CreateAddCommand()
     {
-        var addCommand = new Command("add", "Install Claude Code skill");
+        var addCommand = new Command("add", "Add Claude Code skill");
 
         var globalOption = new Option<bool>(
             "--global",
-            "Install to global ~/.claude/skills/ instead of local .claude/skills/"
+            "Add to global ~/.claude/skills/ instead of local .claude/skills/"
         );
         globalOption.AddAlias("-g");
 
@@ -81,13 +81,13 @@ public static class SkillCommands
         removeCommand.AddOption(globalOption);
         removeCommand.AddOption(claudeDirOption);
 
-        removeCommand.SetHandler(async (InvocationContext context) =>
+        removeCommand.SetHandler((InvocationContext context) =>
         {
             var global = context.ParseResult.GetValueForOption(globalOption);
             var claudeDir = context.ParseResult.GetValueForOption(claudeDirOption);
             var json = ContextHelper.GetJson(context);
 
-            await RemoveSkillAsync(global, claudeDir, json);
+            RemoveSkill(global, claudeDir, json);
         });
 
         return removeCommand;
@@ -97,11 +97,11 @@ public static class SkillCommands
     {
         var statusCommand = new Command("status", "Show skill installation status");
 
-        statusCommand.SetHandler(async (InvocationContext context) =>
+        statusCommand.SetHandler((InvocationContext context) =>
         {
             var json = ContextHelper.GetJson(context);
 
-            await StatusSkillAsync(json);
+            ShowSkillStatus(json);
         });
 
         return statusCommand;
@@ -246,7 +246,7 @@ public static class SkillCommands
         }
     }
 
-    private static async Task RemoveSkillAsync(bool global, string? claudeDir, bool json)
+    private static void RemoveSkill(bool global, string? claudeDir, bool json)
     {
         var skillsDir = GetSkillsDirectory(global, claudeDir);
         var skillPath = Path.Combine(skillsDir, SkillFileName);
@@ -292,11 +292,9 @@ public static class SkillCommands
         {
             Console.WriteLine($"Removed skill from: {skillPath}");
         }
-
-        await Task.CompletedTask;
     }
 
-    public static async Task StatusSkillAsync(bool json)
+    private static void ShowSkillStatus(bool json)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var globalSkillsDir = Path.Combine(home, ".claude", "skills");
@@ -329,11 +327,9 @@ public static class SkillCommands
             if (!globalExists && !localExists)
             {
                 Console.WriteLine();
-                Console.WriteLine("Run 'unityctl skill add' to install the skill locally,");
-                Console.WriteLine("or 'unityctl skill add --global' to install globally.");
+                Console.WriteLine("Run 'unityctl skill add' to add the skill locally,");
+                Console.WriteLine("or 'unityctl skill add --global' to add globally.");
             }
         }
-
-        await Task.CompletedTask;
     }
 }

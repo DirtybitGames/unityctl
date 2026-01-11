@@ -242,7 +242,7 @@ public static class UpdateCommands
             var cliSuccess = await RunDotnetToolUpdateAsync(CliPackageId, targetVersion);
             results.Add(new UpdateStepResult
             {
-                Component = CliPackageId,
+                Step = CliPackageId,
                 Success = cliSuccess,
                 Error = cliSuccess ? null : "Failed to update. Run 'dotnet tool update -g UnityCtl.Cli' manually."
             });
@@ -253,7 +253,7 @@ public static class UpdateCommands
             var bridgeSuccess = await RunDotnetToolUpdateAsync(BridgePackageId, targetVersion);
             results.Add(new UpdateStepResult
             {
-                Component = BridgePackageId,
+                Step = BridgePackageId,
                 Success = bridgeSuccess,
                 Error = bridgeSuccess ? null : "Failed to update. Run 'dotnet tool update -g UnityCtl.Bridge' manually."
             });
@@ -280,7 +280,7 @@ public static class UpdateCommands
                 Console.WriteLine("  Skipped: Not in a Unity project");
                 results.Add(new UpdateStepResult
                 {
-                    Component = "Unity Package",
+                    Step = "Unity Package",
                     Success = true,
                     Skipped = true
                 });
@@ -292,7 +292,7 @@ public static class UpdateCommands
                     await PackageCommands.UpdatePackageAsync(projectPath, $"v{effectiveTargetVersion}", json: false);
                     results.Add(new UpdateStepResult
                     {
-                        Component = "Unity Package",
+                        Step = "Unity Package",
                         Success = true
                     });
                 }
@@ -300,7 +300,7 @@ public static class UpdateCommands
                 {
                     results.Add(new UpdateStepResult
                     {
-                        Component = "Unity Package",
+                        Step = "Unity Package",
                         Success = false,
                         Error = ex.Message
                     });
@@ -321,7 +321,7 @@ public static class UpdateCommands
             {
                 var status = result.Skipped ? "Skipped" : (result.Success ? "OK" : "FAILED");
                 var icon = result.Skipped ? "-" : (result.Success ? "+" : "x");
-                Console.WriteLine($"  [{icon}] {result.Component}: {status}");
+                Console.WriteLine($"  [{icon}] {result.Step}: {status}");
                 if (!result.Success && result.Error != null)
                 {
                     Console.WriteLine($"      Error: {result.Error}");
@@ -354,7 +354,7 @@ public static class UpdateCommands
 
     private class UpdateStepResult
     {
-        public required string Component { get; init; }
+        public required string Step { get; init; }
         public bool Success { get; init; }
         public bool Skipped { get; init; }
         public string? Error { get; init; }

@@ -424,7 +424,7 @@ public static class PackageCommands
         }
     }
 
-    public static async Task StatusPackageAsync(string? projectPath, bool json)
+    private static async Task StatusPackageAsync(string? projectPath, bool json)
     {
         var projectRoot = FindProjectRoot(projectPath);
         if (projectRoot == null) return;
