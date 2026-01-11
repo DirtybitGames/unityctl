@@ -23,8 +23,8 @@ public static class StatusCommand
             if (projectRoot == null)
             {
                 Console.Error.WriteLine("Error: Not in a Unity project.");
-                Console.Error.WriteLine("  Use --project to specify project root, or create .unityctl/config.json");
-                Console.Error.WriteLine("  with: { \"projectPath\": \"path/to/unity/project\" }");
+                Console.Error.WriteLine("  Use --project to specify project root, or run:");
+                Console.Error.WriteLine("  unityctl config set project-path <path-to-unity-project>");
                 context.ExitCode = 1;
                 return;
             }

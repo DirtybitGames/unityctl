@@ -25,8 +25,22 @@ rootCommand.AddGlobalOption(projectOption);
 rootCommand.AddGlobalOption(agentIdOption);
 rootCommand.AddGlobalOption(jsonOption);
 
-// Add subcommands
+// Add subcommands - Setup & Configuration
+rootCommand.AddCommand(SetupCommand.CreateCommand());
+rootCommand.AddCommand(UpdateCommands.CreateCommand());
+rootCommand.AddCommand(ConfigCommands.CreateCommand());
+rootCommand.AddCommand(PackageCommands.CreateCommand());
+rootCommand.AddCommand(SkillCommands.CreateCommand());
+
+// Add subcommands - Status & Logs
 rootCommand.AddCommand(StatusCommand.CreateCommand());
+rootCommand.AddCommand(LogsCommand.CreateCommand());
+
+// Add subcommands - Bridge & Editor
+rootCommand.AddCommand(BridgeCommands.CreateCommand());
+rootCommand.AddCommand(EditorCommands.CreateCommand());
+
+// Add subcommands - Unity Operations
 rootCommand.AddCommand(SceneCommands.CreateCommand());
 rootCommand.AddCommand(PlayCommands.CreateCommand());
 rootCommand.AddCommand(AssetCommands.CreateCommand());
@@ -34,8 +48,5 @@ rootCommand.AddCommand(MenuCommands.CreateCommand());
 rootCommand.AddCommand(TestCommands.CreateCommand());
 rootCommand.AddCommand(ScreenshotCommands.CreateCommand());
 rootCommand.AddCommand(ScriptCommands.CreateCommand());
-rootCommand.AddCommand(BridgeCommands.CreateCommand());
-rootCommand.AddCommand(EditorCommands.CreateCommand());
-rootCommand.AddCommand(LogsCommand.CreateCommand());
 
 return await rootCommand.InvokeAsync(args);
