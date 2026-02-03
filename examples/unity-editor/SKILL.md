@@ -1,188 +1,97 @@
 ---
 name: unity-editor
-description: Remote control Unity Editor via CLI using unityctl. Use when working with Unity projects to launch/stop editor, enter/exit play mode, compile scripts, view logs, load scenes, run tests, capture screenshots, or execute C# code for debugging. Activate when user mentions Unity, play mode, compilation, or needs to interact with a running Unity Editor.
+description: Remote control Unity Editor via CLI using unityctl. Activate when user mentions Unity Editor, play mode, asset compilation, Unity console logs, C# script debugging, Unity tests, scene loading, or screenshots. Use for launching/stopping editor, entering/exiting play mode, compiling scripts, viewing logs, loading scenes, running tests, capturing screenshots, or executing arbitrary C# in Unity context.
 ---
 
 # unityctl - Unity Editor Remote Control
 
 Control a running Unity Editor from the command line without batch mode.
 
-## Instructions
-
-### Setup (Required First)
-1. Start the bridge daemon: `unityctl bridge start`
-2. Launch Unity: `unityctl editor run` or manually open the project in Unity Editor
-3. Verify connection: `unityctl status`
-
-### Refresh Assets After Script Changes
-
-After modifying C# scripts, refresh assets to compile:
+## Setup (Required First)
 
 ```bash
-unityctl asset refresh
+unityctl bridge start        # Start bridge daemon (runs in background)
+unityctl editor run          # Launch Unity Editor (or open project manually)
+unityctl status              # Verify connection
 ```
 
-Returns compilation errors directly in the output (non-zero exit code on failure). Fix errors and re-run until compilation succeeds before entering play mode.
+## Commands
 
-### Common Commands
-
-**Status & Bridge:**
 ```bash
-unityctl status           # Check Unity running, bridge, and connection status
-unityctl bridge start     # Start bridge daemon (runs in background)
-unityctl bridge stop      # Stop bridge
+# Status & Bridge
+unityctl status              # Check Unity, bridge, and connection status
+unityctl bridge start/stop   # Manage bridge daemon
+
+# Editor
+unityctl editor run/stop     # Launch or stop Unity Editor
+
+# Compile (run after modifying C# scripts)
+unityctl asset refresh       # Compile scripts, returns errors on failure
+
+# Play Mode
+unityctl play enter/exit     # Enter or exit play mode
+
+# Logs
+unityctl logs                # Show logs since last clear (auto-clears on play/compile)
+unityctl logs -n 50          # Limit entries
+unityctl logs --stack        # Include stack traces
+unityctl logs --full         # Ignore clear boundary
+
+# Scenes
+unityctl scene list          # List scenes
+unityctl scene load <path>   # Load scene (e.g., Assets/Scenes/Main.unity)
+
+# Testing
+unityctl test run            # Run edit mode tests
+unityctl test run --mode playmode
+
+# Screenshots
+unityctl screenshot capture
 ```
 
-**Editor Lifecycle:**
-```bash
-unityctl editor run         # Launch Unity Editor (auto-detects version)
-unityctl editor stop        # Stop running Unity Editor
-```
+## Script Execution
 
-**Play Mode:**
-```bash
-unityctl play enter       # Enter play mode
-unityctl play exit        # Exit play mode
-```
-
-**Logs:**
-```bash
-unityctl logs                 # Show all logs since last clear (auto-clears on play enter and compile)
-unityctl logs -n 50           # Limit to last 50 entries
-unityctl logs --stack         # Show stack traces for log entries
-unityctl logs --full          # Show full history (ignore clear boundary)
-```
-
-**Scenes:**
-```bash
-unityctl scene list                            # List scenes
-unityctl scene load Assets/Scenes/Main.unity   # Load scene
-```
-
-**Testing:**
-```bash
-unityctl test run                    # Run edit mode tests
-unityctl test run --mode playmode    # Play mode tests
-```
-
-**Screenshots:**
-```bash
-unityctl screenshot capture          # Capture screenshot
-```
-
-### Script Execution (Debugging Power Tool)
-
-Execute arbitrary C# in the running editor via Roslyn. Invaluable for debugging and automation.
+Execute arbitrary C# in the running editor via Roslyn. Write scripts to `tmp/` and execute:
 
 ```cs
-// tmp/get-version.cs
+// tmp/debug.cs
 using UnityEngine;
 
 public class Script
 {
     public static object Main()
     {
-        return Application.version;
+        var player = GameObject.Find("Player");
+        return player?.transform.position.ToString() ?? "not found";
     }
 }
 ```
 
 ```bash
-unityctl script execute -f tmp/get-version.cs
+unityctl script execute -f tmp/debug.cs
 ```
 
-You can also execute code directly with `-c`:
+Inline execution with `-c`:
 ```bash
-unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { return Application.version; } }"
+unityctl script execute -c "using UnityEngine; public class Script { public static object Main() => Application.version; }"
 ```
 
-Scripts must define a class with a static `Main` method. The return value is JSON-serialized.
+Scripts require a class with static `Main()` returning `object`. Return value is JSON-serialized.
 
-**Method signatures:**
-- `public static object Main()` - No arguments
-- `public static object Main(string[] args)` - Receives arguments passed after `--`
-
-**Passing arguments:**
+**With arguments** (`Main(string[] args)`):
 ```bash
 unityctl script execute -f tmp/spawn.cs -- Cube 5 "My Object"
 ```
 
-### Getting Help
+## Typical Workflow
 
-```bash
-unityctl --help              # List all commands
-unityctl <command> --help    # Command-specific help
-```
-
-## Examples
-
-**Workflow: Edit script, compile, and test:**
 ```bash
 # After editing C# files...
-unityctl asset refresh       # Returns compilation errors if any
+unityctl asset refresh       # Compile (fix errors if any)
 unityctl play enter
-unityctl logs                # Check runtime logs (shows all since play enter)
+unityctl logs                # Check runtime logs
 unityctl play exit
 ```
-
-**Debug: Find all GameObjects in scene:**
-```cs
-// tmp/find-objects.cs
-using UnityEngine;
-
-public class Script
-{
-    public static object Main()
-    {
-        return GameObject.FindObjectsOfType<GameObject>().Length;
-    }
-}
-```
-```bash
-unityctl script execute -f tmp/find-objects.cs
-```
-
-**Debug: Inspect Player position:**
-```cs
-// tmp/find-player.cs
-using UnityEngine;
-
-public class Script
-{
-    public static object Main()
-    {
-        var go = GameObject.Find("Player");
-        return go?.transform.position.ToString() ?? "not found";
-    }
-}
-```
-```bash
-unityctl script execute -f tmp/find-player.cs
-```
-
-**Debug: Log message to Unity console:**
-```cs
-// tmp/log-message.cs
-using UnityEngine;
-
-public class Script
-{
-    public static object Main()
-    {
-        Debug.Log("Hello from CLI");
-        return "logged";
-    }
-}
-```
-```bash
-unityctl script execute -f tmp/log-message.cs
-```
-
-## Best Practices
-
-- Run `unityctl status` to check overall project status before running commands
-- Always run `unityctl asset refresh` after modifying C# files before entering play mode
-- For script execution, write scripts to `tmp/<scriptname>.cs` and execute with `-f`
 
 ## Troubleshooting
 
@@ -190,8 +99,8 @@ Run `unityctl status` first to diagnose issues.
 
 | Problem | Solution |
 |---------|----------|
-| Bridge not responding | `unityctl bridge stop` then `unityctl bridge start` |
-| Editor not connected to newly started bridge | Normal, editor plugin uses exponential backoff, up to 30 seconds |
-| Connection lost after compile | Normal - domain reload. Auto-reconnects. |
-| "Project not found" | Run `unityctl setup` or `unityctl config set project-path <path>` |
+| Bridge not responding | `unityctl bridge stop && unityctl bridge start` |
+| Editor not connected | Normal - exponential backoff, up to 30 seconds |
+| Connection lost after compile | Normal - domain reload, auto-reconnects |
+| "Project not found" | `unityctl setup` or `unityctl config set project-path <path>` |
 | Editor not found | Use `--unity-path` to specify Unity executable |
