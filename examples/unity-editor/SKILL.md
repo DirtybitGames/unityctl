@@ -96,7 +96,16 @@ You can also execute code directly with `-c`:
 unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { return Application.version; } }"
 ```
 
-Scripts must define a class with a `public static object Main()` method. The return value is JSON-serialized.
+Scripts must define a class with a static `Main` method. The return value is JSON-serialized.
+
+**Method signatures:**
+- `public static object Main()` - No arguments
+- `public static object Main(string[] args)` - Receives arguments passed after `--`
+
+**Passing arguments:**
+```bash
+unityctl script execute -f tmp/spawn.cs -- Cube 5 "My Object"
+```
 
 ### Getting Help
 

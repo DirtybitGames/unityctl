@@ -38,6 +38,9 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 
 # Find the player and move them
 unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { var p = GameObject.Find(\"Player\"); p.transform.position = new Vector3(0, 10, 0); return \"moved\"; } }"
+
+# Pass arguments to scripts (use -- separator)
+unityctl script execute -f spawn-objects.cs -- Cube 5
 ```
 
 ## Installation

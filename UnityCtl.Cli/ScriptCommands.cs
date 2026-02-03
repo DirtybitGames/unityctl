@@ -40,10 +40,17 @@ public static class ScriptCommands
             description: "Name of the static method to execute"
         );
 
+        var scriptArgsArgument = new Argument<string[]>(
+            name: "script-args",
+            description: "Arguments to pass to the script's Main method (after --)",
+            getDefaultValue: () => Array.Empty<string>()
+        );
+
         executeCommand.AddOption(codeOption);
         executeCommand.AddOption(fileOption);
         executeCommand.AddOption(classOption);
         executeCommand.AddOption(methodOption);
+        executeCommand.AddArgument(scriptArgsArgument);
 
         executeCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -85,6 +92,7 @@ public static class ScriptCommands
                 Console.Error.WriteLine("Example:");
                 Console.Error.WriteLine("  unityctl script execute -c \"public class Script { public static object Main() { return 42; } }\"");
                 Console.Error.WriteLine("  unityctl script execute -f ./my-script.cs");
+                Console.Error.WriteLine("  unityctl script execute -f ./my-script.cs -- arg1 arg2 \"arg with spaces\"");
                 Console.Error.WriteLine("  cat my-script.cs | unityctl script execute");
                 return;
             }
@@ -92,11 +100,14 @@ public static class ScriptCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) return;
 
+            var scriptArgs = context.ParseResult.GetValueForArgument(scriptArgsArgument);
+
             var args = new Dictionary<string, object?>
             {
                 { "code", csharpCode },
                 { "className", className },
-                { "methodName", methodName }
+                { "methodName", methodName },
+                { "scriptArgs", scriptArgs }
             };
 
             var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args);

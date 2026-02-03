@@ -15,7 +15,7 @@ namespace UnityCtl.Editor
     /// </summary>
     public static class ScriptExecutor
     {
-        public static ScriptExecuteResult Execute(string code, string className, string methodName)
+        public static ScriptExecuteResult Execute(string code, string className, string methodName, string[]? scriptArgs = null)
         {
             if (string.IsNullOrEmpty(code))
             {
@@ -98,14 +98,33 @@ namespace UnityCtl.Editor
                     };
                 }
 
-                // Find the method
-                var method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (method == null)
+                // Find the method - try with string[] parameter first, then parameterless
+                var methodWithArgs = type.GetMethod(methodName,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null, new[] { typeof(string[]) }, null);
+                var methodNoArgs = type.GetMethod(methodName,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null, Type.EmptyTypes, null);
+
+                MethodInfo? method;
+                object?[]? invokeArgs;
+
+                if (methodWithArgs != null)
+                {
+                    method = methodWithArgs;
+                    invokeArgs = new object?[] { scriptArgs ?? Array.Empty<string>() };
+                }
+                else if (methodNoArgs != null)
+                {
+                    method = methodNoArgs;
+                    invokeArgs = null;
+                }
+                else
                 {
                     return new ScriptExecuteResult
                     {
                         Success = false,
-                        Error = $"Static method '{methodName}' not found in class '{className}'."
+                        Error = $"Static method '{methodName}' not found in class '{className}'. Expected '{methodName}()' or '{methodName}(string[] args)'."
                     };
                 }
 
@@ -113,7 +132,7 @@ namespace UnityCtl.Editor
                 object? result;
                 try
                 {
-                    result = method.Invoke(null, null);
+                    result = method.Invoke(null, invokeArgs);
                 }
                 catch (TargetInvocationException ex)
                 {

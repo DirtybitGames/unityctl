@@ -630,6 +630,59 @@ namespace UnityCtl
             return null;
         }
 
+        private static string[] GetStringArrayArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return null;
+
+            try
+            {
+                // Try to access as dictionary
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return null;
+
+                    // Direct string array
+                    if (value is string[] strArray)
+                    {
+                        return strArray;
+                    }
+
+                    // Handle Newtonsoft.Json JArray
+                    if (value is JArray jarray)
+                    {
+                        return jarray.Select(t => t.Value<string>()).ToArray();
+                    }
+
+                    // Handle generic IEnumerable (but not string itself)
+                    if (value is System.Collections.IEnumerable enumerable && !(value is string))
+                    {
+                        var result = new System.Collections.Generic.List<string>();
+                        foreach (var item in enumerable)
+                        {
+                            if (item is JToken jtoken)
+                            {
+                                result.Add(jtoken.Value<string>());
+                            }
+                            else
+                            {
+                                result.Add(item?.ToString());
+                            }
+                        }
+                        return result.ToArray();
+                    }
+
+                    DebugLog($"[UnityCtl] Could not parse argument '{key}' as string array: {value.GetType().FullName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get string array argument '{key}': {ex.Message}");
+            }
+
+            return null;
+        }
+
         private static void ForceGameViewUpdate()
         {
             try
@@ -922,15 +975,16 @@ namespace UnityCtl
             var code = GetStringArgument(request, "code");
             var className = GetStringArgument(request, "className") ?? "Script";
             var methodName = GetStringArgument(request, "methodName") ?? "Main";
+            var scriptArgs = GetStringArrayArgument(request, "scriptArgs");
 
             if (string.IsNullOrEmpty(code))
             {
                 throw new ArgumentException("C# code is required");
             }
 
-            DebugLog($"[UnityCtl] Executing script: class={className}, method={methodName}");
+            DebugLog($"[UnityCtl] Executing script: class={className}, method={methodName}, args={scriptArgs?.Length ?? 0}");
 
-            var result = Editor.ScriptExecutor.Execute(code, className, methodName);
+            var result = Editor.ScriptExecutor.Execute(code, className, methodName, scriptArgs);
 
             if (result.Success)
             {
