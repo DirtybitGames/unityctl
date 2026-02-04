@@ -54,7 +54,7 @@ unityctl screenshot capture
 Execute arbitrary C# in the running editor via Roslyn. Write scripts to `/tmp/` and execute:
 
 ```cs
-// /tmp/debug.cs
+// /tmp/DebugScript.cs
 using UnityEngine;
 
 public class Script
@@ -68,7 +68,7 @@ public class Script
 ```
 
 ```bash
-unityctl script execute -f /tmp/debug.cs
+unityctl script execute -f /tmp/DebugScript.cs
 ```
 
 Inline execution with `-c`:
@@ -80,7 +80,7 @@ Scripts require a class with static `Main()` returning `object`. Return value is
 
 **With arguments** (`Main(string[] args)`):
 ```bash
-unityctl script execute -f /tmp/spawn.cs -- Cube 5 "My Object"
+unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 "My Object"
 ```
 
 ## Typical Workflow

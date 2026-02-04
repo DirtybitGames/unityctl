@@ -91,9 +91,9 @@ public static class ScriptCommands
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("Example:");
                 Console.Error.WriteLine("  unityctl script execute -c \"public class Script { public static object Main() { return 42; } }\"");
-                Console.Error.WriteLine("  unityctl script execute -f ./my-script.cs");
-                Console.Error.WriteLine("  unityctl script execute -f ./my-script.cs -- arg1 arg2 \"arg with spaces\"");
-                Console.Error.WriteLine("  cat my-script.cs | unityctl script execute");
+                Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs");
+                Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs -- arg1 arg2 \"arg with spaces\"");
+                Console.Error.WriteLine("  cat MyScript.cs | unityctl script execute");
                 return;
             }
 

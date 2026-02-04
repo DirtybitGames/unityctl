@@ -40,7 +40,7 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { var p = GameObject.Find(\"Player\"); p.transform.position = new Vector3(0, 10, 0); return \"moved\"; } }"
 
 # Pass arguments to scripts (use -- separator)
-unityctl script execute -f spawn-objects.cs -- Cube 5
+unityctl script execute -f SpawnObjects.cs -- Cube 5
 ```
 
 ## Installation
@@ -123,7 +123,7 @@ The API is kept simple, and leans mostly on the script execution to get work don
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical details
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
-- [examples/unity-editor/SKILL.md](examples/unity-editor/SKILL.md) - AI assistant skill file
+- [.claude/skills/unity-editor/SKILL.md](.claude/skills/unity-editor/SKILL.md) - AI assistant skill file
 
 ## License
 

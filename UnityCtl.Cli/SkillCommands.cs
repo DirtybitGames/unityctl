@@ -141,9 +141,9 @@ public static class SkillCommands
             // Fallback: try to find SKILL.md in development environment
             var possiblePaths = new[]
             {
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "examples", "unity-editor", "SKILL.md"),
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "examples", "unity-editor", "SKILL.md"),
-                Path.Combine(Directory.GetCurrentDirectory(), "examples", "unity-editor", "SKILL.md")
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".claude", "skills", "unity-editor", "SKILL.md"),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".claude", "skills", "unity-editor", "SKILL.md"),
+                Path.Combine(Directory.GetCurrentDirectory(), ".claude", "skills", "unity-editor", "SKILL.md")
             };
 
             foreach (var path in possiblePaths)

@@ -30,7 +30,7 @@ unity-project/
 
 ## Skill
 
-Claude Code skill for AI integration: `examples/unity-editor/SKILL.md`
+Claude Code skill for AI integration: `.claude/skills/unity-editor/SKILL.md`
 
 ## Notes
 
