@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
@@ -95,12 +96,22 @@ public static class UpdateCommands
         }
     }
 
-    private static async Task<bool> RunDotnetToolUpdateAsync(string packageId, string? version = null)
+    private enum UpdateResult { Success, Scheduled, Failed }
+
+    private static async Task<UpdateResult> RunDotnetToolUpdateAsync(string packageId, string? version = null, bool isSelf = false)
     {
         var args = $"tool update -g {packageId}";
         if (!string.IsNullOrEmpty(version))
         {
             args += $" --version {version}";
+        }
+
+        // On Windows, updating the currently-running CLI requires a workaround:
+        // spawn a script that waits for this process to exit, then performs the update
+        if (isSelf && OperatingSystem.IsWindows())
+        {
+            var scheduled = await ScheduleSelfUpdateViaScriptAsync(packageId, version);
+            return scheduled ? UpdateResult.Scheduled : UpdateResult.Failed;
         }
 
         var psi = new ProcessStartInfo
@@ -116,13 +127,85 @@ public static class UpdateCommands
         try
         {
             using var process = Process.Start(psi);
-            if (process == null) return false;
+            if (process == null) return UpdateResult.Failed;
 
             await process.WaitForExitAsync();
-            return process.ExitCode == 0;
+            return process.ExitCode == 0 ? UpdateResult.Success : UpdateResult.Failed;
         }
         catch
         {
+            return UpdateResult.Failed;
+        }
+    }
+
+    /// <summary>
+    /// Schedules the CLI self-update via a detached PowerShell script.
+    /// Returns true if the script was successfully launched (update is pending).
+    /// The actual update happens after this process exits.
+    /// </summary>
+    private static async Task<bool> ScheduleSelfUpdateViaScriptAsync(string packageId, string? version)
+    {
+        var currentPid = Environment.ProcessId;
+        var versionArg = string.IsNullOrEmpty(version) ? "" : $" --version {version}";
+
+        // Create a temporary PowerShell script that:
+        // 1. Waits for the current process to exit
+        // 2. Runs the dotnet tool update command
+        // 3. Deletes itself
+        var tempDir = Path.GetTempPath();
+        var scriptPath = Path.Combine(tempDir, $"unityctl-update-{Guid.NewGuid():N}.ps1");
+
+        var scriptContent = $@"
+# Wait for the CLI process to exit (max 30 seconds)
+$maxWait = 30
+$waited = 0
+while ($waited -lt $maxWait) {{
+    try {{
+        $proc = Get-Process -Id {currentPid} -ErrorAction SilentlyContinue
+        if (-not $proc) {{ break }}
+        Start-Sleep -Milliseconds 500
+        $waited += 0.5
+    }} catch {{
+        break
+    }}
+}}
+
+# Run the update
+dotnet tool update -g {packageId}{versionArg} 2>&1 | Out-Null
+
+# Clean up this script
+Remove-Item -Path $MyInvocation.MyCommand.Path -Force
+";
+
+        try
+        {
+            // Write the script
+            await File.WriteAllTextAsync(scriptPath, scriptContent);
+
+            // Launch PowerShell detached
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell",
+                Arguments = $"-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"",
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+
+            var process = Process.Start(psi);
+            if (process == null)
+            {
+                File.Delete(scriptPath);
+                return false;
+            }
+
+            // Script launched successfully - update is scheduled
+            return true;
+        }
+        catch
+        {
+            // Clean up on error
+            if (File.Exists(scriptPath)) File.Delete(scriptPath);
             return false;
         }
     }
@@ -239,18 +322,28 @@ public static class UpdateCommands
 
             // Update CLI
             Console.WriteLine($"  Updating {CliPackageId}...");
-            var cliSuccess = await RunDotnetToolUpdateAsync(CliPackageId, targetVersion);
+            var cliResult = await RunDotnetToolUpdateAsync(CliPackageId, targetVersion, isSelf: true);
+            var cliScheduled = cliResult == UpdateResult.Scheduled;
+            var cliSuccess = cliResult == UpdateResult.Success || cliScheduled;
             results.Add(new UpdateStepResult
             {
                 Step = CliPackageId,
                 Success = cliSuccess,
+                Scheduled = cliScheduled,
                 Error = cliSuccess ? null : "Failed to update. Run 'dotnet tool update -g UnityCtl.Cli' manually."
             });
-            Console.WriteLine(cliSuccess ? $"    Updated {CliPackageId}" : $"    Failed to update {CliPackageId}");
+            var cliMessage = cliResult switch
+            {
+                UpdateResult.Success => $"    Updated {CliPackageId}",
+                UpdateResult.Scheduled => $"    Scheduled {CliPackageId} (will complete after this command exits)",
+                _ => $"    Failed to update {CliPackageId}"
+            };
+            Console.WriteLine(cliMessage);
 
             // Update Bridge
             Console.WriteLine($"  Updating {BridgePackageId}...");
-            var bridgeSuccess = await RunDotnetToolUpdateAsync(BridgePackageId, targetVersion);
+            var bridgeResult = await RunDotnetToolUpdateAsync(BridgePackageId, targetVersion);
+            var bridgeSuccess = bridgeResult == UpdateResult.Success;
             results.Add(new UpdateStepResult
             {
                 Step = BridgePackageId,
@@ -317,15 +410,22 @@ public static class UpdateCommands
             Console.WriteLine("Update Summary:");
             Console.WriteLine();
 
+            var hasScheduled = false;
             foreach (var result in results)
             {
-                var status = result.Skipped ? "Skipped" : (result.Success ? "OK" : "FAILED");
-                var icon = result.Skipped ? "-" : (result.Success ? "+" : "x");
+                var (status, icon) = result switch
+                {
+                    { Skipped: true } => ("Skipped", "-"),
+                    { Scheduled: true } => ("Scheduled", "~"),
+                    { Success: true } => ("OK", "+"),
+                    _ => ("FAILED", "x")
+                };
                 Console.WriteLine($"  [{icon}] {result.Step}: {status}");
                 if (!result.Success && result.Error != null)
                 {
                     Console.WriteLine($"      Error: {result.Error}");
                 }
+                if (result.Scheduled) hasScheduled = true;
             }
 
             Console.WriteLine();
@@ -334,7 +434,15 @@ public static class UpdateCommands
             {
                 Console.WriteLine("Update complete!");
                 Console.WriteLine();
-                Console.WriteLine("Note: You may need to restart your terminal for CLI changes to take effect.");
+                if (hasScheduled)
+                {
+                    Console.WriteLine("Note: CLI update is scheduled and will complete after this command exits.");
+                    Console.WriteLine("      Please restart your terminal to use the new version.");
+                }
+                else
+                {
+                    Console.WriteLine("Note: You may need to restart your terminal for CLI changes to take effect.");
+                }
             }
             else
             {
@@ -357,6 +465,7 @@ public static class UpdateCommands
         public required string Step { get; init; }
         public bool Success { get; init; }
         public bool Skipped { get; init; }
+        public bool Scheduled { get; init; }
         public string? Error { get; init; }
     }
 }
