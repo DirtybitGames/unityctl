@@ -75,6 +75,7 @@ public static class ScriptCommands
                 if (!file.Exists)
                 {
                     Console.Error.WriteLine($"Error: File not found: {file.FullName}");
+                    context.ExitCode = 1;
                     return;
                 }
                 csharpCode = await File.ReadAllTextAsync(file.FullName);
@@ -94,11 +95,12 @@ public static class ScriptCommands
                 Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs");
                 Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs -- arg1 arg2 \"arg with spaces\"");
                 Console.Error.WriteLine("  cat MyScript.cs | unityctl script execute");
+                context.ExitCode = 1;
                 return;
             }
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) return;
+            if (client == null) { context.ExitCode = 1; return; }
 
             var scriptArgs = context.ParseResult.GetValueForArgument(scriptArgsArgument);
 
@@ -111,12 +113,23 @@ public static class ScriptCommands
             };
 
             var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args);
-            if (response == null) return;
+            if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
                 return;
+            }
+
+            var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(
+                JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                JsonHelper.Settings
+            );
+
+            if (result != null && !result.Success)
+            {
+                context.ExitCode = 1;
             }
 
             if (json)
@@ -125,11 +138,6 @@ public static class ScriptCommands
             }
             else
             {
-                var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(
-                    JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
-                    JsonHelper.Settings
-                );
-
                 if (result != null)
                 {
                     if (result.Success)

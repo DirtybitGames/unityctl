@@ -35,7 +35,7 @@ public static class ScreenshotCommands
             var height = context.ParseResult.GetValueForOption(heightOption);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) return;
+            if (client == null) { context.ExitCode = 1; return; }
 
             // Resolve project path (same logic as BridgeClient.TryCreateFromProject)
             var resolvedProjectPath = projectPath ?? ProjectLocator.FindProjectRoot()!;
@@ -48,11 +48,12 @@ public static class ScreenshotCommands
             };
 
             var response = await client.SendCommandAsync(UnityCtlCommands.ScreenshotCapture, args);
-            if (response == null) return;
+            if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
                 return;
             }
 

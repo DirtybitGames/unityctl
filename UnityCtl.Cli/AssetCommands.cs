@@ -26,15 +26,16 @@ public static class AssetCommands
             var path = context.ParseResult.GetValueForArgument(pathArg);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) return;
+            if (client == null) { context.ExitCode = 1; return; }
 
             var args = new Dictionary<string, object?> { { "path", path } };
             var response = await client.SendCommandAsync(UnityCtlCommands.AssetImport, args);
-            if (response == null) return;
+            if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -59,10 +60,10 @@ public static class AssetCommands
             var json = ContextHelper.GetJson(context);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) return;
+            if (client == null) { context.ExitCode = 1; return; }
 
             var response = await client.SendCommandAsync(UnityCtlCommands.AssetRefresh, null);
-            if (response == null) return;
+            if (response == null) { context.ExitCode = 1; return; }
 
             if (json)
             {
@@ -70,13 +71,13 @@ public static class AssetCommands
                 Console.WriteLine(JsonHelper.Serialize(response.Result));
                 if (response.Status == ResponseStatus.Error)
                 {
-                    Environment.ExitCode = 1;
+                    context.ExitCode = 1;
                 }
             }
             else if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
-                Environment.ExitCode = 1;
+                context.ExitCode = 1;
             }
             else
             {

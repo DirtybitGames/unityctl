@@ -39,13 +39,14 @@ public static class TestCommands
             var filter = context.ParseResult.GetValueForOption(filterOption);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) return;
+            if (client == null) { context.ExitCode = 1; return; }
 
             // Normalize mode to lowercase for consistency
             mode = mode?.ToLower() ?? "editmode";
             if (mode != "editmode" && mode != "playmode")
             {
                 Console.Error.WriteLine($"Error: Invalid mode '{mode}'. Must be 'editmode' or 'playmode'.");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -61,12 +62,23 @@ public static class TestCommands
             }
 
             var response = await client.SendCommandAsync(UnityCtlCommands.TestRun, args);
-            if (response == null) return;
+            if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
                 return;
+            }
+
+            var result = JsonConvert.DeserializeObject<TestFinishedPayload>(
+                JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                JsonHelper.Settings
+            );
+
+            if (result != null && result.Failed > 0)
+            {
+                context.ExitCode = 1;
             }
 
             if (json)
@@ -75,11 +87,6 @@ public static class TestCommands
             }
             else
             {
-                var result = JsonConvert.DeserializeObject<TestFinishedPayload>(
-                    JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
-                    JsonHelper.Settings
-                );
-
                 if (result != null)
                 {
                     Console.WriteLine($"Tests completed in {result.Duration:F1}s");

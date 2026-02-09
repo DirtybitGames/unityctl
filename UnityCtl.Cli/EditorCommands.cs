@@ -34,7 +34,7 @@ public static class EditorCommands
             var wait = context.ParseResult.GetValueForOption(waitOption);
             var unityPath = context.ParseResult.GetValueForOption(unityPathOption);
 
-            await RunEditorAsync(projectPath, unityPath, wait);
+            await RunEditorAsync(context, projectPath, unityPath, wait);
         });
 
         // editor stop
@@ -43,7 +43,7 @@ public static class EditorCommands
         stopCommand.SetHandler(async (InvocationContext context) =>
         {
             var projectPath = ContextHelper.GetProjectPath(context);
-            await StopEditorAsync(projectPath);
+            await StopEditorAsync(context, projectPath);
         });
 
         editorCommand.AddCommand(runCommand);
@@ -51,7 +51,7 @@ public static class EditorCommands
         return editorCommand;
     }
 
-    private static async Task RunEditorAsync(string? projectPath, string? unityPath, bool wait)
+    private static async Task RunEditorAsync(InvocationContext context, string? projectPath, string? unityPath, bool wait)
     {
         // 1. Find project root
         var projectRoot = projectPath != null
@@ -62,6 +62,7 @@ public static class EditorCommands
         {
             Console.Error.WriteLine("Error: Not in a Unity project.");
             Console.Error.WriteLine("  Use --project to specify project root");
+            context.ExitCode = 1;
             return;
         }
 
@@ -73,6 +74,7 @@ public static class EditorCommands
         {
             Console.Error.WriteLine("Error: Unity Editor is already running for this project.");
             Console.Error.WriteLine("  Use 'unityctl editor stop' to stop it first.");
+            context.ExitCode = 1;
             return;
         }
 
@@ -83,6 +85,7 @@ public static class EditorCommands
             if (version == null)
             {
                 Console.Error.WriteLine("Error: Could not read Unity version from ProjectSettings/ProjectVersion.txt");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -99,6 +102,7 @@ public static class EditorCommands
                     Console.Error.WriteLine($"    {expectedPath}");
                 }
                 Console.Error.WriteLine("  Use --unity-path to specify the Unity executable manually.");
+                context.ExitCode = 1;
                 return;
             }
         }
@@ -140,6 +144,7 @@ public static class EditorCommands
             if (unityProcess == null)
             {
                 Console.Error.WriteLine("Error: Failed to start Unity process.");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -177,10 +182,11 @@ public static class EditorCommands
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
+            context.ExitCode = 1;
         }
     }
 
-    private static Task StopEditorAsync(string? projectPath)
+    private static Task StopEditorAsync(InvocationContext context, string? projectPath)
     {
         // 1. Find project root
         var projectRoot = projectPath != null
@@ -191,6 +197,7 @@ public static class EditorCommands
         {
             Console.Error.WriteLine("Error: Not in a Unity project.");
             Console.Error.WriteLine("  Use --project to specify project root");
+            context.ExitCode = 1;
             return Task.CompletedTask;
         }
 
@@ -201,6 +208,7 @@ public static class EditorCommands
         if (unityProcess == null)
         {
             Console.Error.WriteLine("Error: No Unity Editor found running for this project.");
+            context.ExitCode = 1;
             return Task.CompletedTask;
         }
 
@@ -215,6 +223,7 @@ public static class EditorCommands
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error stopping Unity: {ex.Message}");
+            context.ExitCode = 1;
         }
 
         return Task.CompletedTask;

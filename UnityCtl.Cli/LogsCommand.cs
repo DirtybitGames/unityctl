@@ -56,7 +56,7 @@ public static class LogsCommand
             var full = context.ParseResult.GetValueForOption(fullOption);
             var stack = context.ParseResult.GetValueForOption(stackOption);
 
-            await ShowLogsAsync(projectPath, follow, lines, noColor, verbose, full, stack);
+            await ShowLogsAsync(context, projectPath, follow, lines, noColor, verbose, full, stack);
         });
 
         // Add 'logs clear' subcommand
@@ -64,14 +64,14 @@ public static class LogsCommand
         clearCommand.SetHandler(async (InvocationContext context) =>
         {
             var projectPath = ContextHelper.GetProjectPath(context);
-            await ClearLogsAsync(projectPath);
+            await ClearLogsAsync(context, projectPath);
         });
         logsCommand.AddCommand(clearCommand);
 
         return logsCommand;
     }
 
-    private static async Task ClearLogsAsync(string? projectPath)
+    private static async Task ClearLogsAsync(InvocationContext context, string? projectPath)
     {
         var projectRoot = projectPath != null
             ? Path.GetFullPath(projectPath)
@@ -81,6 +81,7 @@ public static class LogsCommand
         {
             Console.Error.WriteLine("Error: Not in a Unity project.");
             Console.Error.WriteLine("  Use --project to specify project root");
+            context.ExitCode = 1;
             return;
         }
 
@@ -89,6 +90,7 @@ public static class LogsCommand
         {
             Console.Error.WriteLine("Error: Bridge not running.");
             Console.Error.WriteLine("  Start the bridge first: unityctl bridge start");
+            context.ExitCode = 1;
             return;
         }
 
@@ -102,6 +104,7 @@ public static class LogsCommand
             if (!response.IsSuccessStatusCode)
             {
                 Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -112,10 +115,12 @@ public static class LogsCommand
             Console.Error.WriteLine($"Error: Cannot connect to bridge at {baseUrl}");
             Console.Error.WriteLine($"  {ex.Message}");
             Console.Error.WriteLine("  Make sure the bridge is running: unityctl bridge start");
+            context.ExitCode = 1;
         }
     }
 
     private static async Task ShowLogsAsync(
+        InvocationContext context,
         string? projectPath,
         bool follow,
         int lines,
@@ -133,6 +138,7 @@ public static class LogsCommand
         {
             Console.Error.WriteLine("Error: Not in a Unity project.");
             Console.Error.WriteLine("  Use --project to specify project root");
+            context.ExitCode = 1;
             return;
         }
 
@@ -141,6 +147,7 @@ public static class LogsCommand
         {
             Console.Error.WriteLine("Error: Bridge not running.");
             Console.Error.WriteLine("  Start the bridge first: unityctl bridge start");
+            context.ExitCode = 1;
             return;
         }
 
@@ -156,6 +163,7 @@ public static class LogsCommand
             if (!response.IsSuccessStatusCode)
             {
                 Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -181,6 +189,7 @@ public static class LogsCommand
             Console.Error.WriteLine($"Error: Cannot connect to bridge at {baseUrl}");
             Console.Error.WriteLine($"  {ex.Message}");
             Console.Error.WriteLine("  Make sure the bridge is running: unityctl bridge start");
+            context.ExitCode = 1;
             return;
         }
 

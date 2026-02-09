@@ -27,15 +27,16 @@ public static class SceneCommands
             var source = context.ParseResult.GetValueForOption(sourceOption);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) return;
+            if (client == null) { context.ExitCode = 1; return; }
 
             var args = new Dictionary<string, object?> { { "source", source } };
             var response = await client.SendCommandAsync(UnityCtlCommands.SceneList, args);
-            if (response == null) return;
+            if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -78,7 +79,7 @@ public static class SceneCommands
             var mode = context.ParseResult.GetValueForOption(modeOption);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) return;
+            if (client == null) { context.ExitCode = 1; return; }
 
             var args = new Dictionary<string, object?>
             {
@@ -86,11 +87,12 @@ public static class SceneCommands
                 { "mode", mode }
             };
             var response = await client.SendCommandAsync(UnityCtlCommands.SceneLoad, args);
-            if (response == null) return;
+            if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
                 return;
             }
 

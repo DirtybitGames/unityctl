@@ -32,6 +32,7 @@ public static class BridgeCommands
             if (projectRoot == null)
             {
                 Console.Error.WriteLine("Error: Not in a Unity project. Use --project to specify project root.");
+                context.ExitCode = 1;
                 return;
             }
 
@@ -78,7 +79,8 @@ public static class BridgeCommands
                 projectPath = parseResult.GetValueForOption(projectOption);
             }
 
-            await BridgeClient.StartBridgeAsync(projectPath);
+            var success = await BridgeClient.StartBridgeAsync(projectPath);
+            if (!success) context.ExitCode = 1;
         });
 
         // bridge stop
@@ -96,7 +98,8 @@ public static class BridgeCommands
                 projectPath = parseResult.GetValueForOption(projectOption);
             }
 
-            await BridgeClient.StopBridgeAsync(projectPath);
+            var success = await BridgeClient.StopBridgeAsync(projectPath);
+            if (!success) context.ExitCode = 1;
         });
 
         bridgeCommand.AddCommand(statusCommand);

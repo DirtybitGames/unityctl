@@ -47,14 +47,15 @@ public static class PlayCommands
         var json = ContextHelper.GetJson(context);
 
         var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-        if (client == null) return;
+        if (client == null) { context.ExitCode = 1; return; }
 
         var response = await client.SendCommandAsync(command);
-        if (response == null) return;
+        if (response == null) { context.ExitCode = 1; return; }
 
         if (response.Status == ResponseStatus.Error)
         {
             Console.Error.WriteLine($"Error: {response.Error?.Message}");
+            context.ExitCode = 1;
             return;
         }
 
