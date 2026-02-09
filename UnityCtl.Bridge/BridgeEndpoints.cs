@@ -25,55 +25,49 @@ public static class BridgeEndpoints
     private static readonly TimeSpan DomainReloadDetectionTimeout = TimeSpan.FromSeconds(3);
 
     // Command timeout configuration (in seconds, configurable via environment variables)
+    // Note: Timeouts are resolved lazily via env vars so tests can override them per-fixture.
     private static readonly Dictionary<string, CommandConfig> CommandConfigs = new()
     {
         [UnityCtlCommands.PlayEnter] = new CommandConfig
         {
-            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_PLAYMODE", 30),
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_PLAYMODE", TimeoutDefaultSeconds = 30,
             CompletionEvent = UnityCtlEvents.PlayModeChanged,
             CompletionEventState = "EnteredPlayMode"
         },
         [UnityCtlCommands.PlayExit] = new CommandConfig
         {
-            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_PLAYMODE", 30),
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_PLAYMODE", TimeoutDefaultSeconds = 30,
             CompletionEvent = UnityCtlEvents.PlayModeChanged
             // Note: Don't filter by state for play exit - domain reload can cause event loss
         },
         [UnityCtlCommands.AssetImport] = new CommandConfig
         {
-            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_ASSET", 30),
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_ASSET", TimeoutDefaultSeconds = 30,
             CompletionEvent = UnityCtlEvents.AssetImportComplete
         },
         [UnityCtlCommands.AssetReimportAll] = new CommandConfig
         {
-            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_ASSET", 30),
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_ASSET", TimeoutDefaultSeconds = 30,
             CompletionEvent = UnityCtlEvents.AssetReimportAllComplete
         },
         [UnityCtlCommands.AssetRefresh] = new CommandConfig
         {
-            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_REFRESH", 60),
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_REFRESH", TimeoutDefaultSeconds = 60,
             CompletionEvent = UnityCtlEvents.AssetRefreshComplete
         },
         [UnityCtlCommands.TestRun] = new CommandConfig
         {
-            Timeout = GetTimeoutFromEnv("UNITYCTL_TIMEOUT_TEST", 300),
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_TEST", TimeoutDefaultSeconds = 300,
             CompletionEvent = UnityCtlEvents.TestFinished
         }
     };
 
-    private static TimeSpan GetTimeoutFromEnv(string envVar, int defaultSeconds)
-    {
-        var value = Environment.GetEnvironmentVariable(envVar);
-        if (int.TryParse(value, out var seconds))
-        {
-            return TimeSpan.FromSeconds(seconds);
-        }
-        return TimeSpan.FromSeconds(defaultSeconds);
-    }
-
     private static TimeSpan GetDefaultTimeout()
     {
-        return GetTimeoutFromEnv("UNITYCTL_TIMEOUT_DEFAULT", 30);
+        var value = Environment.GetEnvironmentVariable("UNITYCTL_TIMEOUT_DEFAULT");
+        if (int.TryParse(value, out var seconds))
+            return TimeSpan.FromSeconds(seconds);
+        return TimeSpan.FromSeconds(30);
     }
 
     // --- Helper methods ---
@@ -1108,7 +1102,17 @@ public class RpcRequest
 
 internal class CommandConfig
 {
-    public required TimeSpan Timeout { get; init; }
+    public required string TimeoutEnvVar { get; init; }
+    public required int TimeoutDefaultSeconds { get; init; }
+    public TimeSpan Timeout => GetTimeoutFromEnv(TimeoutEnvVar, TimeoutDefaultSeconds);
     public string? CompletionEvent { get; init; }               // WebSocket event from Unity
     public string? CompletionEventState { get; init; }          // Expected state in payload to consider event complete (e.g., "EnteredPlayMode")
+
+    private static TimeSpan GetTimeoutFromEnv(string envVar, int defaultSeconds)
+    {
+        var value = Environment.GetEnvironmentVariable(envVar);
+        if (int.TryParse(value, out var seconds))
+            return TimeSpan.FromSeconds(seconds);
+        return TimeSpan.FromSeconds(defaultSeconds);
+    }
 }
