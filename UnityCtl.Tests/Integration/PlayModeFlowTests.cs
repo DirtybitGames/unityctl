@@ -240,14 +240,17 @@ public class PlayModeFlowTests : IAsyncLifetime
     [Fact]
     public async Task PlayExit_CompilationTriggered_WaitsForCompilationFinished()
     {
-        // Configure play.exit to emit ExitingPlayMode with compilationTriggered=true,
-        // followed by compilation.finished
+        // Real Unity behavior: ExitingPlayMode has compilationTriggered=false,
+        // then compilation.started fires quickly, then compilation.finished later
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
             new PlayModeResult { State = PlayModeState.Transitioning },
             ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
                 UnityCtlEvents.PlayModeChanged,
-                new { state = "ExitingPlayMode", compilationTriggered = true }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                new { state = "ExitingPlayMode", compilationTriggered = false }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(100),
+                UnityCtlEvents.CompilationStarted,
+                new { }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(300),
                 UnityCtlEvents.CompilationFinished,
                 new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }));
 
@@ -265,17 +268,20 @@ public class PlayModeFlowTests : IAsyncLifetime
         // Reproduce the exact bug from conversation logs: play.exit triggers compilation
         // which triggers domain reload. The next command should NOT get a 503.
         //
-        // Sequence: ExitingPlayMode (compilationTriggered) -> compilation.finished
+        // Real Unity sequence: ExitingPlayMode -> compilation.started -> compilation.finished
         //   -> DomainReloadStarting -> Unity disconnects -> Unity reconnects
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
             new PlayModeResult { State = PlayModeState.Transitioning },
             ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
                 UnityCtlEvents.PlayModeChanged,
-                new { state = "ExitingPlayMode", compilationTriggered = true }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                new { state = "ExitingPlayMode", compilationTriggered = false }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(100),
+                UnityCtlEvents.CompilationStarted,
+                new { }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(200),
                 UnityCtlEvents.CompilationFinished,
                 new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(250),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(300),
                 UnityCtlEvents.DomainReloadStarting,
                 new { }));
 

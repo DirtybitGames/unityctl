@@ -537,12 +537,19 @@ public static class BridgeEndpoints
                     eventWaitTask = state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted, config.CompletionEventState);
                 }
 
-                // For play exit, also pre-register waiters for compilation.finished
-                // and domain.reloadStarting (must register BEFORE events fire to capture them)
+                // For play exit, also pre-register waiters for compilation.started,
+                // compilation.finished, and domain.reloadStarting
+                // (must register BEFORE events fire to capture them)
+                Task<EventMessage>? compilationStartedWaitTask = null;
                 Task<EventMessage>? compilationWaitTask = null;
                 Task<EventMessage>? domainReloadWaitTask = null;
                 if (request.Command == UnityCtlCommands.PlayExit)
                 {
+                    compilationStartedWaitTask = state.WaitForEventAsync(
+                        requestMessage.RequestId + "_compile_started_preregister",
+                        UnityCtlEvents.CompilationStarted,
+                        timeout,
+                        context.RequestAborted);
                     compilationWaitTask = state.WaitForEventAsync(
                         requestMessage.RequestId + "_compile_preregister",
                         UnityCtlEvents.CompilationFinished,
@@ -582,19 +589,20 @@ public static class BridgeEndpoints
                         object? finalResult = eventMessage.Payload;
                         var eventPayload = eventMessage.Payload as JObject;
 
-                        // For play exit: wait briefly to see if compilation.finished arrives
-                        // (compilation events come AFTER ExitingPlayMode but BEFORE DomainReloadStarting)
-                        if (!compilationTriggered && compilationWaitTask != null)
+                        // For play exit: detect compilation via compilation.started event.
+                        // ExitingPlayMode always has compilationTriggered=false (the Unity plugin
+                        // only sets it for EnteredEditMode). Instead, we listen for compilation.started
+                        // which fires almost immediately if scripts need recompilation.
+                        if (!compilationTriggered && compilationStartedWaitTask != null)
                         {
-                            // Wait briefly for compilation.finished to arrive
-                            // (compilation events come shortly after ExitingPlayMode)
+                            // Wait briefly for compilation.started to arrive
                             var waitTask = Task.Delay(CompilationWaitTimeout, context.RequestAborted);
-                            var completedTask = await Task.WhenAny(compilationWaitTask, waitTask);
+                            var completedTask = await Task.WhenAny(compilationStartedWaitTask, waitTask);
 
-                            if (completedTask == compilationWaitTask && compilationWaitTask.IsCompletedSuccessfully)
+                            if (completedTask == compilationStartedWaitTask && compilationStartedWaitTask.IsCompletedSuccessfully)
                             {
                                 compilationTriggered = true;
-                                Console.WriteLine($"[Bridge] Compilation detected during play exit - returning compilation results");
+                                Console.WriteLine($"[Bridge] Compilation started detected during play exit - will wait for compilation to finish");
                             }
                         }
 
@@ -718,6 +726,10 @@ public static class BridgeEndpoints
                 finally
                 {
                     // Clean up pre-registered waiters if not used
+                    if (compilationStartedWaitTask != null && !compilationStartedWaitTask.IsCompleted)
+                    {
+                        state.CancelEventWaiter(requestMessage.RequestId + "_compile_started_preregister");
+                    }
                     if (compilationWaitTask != null && !compilationWaitTask.IsCompleted)
                     {
                         state.CancelEventWaiter(requestMessage.RequestId + "_compile_preregister");
