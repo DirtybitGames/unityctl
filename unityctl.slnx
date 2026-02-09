@@ -7,4 +7,5 @@
   <Project Path="UnityCtl.Bridge/UnityCtl.Bridge.csproj" />
   <Project Path="UnityCtl.Cli/UnityCtl.Cli.csproj" />
   <Project Path="UnityCtl.Protocol/UnityCtl.Protocol.csproj" />
+  <Project Path="UnityCtl.Tests/UnityCtl.Tests.csproj" />
 </Solution>
