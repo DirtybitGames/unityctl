@@ -91,8 +91,10 @@ public class TestRunFlowTests : IAsyncLifetime
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.TestRun, args);
         AssertExtensions.IsOk(response);
 
-        // Verify args were forwarded
+        // Verify args were forwarded with correct values
         var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.TestRun);
         Assert.NotNull(received.Args);
+        Assert.Equal("playmode", received.Args["mode"]?.ToString());
+        Assert.Equal("MyTests", received.Args["filter"]?.ToString());
     }
 }

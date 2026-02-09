@@ -163,6 +163,8 @@ public class PlayModeFlowTests : IAsyncLifetime
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
 
         AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("ExitingPlayMode", result["state"]?.ToString());
     }
 
     [Fact]
@@ -173,5 +175,87 @@ public class PlayModeFlowTests : IAsyncLifetime
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
         Assert.Equal("stopped", result["state"]?.ToString());
+    }
+
+    [Fact]
+    public async Task PlayEnter_DomainReloadDuringEntry_RetriesAndSucceeds()
+    {
+        // Configure play.enter to respond with transitioning but NO follow-up events
+        // (simulates: Unity starts transitioning, then domain reload kills the connection
+        //  before EnteredPlayMode event can be sent)
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayEnter, _ =>
+            new PlayModeResult { State = PlayModeState.Transitioning });
+
+        // Start play.enter RPC (will go through asset.refresh, then enter the retry loop)
+        var rpcTask = _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayEnter);
+
+        // Wait for play.enter to be received by FakeUnity
+        await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.PlayEnter);
+
+        // Simulate domain reload: disconnect + reconnect with a new FakeUnity
+        await _fixture.FakeUnity.SendEventAsync(
+            UnityCtlEvents.DomainReloadStarting, new { });
+        await Task.Delay(50);
+        await _fixture.FakeUnity.DisconnectAsync();
+        await Task.Delay(200);
+
+        // Reconnect with new FakeUnity that reports "playing" on status check
+        var newFakeUnity = _fixture.CreateFakeUnity();
+        newFakeUnity.OnCommand(UnityCtlCommands.PlayStatus, _ =>
+            new PlayModeResult { State = PlayModeState.Playing });
+        await newFakeUnity.ConnectAsync(_fixture.BaseUri);
+
+        // The Bridge's retry loop should detect "playing" on status re-check
+        var response = await rpcTask;
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("EnteredPlayMode", result["state"]?.ToString());
+
+        await newFakeUnity.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PlayEnter_BounceBack_ReturnsPlayModeFailed()
+    {
+        // Configure play.enter to emit ExitingEditMode then EnteredEditMode (bounce-back)
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayEnter, _ =>
+            new PlayModeResult { State = PlayModeState.Transitioning },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "ExitingEditMode" }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "EnteredEditMode" }));
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayEnter);
+
+        Assert.Equal(ResponseStatus.Error, response.Status);
+        Assert.NotNull(response.Error);
+        Assert.Equal("PLAY_MODE_FAILED", response.Error.Code);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("PlayModeEntryFailed", result["state"]?.ToString());
+    }
+
+    [Fact]
+    public async Task PlayExit_CompilationTriggered_WaitsForCompilationFinished()
+    {
+        // Configure play.exit to emit ExitingPlayMode with compilationTriggered=true,
+        // followed by compilation.finished
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
+            new PlayModeResult { State = PlayModeState.Transitioning },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "ExitingPlayMode", compilationTriggered = true }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.CompilationFinished,
+                new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }));
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.True(result["compilationTriggered"]?.Value<bool>());
+        Assert.True(result["compilationSuccess"]?.Value<bool>());
     }
 }

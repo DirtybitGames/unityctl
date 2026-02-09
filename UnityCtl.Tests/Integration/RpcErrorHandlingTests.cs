@@ -72,8 +72,6 @@ public class RpcErrorHandlingTests : IAsyncLifetime
         AssertExtensions.IsOk(response);
 
         var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.SceneList);
-        // The bridge creates its own RequestMessage, but the agentId should be forwarded
-        // We can verify the request was received
-        Assert.Equal(UnityCtlCommands.SceneList, received.Command);
+        Assert.Equal("agent-42", received.AgentId);
     }
 }

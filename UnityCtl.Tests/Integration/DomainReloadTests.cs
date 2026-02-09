@@ -20,9 +20,18 @@ public class DomainReloadTests : IAsyncLifetime
     [Fact]
     public async Task DomainReloadEvent_KeepsOperationsAlive()
     {
-        // Add a pending request
-        var tcs = new TaskCompletionSource<ResponseMessage>();
-        _fixture.BridgeState.PendingRequests["test-req"] = tcs;
+        // Configure a command with a long delay so the request stays pending
+        _fixture.FakeUnity.OnCommandWithDelay(UnityCtlCommands.SceneList,
+            TimeSpan.FromSeconds(30), _ => new SceneListResult
+            {
+                Scenes = new[] { new SceneInfo { Path = "Assets/Scenes/Main.unity", EnabledInBuild = true } }
+            });
+
+        // Start a real RPC request that will be in-flight
+        var rpcTask = _fixture.SendRpcAndParseAsync(UnityCtlCommands.SceneList);
+
+        // Wait for the request to arrive at FakeUnity (so it's truly in-flight)
+        await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.SceneList);
 
         // Send domain reload starting event
         await _fixture.FakeUnity.SendEventAsync(
@@ -35,9 +44,8 @@ public class DomainReloadTests : IAsyncLifetime
         await _fixture.FakeUnity.DisconnectAsync();
         await Task.Delay(100);
 
-        // The pending request should NOT be cancelled (grace period)
-        Assert.False(tcs.Task.IsCanceled);
-        Assert.False(tcs.Task.IsCompleted);
+        // The real in-flight RPC should NOT be completed (grace period keeps it alive)
+        Assert.False(rpcTask.IsCompleted);
     }
 
     [Fact]
@@ -78,16 +86,25 @@ public class DomainReloadTests : IAsyncLifetime
     [Fact]
     public async Task NormalDisconnect_CancelsPendingRequests()
     {
-        // Add a pending request
-        var tcs = new TaskCompletionSource<ResponseMessage>();
-        _fixture.BridgeState.PendingRequests["test-req-2"] = tcs;
+        // Configure a command with a long delay so the request stays pending
+        _fixture.FakeUnity.OnCommandWithDelay(UnityCtlCommands.SceneList,
+            TimeSpan.FromSeconds(30), _ => new SceneListResult
+            {
+                Scenes = Array.Empty<SceneInfo>()
+            });
+
+        // Start a real RPC request that will be in-flight
+        var rpcTask = _fixture.SendRpcAsync(UnityCtlCommands.SceneList);
+
+        // Wait for the request to arrive at FakeUnity
+        await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.SceneList);
 
         // Disconnect WITHOUT domain reload event
         await _fixture.FakeUnity.DisconnectAsync();
         await Task.Delay(200);
 
-        // The pending request SHOULD be cancelled (no grace period)
-        Assert.True(tcs.Task.IsCanceled);
+        // The HTTP response should complete (bridge returns error when Unity disconnects)
+        Assert.True(rpcTask.IsCompleted);
     }
 
     [Fact]

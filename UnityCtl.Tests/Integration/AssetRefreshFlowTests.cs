@@ -103,9 +103,10 @@ public class AssetRefreshFlowTests : IAsyncLifetime
 
         AssertExtensions.IsOk(response);
 
-        // Verify the request was received by FakeUnity
+        // Verify the request was received by FakeUnity with correct args
         var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.AssetImport);
-        Assert.Equal(UnityCtlCommands.AssetImport, received.Command);
+        Assert.NotNull(received.Args);
+        Assert.Equal("Assets/Scripts/Test.cs", received.Args["path"]?.ToString());
     }
 
     [Fact]

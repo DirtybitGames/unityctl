@@ -298,6 +298,7 @@ public class FakeUnityClient : IAsyncDisposable
             {
                 RequestId = request.RequestId,
                 Command = request.Command,
+                AgentId = request.AgentId,
                 Args = request.Args,
                 ReceivedAt = DateTime.UtcNow
             };
@@ -422,6 +423,7 @@ public class ReceivedRequest
 {
     public required string RequestId { get; init; }
     public required string Command { get; init; }
+    public string? AgentId { get; init; }
     public Dictionary<string, object?>? Args { get; init; }
     public DateTime ReceivedAt { get; init; }
     internal bool Claimed { get; set; }
