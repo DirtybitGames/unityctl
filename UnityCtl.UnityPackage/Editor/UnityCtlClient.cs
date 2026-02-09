@@ -36,7 +36,16 @@ namespace UnityCtl
         private int _reconnectAttempts;
 
         // Public connection status
-        public bool IsConnected => _isConnected && _webSocket != null && _webSocket.State == WebSocketState.Open;
+        public bool IsConnected
+        {
+            get
+            {
+                lock (_connectionLock)
+                {
+                    return _isConnected && _webSocket != null && _webSocket.State == WebSocketState.Open;
+                }
+            }
+        }
 
         // Conditional debug logging helpers
         private static void DebugLog(string message)
@@ -67,6 +76,7 @@ namespace UnityCtl
         private const int MAX_BUFFERED_LOGS = 1000;
         private readonly System.Collections.Generic.Queue<EventMessage> _logBuffer = new();
         private readonly object _bufferLock = new object();
+        private readonly object _connectionLock = new object();
 
         public void TryConnectIfBridgePresent()
         {
@@ -116,19 +126,34 @@ namespace UnityCtl
 
         private async Task ConnectAsync(int port)
         {
-            // Skip if already connected with a healthy WebSocket
-            if (_isConnected && _webSocket != null && _webSocket.State == WebSocketState.Open)
+            ClientWebSocket oldSocket;
+            ClientWebSocket newSocket;
+            CancellationTokenSource newCts;
+
+            lock (_connectionLock)
             {
-                DebugLog("[UnityCtl] Already connected, skipping connection attempt");
-                return;
+                // Skip if already connected with a healthy WebSocket
+                if (_isConnected && _webSocket != null && _webSocket.State == WebSocketState.Open)
+                {
+                    DebugLog("[UnityCtl] Already connected, skipping connection attempt");
+                    return;
+                }
+
+                oldSocket = _webSocket;
+                newSocket = new ClientWebSocket();
+                _webSocket = newSocket;
+
+                _receiveCts?.Cancel();
+                newCts = new CancellationTokenSource();
+                _receiveCts = newCts;
             }
 
-            // Clean up any existing WebSocket
-            if (_webSocket != null)
+            // Dispose old socket outside lock
+            if (oldSocket != null)
             {
                 try
                 {
-                    _webSocket.Dispose();
+                    oldSocket.Dispose();
                 }
                 catch (Exception disposeEx)
                 {
@@ -136,16 +161,16 @@ namespace UnityCtl
                 }
             }
 
-            _webSocket = new ClientWebSocket();
-            _receiveCts?.Cancel();
-            _receiveCts = new CancellationTokenSource();
-
             var uri = new Uri($"ws://localhost:{port}/unity");
 
             try
             {
-                await _webSocket.ConnectAsync(uri, _receiveCts.Token);
-                _isConnected = true;
+                await newSocket.ConnectAsync(uri, newCts.Token);
+
+                lock (_connectionLock)
+                {
+                    _isConnected = true;
+                }
                 _reconnectAttempts = 0; // Reset reconnection counter on successful connection
 
                 DebugLog($"[UnityCtl] ✓ Connected to bridge at port {port}");
@@ -157,12 +182,15 @@ namespace UnityCtl
                 FlushLogBuffer();
 
                 // Start receive loop
-                _ = Task.Run(() => ReceiveLoopAsync(_receiveCts.Token));
+                _ = Task.Run(() => ReceiveLoopAsync(newCts.Token));
             }
             catch (Exception ex)
             {
                 DebugLogWarning($"[UnityCtl] ✗ Connection failed: {ex.Message}");
-                _isConnected = false;
+                lock (_connectionLock)
+                {
+                    _isConnected = false;
+                }
             }
         }
 
@@ -207,14 +235,21 @@ namespace UnityCtl
 
             try
             {
-                while (_webSocket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+                while (!cancellationToken.IsCancellationRequested)
                 {
-                    var result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                    ClientWebSocket socket;
+                    lock (_connectionLock)
+                    {
+                        socket = _webSocket;
+                        if (socket == null || socket.State != WebSocketState.Open) break;
+                    }
+
+                    var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
                         DebugLog("[UnityCtl] Bridge closed connection gracefully");
-                        await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
                         break;
                     }
 
@@ -238,9 +273,9 @@ namespace UnityCtl
                 {
                     DebugLog("[UnityCtl] Receive loop cancelled");
                 }
-                else if (_webSocket.State != WebSocketState.Open)
+                else
                 {
-                    DebugLogWarning($"[UnityCtl] WebSocket closed unexpectedly (state: {_webSocket.State})");
+                    DebugLogWarning("[UnityCtl] WebSocket closed unexpectedly");
                 }
             }
             catch (Exception ex)
@@ -249,7 +284,10 @@ namespace UnityCtl
             }
             finally
             {
-                _isConnected = false;
+                lock (_connectionLock)
+                {
+                    _isConnected = false;
+                }
                 DebugLog("[UnityCtl] Disconnected from bridge - will attempt to reconnect");
             }
         }
@@ -324,7 +362,7 @@ namespace UnityCtl
                 _lastConnectionCheck = currentTime;
 
                 // If disconnected or WebSocket is not in Open state, attempt reconnection
-                if (!_isConnected || _webSocket == null || _webSocket.State != WebSocketState.Open)
+                if (!IsConnected)
                 {
                     // Calculate exponential backoff delay: 1s, 2s, 4s, 8s, 16s, 30s (max)
                     var backoffDelay = Mathf.Min(1f * Mathf.Pow(2, _reconnectAttempts), 30f);
@@ -1114,7 +1152,7 @@ namespace UnityCtl
 
         public void SendTestFinishedEvent(TestFinishedPayload payload)
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             var eventMessage = new EventMessage
             {
@@ -1183,7 +1221,7 @@ namespace UnityCtl
             };
 
             // If not connected, buffer the log for later
-            if (!_isConnected)
+            if (!IsConnected)
             {
                 lock (_bufferLock)
                 {
@@ -1202,7 +1240,7 @@ namespace UnityCtl
 
         private void FlushLogBuffer()
         {
-            if (!_isConnected)
+            if (!IsConnected)
             {
                 return;
             }
@@ -1234,7 +1272,7 @@ namespace UnityCtl
 
         public void SendPlayModeChangedEvent(PlayModeStateChange stateChange)
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             var state = stateChange switch
             {
@@ -1260,7 +1298,7 @@ namespace UnityCtl
 
         public void SendCompilationStartedEvent()
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             var eventMessage = new EventMessage
             {
@@ -1274,7 +1312,7 @@ namespace UnityCtl
 
         public void SendCompilationFinishedEvent(bool success, System.Collections.Generic.List<UnityEditor.Compilation.CompilerMessage> messages = null)
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             // Convert CompilerMessages to our DTO format
             CompilationMessageInfo[] errors = null;
@@ -1322,7 +1360,7 @@ namespace UnityCtl
 
         public void SendDomainReloadStartingEvent()
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             var eventMessage = new EventMessage
             {
@@ -1346,7 +1384,7 @@ namespace UnityCtl
 
         public void SendAssetImportCompleteEvent(string path, bool success)
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             var eventMessage = new EventMessage
             {
@@ -1360,7 +1398,7 @@ namespace UnityCtl
 
         public void SendAssetReimportAllCompleteEvent(bool success)
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             var eventMessage = new EventMessage
             {
@@ -1374,7 +1412,7 @@ namespace UnityCtl
 
         public void SendAssetRefreshCompleteEvent(bool compilationTriggered, bool hasCompilationErrors = false)
         {
-            if (!_isConnected) return;
+            if (!IsConnected) return;
 
             var eventMessage = new EventMessage
             {
@@ -1392,16 +1430,21 @@ namespace UnityCtl
 
         private async Task SendMessageAsync(BaseMessage message)
         {
-            if (!_isConnected || _webSocket == null || _webSocket.State != WebSocketState.Open)
+            ClientWebSocket socket;
+            lock (_connectionLock)
             {
-                return;
+                if (!_isConnected || _webSocket == null || _webSocket.State != WebSocketState.Open)
+                {
+                    return;
+                }
+                socket = _webSocket;
             }
 
             try
             {
                 var json = JsonHelper.Serialize(message);
                 var bytes = Encoding.UTF8.GetBytes(json);
-                await _webSocket.SendAsync(
+                await socket.SendAsync(
                     new ArraySegment<byte>(bytes),
                     WebSocketMessageType.Text,
                     true,
@@ -1411,7 +1454,10 @@ namespace UnityCtl
             catch (Exception ex)
             {
                 DebugLogWarning($"[UnityCtl] Failed to send message: {ex.Message}");
-                _isConnected = false;
+                lock (_connectionLock)
+                {
+                    _isConnected = false;
+                }
             }
         }
     }

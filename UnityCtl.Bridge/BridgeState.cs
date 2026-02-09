@@ -107,19 +107,45 @@ public class BridgeState
     public async Task<bool> WaitForDomainReloadCompleteAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         Task signal;
+        TimeSpan effectiveTimeout;
         lock (_lock)
         {
             if (!_isDomainReloadInProgress) return true;
+
+            // Check if grace period already expired
+            if (_domainReloadGracePeriodEnd != DateTime.MinValue
+                && DateTime.UtcNow > _domainReloadGracePeriodEnd)
+            {
+                _isDomainReloadInProgress = false;
+                _domainReloadGracePeriodEnd = DateTime.MinValue;
+                _domainReloadCompleteSignal.TrySetResult();
+                return false;
+            }
+
             signal = _domainReloadCompleteSignal.Task;
+
+            // Cap timeout to remaining grace period
+            if (_domainReloadGracePeriodEnd != DateTime.MinValue)
+            {
+                var remaining = _domainReloadGracePeriodEnd - DateTime.UtcNow;
+                if (remaining < timeout)
+                    effectiveTimeout = remaining;
+                else
+                    effectiveTimeout = timeout;
+            }
+            else
+            {
+                effectiveTimeout = timeout;
+            }
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeout);
+        cts.CancelAfter(effectiveTimeout);
 
         try
         {
             await signal.WaitAsync(cts.Token);
-            return true;
+            return IsUnityConnected;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -133,6 +159,14 @@ public class BridgeState
         {
             lock (_lock)
             {
+                if (_isDomainReloadInProgress && _domainReloadGracePeriodEnd != DateTime.MinValue
+                    && DateTime.UtcNow > _domainReloadGracePeriodEnd)
+                {
+                    Console.WriteLine("[Bridge] Domain reload grace period expired - clearing flag");
+                    _isDomainReloadInProgress = false;
+                    _domainReloadGracePeriodEnd = DateTime.MinValue;
+                    _domainReloadCompleteSignal.TrySetResult();
+                }
                 return _isDomainReloadInProgress;
             }
         }
@@ -220,19 +254,22 @@ public class BridgeState
     /// </summary>
     public void CancelAllPendingOperations()
     {
-        // Cancel all pending requests
-        foreach (var kvp in PendingRequests)
+        // Snapshot before iterating to avoid concurrent modification during foreach
+        var pendingRequests = PendingRequests.ToArray();
+        PendingRequests.Clear();
+
+        foreach (var kvp in pendingRequests)
         {
             kvp.Value.TrySetCanceled();
         }
-        PendingRequests.Clear();
 
-        // Cancel all pending event waiters
-        foreach (var kvp in _pendingEventWaiters)
+        var pendingEventWaiters = _pendingEventWaiters.ToArray();
+        _pendingEventWaiters.Clear();
+
+        foreach (var kvp in pendingEventWaiters)
         {
             kvp.Value.CompletionSource.TrySetCanceled();
         }
-        _pendingEventWaiters.Clear();
     }
 
     /// <summary>

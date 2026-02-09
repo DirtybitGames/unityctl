@@ -1,3 +1,4 @@
+using System.Reflection;
 using UnityCtl.Bridge;
 using UnityCtl.Protocol;
 using Xunit;
@@ -418,6 +419,33 @@ public class BridgeStateTests
         Assert.True(waitTask.IsCanceled);
     }
 
+    [Fact]
+    public void CancelAllPendingOperations_WithEventWaiters_CancelsAll()
+    {
+        var state = new BridgeState("proj-test");
+
+        // Register pending requests
+        var tcs1 = new TaskCompletionSource<ResponseMessage>();
+        var tcs2 = new TaskCompletionSource<ResponseMessage>();
+        state.PendingRequests["req-1"] = tcs1;
+        state.PendingRequests["req-2"] = tcs2;
+
+        // Register event waiters (fire-and-forget the wait tasks)
+        var waitTask1 = state.WaitForEventAsync("evt-1", UnityCtlEvents.CompilationFinished, TimeSpan.FromSeconds(30));
+        var waitTask2 = state.WaitForEventAsync("evt-2", UnityCtlEvents.TestFinished, TimeSpan.FromSeconds(30));
+
+        state.CancelAllPendingOperations();
+
+        // All pending requests should be canceled
+        Assert.True(tcs1.Task.IsCanceled);
+        Assert.True(tcs2.Task.IsCanceled);
+        Assert.Empty(state.PendingRequests);
+
+        // All event waiters should be canceled
+        Assert.True(waitTask1.IsCanceled);
+        Assert.True(waitTask2.IsCanceled);
+    }
+
     #endregion
 
     #region Domain Reload
@@ -481,6 +509,39 @@ public class BridgeStateTests
         // Operations should NOT be cancelled
         Assert.False(tcs.Task.IsCanceled);
         Assert.False(tcs.Task.IsCompleted);
+    }
+
+    [Fact]
+    public void IsDomainReloadInProgress_GracePeriodExpired_AutoClearsFlag()
+    {
+        var state = new BridgeState("proj-test");
+        state.OnDomainReloadStarting();
+        Assert.True(state.IsDomainReloadInProgress);
+
+        // Use reflection to set grace period end to the past
+        var field = typeof(BridgeState).GetField("_domainReloadGracePeriodEnd", BindingFlags.NonPublic | BindingFlags.Instance);
+        field!.SetValue(state, DateTime.UtcNow.AddSeconds(-1));
+
+        // Reading the property should auto-clear the flag
+        Assert.False(state.IsDomainReloadInProgress);
+    }
+
+    [Fact]
+    public async Task WaitForDomainReloadCompleteAsync_GracePeriodAlreadyExpired_ReturnsFalse()
+    {
+        var state = new BridgeState("proj-test");
+        state.OnDomainReloadStarting();
+
+        // Use reflection to set grace period end to the past
+        var field = typeof(BridgeState).GetField("_domainReloadGracePeriodEnd", BindingFlags.NonPublic | BindingFlags.Instance);
+        field!.SetValue(state, DateTime.UtcNow.AddSeconds(-1));
+
+        // Should return false promptly (grace period expired, Unity didn't reconnect)
+        var result = await state.WaitForDomainReloadCompleteAsync(TimeSpan.FromSeconds(5));
+        Assert.False(result);
+
+        // Flag should be cleared
+        Assert.False(state.IsDomainReloadInProgress);
     }
 
     #endregion

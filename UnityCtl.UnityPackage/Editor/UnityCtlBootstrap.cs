@@ -11,6 +11,7 @@ namespace UnityCtl
     {
         // Collect compiler messages across all assemblies during compilation
         private static List<CompilerMessage> _compilerMessages = new List<CompilerMessage>();
+        private static readonly object _compilerMessagesLock = new object();
 
         static UnityCtlBootstrap()
         {
@@ -50,30 +51,33 @@ namespace UnityCtl
         private static void OnCompilationStarted(object obj)
         {
             // Clear collected messages when compilation starts
-            _compilerMessages.Clear();
+            lock (_compilerMessagesLock) { _compilerMessages.Clear(); }
             UnityCtlClient.Instance.SendCompilationStartedEvent();
         }
 
         private static void OnAssemblyCompilationFinished(string assemblyPath, CompilerMessage[] messages)
         {
-            // Collect messages from each assembly as it finishes
+            // Collect messages from each assembly as it finishes (called from background thread)
             if (messages != null && messages.Length > 0)
             {
-                _compilerMessages.AddRange(messages);
+                lock (_compilerMessagesLock) { _compilerMessages.AddRange(messages); }
             }
         }
 
         private static void OnCompilationFinished(object obj)
         {
-            // Derive success from collected messages - EditorUtility.scriptCompilationFailed can be unreliable
-            var hasErrors = _compilerMessages.Exists(m => m.type == CompilerMessageType.Error);
+            // Snapshot under lock, then use copy outside lock
+            List<CompilerMessage> messagesCopy;
+            lock (_compilerMessagesLock)
+            {
+                messagesCopy = new List<CompilerMessage>(_compilerMessages);
+                _compilerMessages.Clear();
+            }
+
+            var hasErrors = messagesCopy.Exists(m => m.type == CompilerMessageType.Error);
             var success = !hasErrors;
 
-            // Send compilation finished with collected messages
-            UnityCtlClient.Instance.SendCompilationFinishedEvent(success, _compilerMessages);
-
-            // Clear for next compilation
-            _compilerMessages.Clear();
+            UnityCtlClient.Instance.SendCompilationFinishedEvent(success, messagesCopy);
         }
 
         private static void OnBeforeAssemblyReload()
