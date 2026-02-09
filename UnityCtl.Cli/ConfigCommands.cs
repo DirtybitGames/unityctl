@@ -12,7 +12,7 @@ namespace UnityCtl.Cli;
 
 public static class ConfigCommands
 {
-    private static readonly string[] ValidKeys = { "project-path", "bridge-port" };
+    private static readonly string[] ValidKeys = { "project-path", "bridge-port", "wait-timeout" };
 
     public static Command CreateCommand()
     {
@@ -175,6 +175,15 @@ public static class ConfigCommands
                 }
                 config["bridgePort"] = port;
                 break;
+
+            case "wait-timeout":
+                if (!int.TryParse(value, out var timeout) || timeout < 1)
+                {
+                    Console.Error.WriteLine($"Error: Invalid timeout '{value}'. Must be a positive number of seconds.");
+                    return;
+                }
+                config["waitTimeout"] = timeout;
+                break;
         }
 
         await WriteConfigObjectAsync(config);
@@ -206,6 +215,7 @@ public static class ConfigCommands
         {
             "project-path" => "projectPath",
             "bridge-port" => "bridgePort",
+            "wait-timeout" => "waitTimeout",
             _ => normalizedKey
         };
 
@@ -261,6 +271,7 @@ public static class ConfigCommands
                     {
                         "projectPath" => "project-path",
                         "bridgePort" => "bridge-port",
+                        "waitTimeout" => "wait-timeout",
                         _ => kvp.Key
                     };
                     Console.WriteLine($"  {displayKey} = {kvp.Value}");

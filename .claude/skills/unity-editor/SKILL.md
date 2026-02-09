@@ -9,10 +9,13 @@ Control a running Unity Editor from the command line without batch mode.
 
 ## Setup (Required First)
 
+Run `unityctl status` first to check what's already running. If Unity is already connected, skip straight to commands.
+
 ```bash
-unityctl bridge start        # Start bridge daemon (runs in background)
-unityctl editor run          # Launch Unity Editor (or open project manually)
-unityctl status              # Verify connection
+unityctl status                # Check current state — may already be connected
+unityctl bridge start          # Start bridge daemon (idempotent, skips if running)
+unityctl editor run            # Launch Unity Editor (or open project manually)
+unityctl wait                  # Block until Unity is connected (up to 120s)
 ```
 
 ## Commands
@@ -97,4 +100,5 @@ Run `unityctl status` first to diagnose issues.
 | Editor not connected | Normal - exponential backoff, up to 15 seconds |
 | Connection lost after compile | Normal - domain reload, auto-reconnects |
 | "Project not found" | `unityctl setup` or `unityctl config set project-path <path>` |
+| Can't tell when Unity is ready | `unityctl wait --timeout 120` |
 | Editor not found | Use `--unity-path` to specify Unity executable |

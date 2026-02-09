@@ -72,9 +72,9 @@ unityctl setup
 
 This installs the Unity package and Claude Code skill. If run outside a Unity project, it will prompt for the project path and save it to `.unityctl/config.json` for future commands.
 
-**Quick start:** `unityctl bridge start`, open Unity, `unityctl status`
+**Quick start:** `unityctl bridge start`, open Unity, `unityctl wait`
 
-**Or launch Unity via CLI:** `unityctl bridge start`, `unityctl editor run`, `unityctl status`
+**Or launch Unity via CLI:** `unityctl bridge start`, `unityctl editor run`, `unityctl wait`
 
 ## More Commands
 

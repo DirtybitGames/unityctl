@@ -34,6 +34,7 @@ rootCommand.AddCommand(SkillCommands.CreateCommand());
 
 // Add subcommands - Status & Logs
 rootCommand.AddCommand(StatusCommand.CreateCommand());
+rootCommand.AddCommand(WaitCommand.CreateCommand());
 rootCommand.AddCommand(LogsCommand.CreateCommand());
 
 // Add subcommands - Bridge & Editor
