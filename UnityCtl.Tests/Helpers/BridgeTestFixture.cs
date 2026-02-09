@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using UnityCtl.Bridge;
 using UnityCtl.Protocol;
 using UnityCtl.Tests.Fakes;
+using Xunit;
 
 namespace UnityCtl.Tests.Helpers;
 
@@ -16,7 +16,6 @@ namespace UnityCtl.Tests.Helpers;
 public class BridgeTestFixture : IAsyncLifetime
 {
     private WebApplication? _app;
-    private Task? _appTask;
     private CancellationTokenSource? _appCts;
 
     public BridgeState BridgeState { get; private set; } = null!;
@@ -39,14 +38,12 @@ public class BridgeTestFixture : IAsyncLifetime
         _app.UseWebSockets();
         BridgeEndpoints.MapEndpoints(_app);
 
-        // Start the app
+        // Start the app (use StartAsync only — RunAsync calls StartAsync internally and would conflict)
         _appCts = new CancellationTokenSource();
-        _appTask = _app.RunAsync(_appCts.Token);
+        await _app.StartAsync(_appCts.Token);
 
-        // Wait for app to start and discover the port
-        await _app.StartAsync();
-        var addresses = _app.Urls;
-        var address = addresses.First();
+        // Discover the assigned port
+        var address = _app.Urls.First();
         BaseUri = new Uri(address);
 
         // Create HTTP client for test requests
@@ -66,10 +63,6 @@ public class BridgeTestFixture : IAsyncLifetime
         if (_app != null)
         {
             try { await _app.StopAsync(); } catch { }
-        }
-        if (_appTask != null)
-        {
-            try { await _appTask; } catch { }
         }
         _appCts?.Dispose();
     }

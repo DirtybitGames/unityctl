@@ -17,16 +17,16 @@ public class RpcErrorHandlingTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
+        await _fixture.InitializeAsync();
+
         _fixture.FakeUnity
             .OnCommandError(UnityCtlCommands.MenuExecute, "MENU_NOT_FOUND", "Menu item not found: Invalid/Path")
             .OnCommand(UnityCtlCommands.SceneList, _ => new SceneListResult
             {
                 Scenes = new[] { new SceneInfo { Path = "Assets/Scenes/Main.unity", EnabledInBuild = true } }
             });
-
-        return _fixture.InitializeAsync();
     }
 
     public Task DisposeAsync() => _fixture.DisposeAsync();

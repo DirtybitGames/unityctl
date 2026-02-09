@@ -119,6 +119,7 @@ public static class BridgeEndpoints
             context.Response.Headers["Content-Type"] = "text/event-stream";
             context.Response.Headers["Cache-Control"] = "no-cache";
             context.Response.Headers["Connection"] = "keep-alive";
+            await context.Response.Body.FlushAsync(context.RequestAborted);
 
             var reader = state.SubscribeToLogs();
 

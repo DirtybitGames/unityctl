@@ -171,6 +171,9 @@ public class LogStreamingTests : IAsyncLifetime
 
         Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
 
+        // Give the Bridge time to register the SSE subscriber
+        await Task.Delay(100);
+
         // Send a log event
         await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
         {

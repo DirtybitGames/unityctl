@@ -13,8 +13,10 @@ public class SceneCommandTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
+        await _fixture.InitializeAsync();
+
         // Configure FakeUnity command handlers
         _fixture.FakeUnity
             .OnCommand(UnityCtlCommands.SceneList, _ => new SceneListResult
@@ -32,8 +34,6 @@ public class SceneCommandTests : IAsyncLifetime
                 var path = args?["path"]?.ToString() ?? "unknown";
                 return new SceneLoadResult { LoadedScenePath = path };
             });
-
-        return _fixture.InitializeAsync();
     }
 
     public Task DisposeAsync() => _fixture.DisposeAsync();

@@ -14,8 +14,10 @@ public class ConcurrencyTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
+        await _fixture.InitializeAsync();
+
         _fixture.FakeUnity
             .OnCommand(UnityCtlCommands.SceneList, _ =>
                 new SceneListResult
@@ -27,8 +29,6 @@ public class ConcurrencyTests : IAsyncLifetime
             .OnCommandWithDelay(UnityCtlCommands.ScreenshotCapture,
                 TimeSpan.FromMilliseconds(100),
                 _ => new ScreenshotCaptureResult { Path = "/tmp/shot.png", Width = 1920, Height = 1080 });
-
-        return _fixture.InitializeAsync();
     }
 
     public Task DisposeAsync() => _fixture.DisposeAsync();

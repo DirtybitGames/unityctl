@@ -14,8 +14,10 @@ public class TestRunFlowTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
+        await _fixture.InitializeAsync();
+
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.TestRun, _ =>
             new TestRunResult { Started = true, TestRunId = "run-001" },
             ScheduledEvent.After(TimeSpan.FromMilliseconds(200),
@@ -29,8 +31,6 @@ public class TestRunFlowTests : IAsyncLifetime
                     duration = 2.5,
                     failures = Array.Empty<object>()
                 }));
-
-        return _fixture.InitializeAsync();
     }
 
     public Task DisposeAsync() => _fixture.DisposeAsync();

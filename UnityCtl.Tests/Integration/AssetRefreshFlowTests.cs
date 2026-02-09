@@ -15,8 +15,10 @@ public class AssetRefreshFlowTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
+        await _fixture.InitializeAsync();
+
         // asset.refresh: success with no compilation
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.AssetRefresh, _ =>
             new { },
@@ -40,8 +42,6 @@ public class AssetRefreshFlowTests : IAsyncLifetime
             ScheduledEvent.After(TimeSpan.FromMilliseconds(100),
                 UnityCtlEvents.AssetReimportAllComplete,
                 new { success = true }));
-
-        return _fixture.InitializeAsync();
     }
 
     public Task DisposeAsync() => _fixture.DisposeAsync();
