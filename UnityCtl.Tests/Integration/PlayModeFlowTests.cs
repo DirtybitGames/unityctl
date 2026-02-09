@@ -140,6 +140,15 @@ public class PlayModeFlowTests : IAsyncLifetime
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayEnter);
 
         AssertExtensions.IsError(response, "COMPILATION_ERROR");
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.False(result["compilationSuccess"]?.Value<bool>());
+        var errors = result["errors"]?.ToObject<CompilationMessageInfo[]>();
+        Assert.NotNull(errors);
+        Assert.Single(errors);
+        Assert.Equal("Assets/Scripts/Foo.cs", errors[0].File);
+        Assert.Equal(10, errors[0].Line);
+        Assert.Equal(5, errors[0].Column);
+        Assert.Equal("CS1002: ; expected", errors[0].Message);
     }
 
     [Fact]

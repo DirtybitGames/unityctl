@@ -93,6 +93,14 @@ public class AssetRefreshFlowTests : IAsyncLifetime
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.AssetRefresh);
 
         AssertExtensions.IsError(response, "COMPILATION_ERROR");
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.False(result["compilationSuccess"]?.Value<bool>());
+        var errors = result["errors"]?.ToObject<CompilationMessageInfo[]>();
+        Assert.NotNull(errors);
+        Assert.Single(errors);
+        Assert.Equal("Foo.cs", errors[0].File);
+        Assert.Equal(1, errors[0].Line);
+        Assert.Equal("error", errors[0].Message);
     }
 
     [Fact]

@@ -77,6 +77,7 @@ public static class AssetCommands
             else if (response.Status == ResponseStatus.Error)
             {
                 Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                ContextHelper.DisplayCompilationErrors(response);
                 context.ExitCode = 1;
             }
             else

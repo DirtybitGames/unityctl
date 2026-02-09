@@ -54,7 +54,15 @@ public static class PlayCommands
 
         if (response.Status == ResponseStatus.Error)
         {
-            Console.Error.WriteLine($"Error: {response.Error?.Message}");
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(response.Result));
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                ContextHelper.DisplayCompilationErrors(response);
+            }
             context.ExitCode = 1;
             return;
         }
