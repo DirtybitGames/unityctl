@@ -276,7 +276,7 @@ public class BridgeStateTests
     #region Pending Requests
 
     [Fact]
-    public void CompleteRequest_ResolvesTaskCompletionSource()
+    public async Task CompleteRequest_ResolvesTaskCompletionSource()
     {
         var state = new BridgeState("proj-test");
         var tcs = new TaskCompletionSource<ResponseMessage>();
@@ -293,7 +293,8 @@ public class BridgeStateTests
         state.CompleteRequest("req-1", response);
 
         Assert.True(tcs.Task.IsCompletedSuccessfully);
-        Assert.Equal("req-1", tcs.Task.Result.RequestId);
+        var result = await tcs.Task;
+        Assert.Equal("req-1", result.RequestId);
     }
 
     [Fact]

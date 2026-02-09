@@ -57,13 +57,13 @@ public class ConcurrencyTests : IAsyncLifetime
 
         await Task.WhenAll(sceneTask, statusTask, screenshotTask);
 
-        var sceneResult = AssertExtensions.GetResultJObject(sceneTask.Result);
+        var sceneResult = AssertExtensions.GetResultJObject(await sceneTask);
         Assert.NotNull(sceneResult["scenes"]);
 
-        var statusResult = AssertExtensions.GetResultJObject(statusTask.Result);
+        var statusResult = AssertExtensions.GetResultJObject(await statusTask);
         Assert.Equal("stopped", statusResult["state"]?.ToString());
 
-        var shotResult = AssertExtensions.GetResultJObject(screenshotTask.Result);
+        var shotResult = AssertExtensions.GetResultJObject(await screenshotTask);
         Assert.Equal("/tmp/shot.png", shotResult["path"]?.ToString());
     }
 
