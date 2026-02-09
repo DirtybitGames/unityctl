@@ -100,7 +100,7 @@ Run `unityctl status` first to diagnose issues.
 | Problem | Solution |
 |---------|----------|
 | Bridge not responding | `unityctl bridge stop && unityctl bridge start` |
-| Editor not connected | Normal - exponential backoff, up to 30 seconds |
+| Editor not connected | Normal - exponential backoff, up to 15 seconds |
 | Connection lost after compile | Normal - domain reload, auto-reconnects |
 | "Project not found" | `unityctl setup` or `unityctl config set project-path <path>` |
 | Editor not found | Use `--unity-path` to specify Unity executable |

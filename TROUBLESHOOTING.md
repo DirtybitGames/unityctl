@@ -89,7 +89,7 @@ This guide covers common issues and how to resolve them.
 - No `[UnityCtl]` logs in Unity console
 - Unity Editor is open but CLI shows "Unity not connected"
 
-**Note:** The Unity plugin uses exponential backoff when attempting to reconnect to the bridge. Connection attempts occur at intervals of 1s, 2s, 4s, 8s, 16s, up to a maximum of 30 seconds between attempts. If the bridge was just started, allow up to 30 seconds for Unity to reconnect.
+**Note:** The Unity plugin uses exponential backoff when attempting to reconnect to the bridge. Connection attempts occur at intervals of 1s, 2s, 4s, 8s, up to a maximum of 15 seconds between attempts. If the bridge was just started, allow up to 15 seconds for Unity to reconnect.
 
 **Solutions:**
 
@@ -234,7 +234,7 @@ This guide covers common issues and how to resolve them.
 1. **Wait for reconnection:**
    - Plugin automatically reconnects after domain reload
    - Initial reconnection attempt is immediate after domain reload
-   - If connection fails, the plugin uses exponential backoff (1s, 2s, 4s... up to 30s max)
+   - If connection fails, the plugin uses exponential backoff (1s, 2s, 4s... up to 15s max)
    - Check Unity console for `[UnityCtl] Connected` message
 
 2. **Check reconnection succeeded:**

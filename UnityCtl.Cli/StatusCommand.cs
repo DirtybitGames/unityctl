@@ -187,7 +187,7 @@ public static class StatusCommand
                 else
                 {
                     Console.WriteLine("  Unity is running but not connected. Ensure UnityCtl package is installed.");
-                    Console.WriteLine("  Note: The Unity plugin uses exponential backoff (max 30s) when reconnecting.");
+                    Console.WriteLine("  Note: The Unity plugin uses exponential backoff (max 15s) when reconnecting.");
                 }
             }
         }

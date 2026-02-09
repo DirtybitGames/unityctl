@@ -364,8 +364,8 @@ namespace UnityCtl
                 // If disconnected or WebSocket is not in Open state, attempt reconnection
                 if (!IsConnected)
                 {
-                    // Calculate exponential backoff delay: 1s, 2s, 4s, 8s, 16s, 30s (max)
-                    var backoffDelay = Mathf.Min(1f * Mathf.Pow(2, _reconnectAttempts), 30f);
+                    // Calculate exponential backoff delay: 1s, 2s, 4s, 8s, 15s (max)
+                    var backoffDelay = Mathf.Min(1f * Mathf.Pow(2, _reconnectAttempts), 15f);
 
                     // Calculate time since last reconnection attempt
                     var timeSinceLastReconnect = currentTime - _lastReconnectAttempt;
