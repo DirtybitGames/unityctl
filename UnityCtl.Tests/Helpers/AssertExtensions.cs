@@ -45,4 +45,21 @@ public static class AssertExtensions
         var json = JsonHelper.Serialize(response.Result!);
         return JObject.Parse(json);
     }
+
+    /// <summary>
+    /// Wait for a condition to become true, polling at 10ms intervals.
+    /// Throws TimeoutException if the condition is not met within timeout.
+    /// Use this instead of Task.Delay + Assert.True to avoid flaky tests.
+    /// </summary>
+    public static async Task WaitUntilAsync(Func<bool> condition, TimeSpan? timeout = null, string? message = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+                throw new Xunit.Sdk.XunitException(
+                    message ?? "Condition was not met within timeout");
+            await Task.Delay(10);
+        }
+    }
 }

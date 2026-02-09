@@ -66,6 +66,10 @@ public class BridgeState
     private DateTime _domainReloadGracePeriodEnd = DateTime.MinValue;
     private static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(60);
 
+    // Event-driven signals (replace polling loops)
+    private TaskCompletionSource _connectionSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _domainReloadCompleteSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
 
     /// <summary>
@@ -74,22 +78,23 @@ public class BridgeState
     /// </summary>
     public async Task<bool> WaitForUnityConnectionAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
     {
-        if (IsUnityConnected) return true;
+        Task signal;
+        lock (_lock)
+        {
+            if (UnityConnection?.State == WebSocketState.Open) return true;
+            signal = _connectionSignal.Task;
+        }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
 
         try
         {
-            while (!IsUnityConnected)
-            {
-                await Task.Delay(100, cts.Token);
-            }
+            await signal.WaitAsync(cts.Token);
             return true;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // Timeout expired (not external cancellation)
             return false;
         }
     }
@@ -101,17 +106,19 @@ public class BridgeState
     /// </summary>
     public async Task<bool> WaitForDomainReloadCompleteAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
     {
-        if (!IsDomainReloadInProgress) return true;
+        Task signal;
+        lock (_lock)
+        {
+            if (!_isDomainReloadInProgress) return true;
+            signal = _domainReloadCompleteSignal.Task;
+        }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
 
         try
         {
-            while (IsDomainReloadInProgress)
-            {
-                await Task.Delay(100, cts.Token);
-            }
+            await signal.WaitAsync(cts.Token);
             return true;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -142,6 +149,10 @@ public class BridgeState
                 // Clear hello message when Unity disconnects
                 _unityHelloMessage = null;
 
+                // Reset connection signal so future waiters block until next connection
+                if (_connectionSignal.Task.IsCompleted)
+                    _connectionSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
                 // Unity disconnected - check if we're in domain reload grace period
                 if (_isDomainReloadInProgress)
                 {
@@ -157,12 +168,15 @@ public class BridgeState
             }
             else
             {
-                // Unity connected/reconnected
+                // Unity connected/reconnected - signal waiters
+                _connectionSignal.TrySetResult();
+
                 if (_isDomainReloadInProgress)
                 {
                     Console.WriteLine($"[Bridge] Unity reconnected after domain reload - resuming operations");
                     _isDomainReloadInProgress = false;
                     _domainReloadGracePeriodEnd = DateTime.MinValue;
+                    _domainReloadCompleteSignal.TrySetResult();
                 }
                 else
                 {
@@ -230,6 +244,11 @@ public class BridgeState
         {
             _isDomainReloadInProgress = true;
             _domainReloadGracePeriodEnd = DateTime.UtcNow.Add(DefaultGracePeriod);
+
+            // Reset the signal so waiters block until reload completes
+            if (_domainReloadCompleteSignal.Task.IsCompleted)
+                _domainReloadCompleteSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
             Console.WriteLine($"[Bridge] Domain reload starting - entering grace period for {DefaultGracePeriod.TotalSeconds}s");
         }
     }

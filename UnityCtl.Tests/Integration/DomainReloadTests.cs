@@ -36,13 +36,11 @@ public class DomainReloadTests : IAsyncLifetime
         // Send domain reload starting event
         await _fixture.FakeUnity.SendEventAsync(
             UnityCtlEvents.DomainReloadStarting, new { });
-        await Task.Delay(100);
-
-        Assert.True(_fixture.BridgeState.IsDomainReloadInProgress);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress);
 
         // Disconnect (simulates Unity destroying its objects)
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
 
         // The real in-flight RPC should NOT be completed (grace period keeps it alive)
         Assert.False(rpcTask.IsCompleted);
@@ -54,14 +52,13 @@ public class DomainReloadTests : IAsyncLifetime
         // Enter domain reload
         await _fixture.FakeUnity.SendEventAsync(
             UnityCtlEvents.DomainReloadStarting, new { });
-        await Task.Delay(50);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress);
 
         // Disconnect
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
 
         Assert.True(_fixture.BridgeState.IsDomainReloadInProgress);
-        Assert.False(_fixture.BridgeState.IsUnityConnected);
 
         // Reconnect with a new FakeUnity
         var newFakeUnity = _fixture.CreateFakeUnity();
@@ -71,9 +68,8 @@ public class DomainReloadTests : IAsyncLifetime
             new SceneListResult { Scenes = Array.Empty<SceneInfo>() });
 
         await newFakeUnity.ConnectAsync(_fixture.BaseUri);
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsUnityConnected);
 
-        Assert.True(_fixture.BridgeState.IsUnityConnected);
         Assert.False(_fixture.BridgeState.IsDomainReloadInProgress);
 
         // Bridge should work normally after reconnection
@@ -101,10 +97,10 @@ public class DomainReloadTests : IAsyncLifetime
 
         // Disconnect WITHOUT domain reload event
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(200);
 
         // The HTTP response should complete (bridge returns error when Unity disconnects)
-        Assert.True(rpcTask.IsCompleted);
+        await AssertExtensions.WaitUntilAsync(() => rpcTask.IsCompleted,
+            message: "RPC should complete after normal disconnect cancels pending operations");
     }
 
     [Fact]
@@ -117,19 +113,20 @@ public class DomainReloadTests : IAsyncLifetime
             Level = LogLevel.Log,
             Message = "Before reload"
         });
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.GetRecentUnifiedLogs(0, ignoreWatermark: true).Length > 0);
 
         // Domain reload: disconnect and reconnect
         await _fixture.FakeUnity.SendEventAsync(
             UnityCtlEvents.DomainReloadStarting, new { });
-        await Task.Delay(50);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress);
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
 
         // Reconnect
         var newFakeUnity = _fixture.CreateFakeUnity();
         await newFakeUnity.ConnectAsync(_fixture.BaseUri);
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsUnityConnected);
 
         // Logs should still be available
         var logs = _fixture.BridgeState.GetRecentUnifiedLogs(10, ignoreWatermark: true);
@@ -141,27 +138,18 @@ public class DomainReloadTests : IAsyncLifetime
     [Fact]
     public async Task Rpc_DuringDomainReload_WaitsForReconnection()
     {
-        // Configure scene.list so it works after reconnection
-        _fixture.FakeUnity.OnCommand(UnityCtlCommands.SceneList, _ =>
-            new SceneListResult
-            {
-                Scenes = new[] { new SceneInfo { Path = "Assets/Scenes/Main.unity", EnabledInBuild = true } }
-            });
-
         // Trigger domain reload and disconnect
         await _fixture.FakeUnity.SendEventAsync(
             UnityCtlEvents.DomainReloadStarting, new { });
-        await Task.Delay(50);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress);
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
 
-        // Verify: Unity is disconnected but domain reload is in progress
-        Assert.False(_fixture.BridgeState.IsUnityConnected);
-        Assert.True(_fixture.BridgeState.IsDomainReloadInProgress);
-
-        // Send RPC while Unity is disconnected — should NOT get 503 immediately
+        // Send RPC while Unity is disconnected — should NOT get 503 immediately.
+        // The bridge's /rpc handler is now blocked on the domain reload TCS,
+        // so once we confirm the state, the RPC is deterministically waiting.
         var rpcTask = _fixture.SendRpcAndParseAsync(UnityCtlCommands.SceneList);
-        await Task.Delay(200);
+        await Task.Delay(50); // Allow HTTP request to reach the handler
         Assert.False(rpcTask.IsCompleted, "RPC should be waiting for reconnection, not failing with 503");
 
         // Reconnect with a new FakeUnity
@@ -190,12 +178,14 @@ public class DomainReloadTests : IAsyncLifetime
             Level = LogLevel.Log,
             Message = "Old log"
         });
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.GetRecentUnifiedLogs(0, ignoreWatermark: true).Length > 0);
 
         // Fire EnteredPlayMode event (should auto-clear logs)
         await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.PlayModeChanged,
             new { state = "EnteredPlayMode" });
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.GetWatermark() >= 0);
 
         // New logs should be visible, old ones hidden by watermark
         await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
@@ -204,7 +194,8 @@ public class DomainReloadTests : IAsyncLifetime
             Level = LogLevel.Log,
             Message = "New log"
         });
-        await Task.Delay(100);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.GetRecentUnifiedLogs(0).Length > 0);
 
         var logs = _fixture.BridgeState.GetRecentUnifiedLogs(0);
         Assert.Single(logs);

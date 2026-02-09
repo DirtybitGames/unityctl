@@ -26,7 +26,8 @@ public class WebSocketConnectionTests : IAsyncLifetime
     public async Task FakeUnity_SendsHello_BridgeStoresIt()
     {
         // The FakeUnity sends hello on connect
-        await Task.Delay(200);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.UnityHelloMessage != null);
 
         var hello = _fixture.BridgeState.UnityHelloMessage;
         Assert.NotNull(hello);
@@ -40,9 +41,9 @@ public class WebSocketConnectionTests : IAsyncLifetime
     public async Task FakeUnity_Disconnects_BridgeDetects()
     {
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(200);
+        await AssertExtensions.WaitUntilAsync(
+            () => !_fixture.BridgeState.IsUnityConnected);
 
-        Assert.False(_fixture.BridgeState.IsUnityConnected);
         Assert.Null(_fixture.BridgeState.UnityHelloMessage);
     }
 
@@ -51,17 +52,16 @@ public class WebSocketConnectionTests : IAsyncLifetime
     {
         // Disconnect
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(200);
-        Assert.False(_fixture.BridgeState.IsUnityConnected);
+        await AssertExtensions.WaitUntilAsync(
+            () => !_fixture.BridgeState.IsUnityConnected);
 
         // Reconnect with new client
         var newFake = _fixture.CreateFakeUnity();
         newFake.OnCommand(UnityCtlCommands.PlayStatus, _ =>
             new PlayModeResult { State = PlayModeState.Stopped });
         await newFake.ConnectAsync(_fixture.BaseUri);
-        await Task.Delay(200);
-
-        Assert.True(_fixture.BridgeState.IsUnityConnected);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.IsUnityConnected);
 
         // Commands should work again
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayStatus);
@@ -84,7 +84,8 @@ public class WebSocketConnectionTests : IAsyncLifetime
             });
         }
 
-        await Task.Delay(500);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.GetRecentUnifiedLogs(0, ignoreWatermark: true).Length == 20);
 
         var logs = _fixture.BridgeState.GetRecentUnifiedLogs(0, ignoreWatermark: true);
         Assert.Equal(20, logs.Length);

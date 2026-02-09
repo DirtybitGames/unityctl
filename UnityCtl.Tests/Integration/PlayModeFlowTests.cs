@@ -195,9 +195,9 @@ public class PlayModeFlowTests : IAsyncLifetime
         // Simulate domain reload: disconnect + reconnect with a new FakeUnity
         await _fixture.FakeUnity.SendEventAsync(
             UnityCtlEvents.DomainReloadStarting, new { });
-        await Task.Delay(50);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress);
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(200);
+        await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
 
         // Reconnect with new FakeUnity that reports "playing" on status check
         var newFakeUnity = _fixture.CreateFakeUnity();
@@ -289,16 +289,14 @@ public class PlayModeFlowTests : IAsyncLifetime
         var rpcTask = _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
 
         // Wait for bridge to detect domain reload
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (!_fixture.BridgeState.IsDomainReloadInProgress && DateTime.UtcNow < deadline)
-            await Task.Delay(50);
-        Assert.True(_fixture.BridgeState.IsDomainReloadInProgress);
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress);
 
         // Simulate Unity disconnecting during domain reload
         await _fixture.FakeUnity.DisconnectAsync();
-        await Task.Delay(200);
+        await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
 
-        // play.exit should still be waiting (not returned yet, because Fix B waits for reconnection)
+        // play.exit should still be waiting (not returned yet, because Fix B waits for reconnection).
+        // With TCS-based signaling, the handler is blocked on _domainReloadCompleteSignal.
         Assert.False(rpcTask.IsCompleted, "play.exit should wait for domain reload to complete");
 
         // Reconnect with new FakeUnity

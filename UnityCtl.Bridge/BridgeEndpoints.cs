@@ -339,11 +339,8 @@ public static class BridgeEndpoints
                         if (!state.IsUnityConnected)
                         {
                             Console.WriteLine($"[Bridge] Waiting for Unity to reconnect...");
-                            while (!state.IsUnityConnected && DateTime.UtcNow - playEnterStartTime < playEnterTimeout)
-                            {
-                                await Task.Delay(100, context.RequestAborted);
-                            }
-                            if (!state.IsUnityConnected)
+                            var remaining = playEnterTimeout - (DateTime.UtcNow - playEnterStartTime);
+                            if (remaining <= TimeSpan.Zero || !await state.WaitForUnityConnectionAsync(remaining, context.RequestAborted))
                             {
                                 throw new TimeoutException("Unity did not reconnect after domain reload");
                             }
