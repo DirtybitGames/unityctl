@@ -68,6 +68,58 @@ public class BridgeState
 
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
 
+    /// <summary>
+    /// Wait for Unity to connect (or reconnect after domain reload).
+    /// Returns true if connected within timeout, false if timeout expired.
+    /// </summary>
+    public async Task<bool> WaitForUnityConnectionAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (IsUnityConnected) return true;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+
+        try
+        {
+            while (!IsUnityConnected)
+            {
+                await Task.Delay(100, cts.Token);
+            }
+            return true;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Timeout expired (not external cancellation)
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Wait for an in-progress domain reload to complete (Unity disconnects then reconnects).
+    /// IsDomainReloadInProgress is cleared when Unity reconnects in SetUnityConnection().
+    /// Returns true if reload completed within timeout, false if timeout expired.
+    /// </summary>
+    public async Task<bool> WaitForDomainReloadCompleteAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (!IsDomainReloadInProgress) return true;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+
+        try
+        {
+            while (IsDomainReloadInProgress)
+            {
+                await Task.Delay(100, cts.Token);
+            }
+            return true;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
     public bool IsDomainReloadInProgress
     {
         get

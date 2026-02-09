@@ -21,6 +21,8 @@ public static class BridgeEndpoints
     private static readonly TimeSpan StatusCheckTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ShortEventTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan CompilationWaitTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan DomainReloadReconnectTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DomainReloadDetectionTimeout = TimeSpan.FromSeconds(3);
 
     // Command timeout configuration (in seconds, configurable via environment variables)
     private static readonly Dictionary<string, CommandConfig> CommandConfigs = new()
@@ -119,6 +121,7 @@ public static class BridgeEndpoints
             context.Response.Headers["Content-Type"] = "text/event-stream";
             context.Response.Headers["Cache-Control"] = "no-cache";
             context.Response.Headers["Connection"] = "keep-alive";
+            await context.Response.Body.FlushAsync(context.RequestAborted);
 
             var reader = state.SubscribeToLogs();
 
@@ -150,11 +153,30 @@ public static class BridgeEndpoints
         {
             if (!state.IsUnityConnected)
             {
-                return Results.Problem(
-                    statusCode: 503,
-                    title: "Unity Offline",
-                    detail: "Unity Editor is not connected to the bridge"
-                );
+                if (state.IsDomainReloadInProgress)
+                {
+                    // Unity is temporarily disconnected during domain reload — wait for reconnection
+                    Console.WriteLine($"[Bridge] RPC received during domain reload - waiting for Unity to reconnect");
+                    var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
+                        DomainReloadReconnectTimeout, context.RequestAborted);
+                    if (!reloadComplete)
+                    {
+                        return Results.Problem(
+                            statusCode: 503,
+                            title: "Unity Offline",
+                            detail: "Unity Editor did not reconnect after domain reload"
+                        );
+                    }
+                    Console.WriteLine($"[Bridge] Unity reconnected after domain reload - processing RPC");
+                }
+                else
+                {
+                    return Results.Problem(
+                        statusCode: 503,
+                        title: "Unity Offline",
+                        detail: "Unity Editor is not connected to the bridge"
+                    );
+                }
             }
 
             // Convert Args to JToken to avoid System.Text.Json JsonElement issues
@@ -515,14 +537,27 @@ public static class BridgeEndpoints
                     eventWaitTask = state.WaitForEventAsync(requestMessage.RequestId, config.CompletionEvent, timeout, context.RequestAborted, config.CompletionEventState);
                 }
 
-                // For play exit, also pre-register a waiter for compilation.finished
-                // (in case domain reload happens due to pending script changes)
+                // For play exit, also pre-register waiters for compilation.started,
+                // compilation.finished, and domain.reloadStarting
+                // (must register BEFORE events fire to capture them)
+                Task<EventMessage>? compilationStartedWaitTask = null;
                 Task<EventMessage>? compilationWaitTask = null;
+                Task<EventMessage>? domainReloadWaitTask = null;
                 if (request.Command == UnityCtlCommands.PlayExit)
                 {
+                    compilationStartedWaitTask = state.WaitForEventAsync(
+                        requestMessage.RequestId + "_compile_started_preregister",
+                        UnityCtlEvents.CompilationStarted,
+                        timeout,
+                        context.RequestAborted);
                     compilationWaitTask = state.WaitForEventAsync(
                         requestMessage.RequestId + "_compile_preregister",
                         UnityCtlEvents.CompilationFinished,
+                        timeout,
+                        context.RequestAborted);
+                    domainReloadWaitTask = state.WaitForEventAsync(
+                        requestMessage.RequestId + "_domain_reload_preregister",
+                        UnityCtlEvents.DomainReloadStarting,
                         timeout,
                         context.RequestAborted);
                 }
@@ -554,19 +589,20 @@ public static class BridgeEndpoints
                         object? finalResult = eventMessage.Payload;
                         var eventPayload = eventMessage.Payload as JObject;
 
-                        // For play exit: wait briefly to see if compilation.finished arrives
-                        // (compilation events come AFTER ExitingPlayMode but BEFORE DomainReloadStarting)
-                        if (!compilationTriggered && compilationWaitTask != null)
+                        // For play exit: detect compilation via compilation.started event.
+                        // ExitingPlayMode always has compilationTriggered=false (the Unity plugin
+                        // only sets it for EnteredEditMode). Instead, we listen for compilation.started
+                        // which fires almost immediately if scripts need recompilation.
+                        if (!compilationTriggered && compilationStartedWaitTask != null)
                         {
-                            // Wait briefly for compilation.finished to arrive
-                            // (compilation events come shortly after ExitingPlayMode)
+                            // Wait briefly for compilation.started to arrive
                             var waitTask = Task.Delay(CompilationWaitTimeout, context.RequestAborted);
-                            var completedTask = await Task.WhenAny(compilationWaitTask, waitTask);
+                            var completedTask = await Task.WhenAny(compilationStartedWaitTask, waitTask);
 
-                            if (completedTask == compilationWaitTask && compilationWaitTask.IsCompletedSuccessfully)
+                            if (completedTask == compilationStartedWaitTask && compilationStartedWaitTask.IsCompletedSuccessfully)
                             {
                                 compilationTriggered = true;
-                                Console.WriteLine($"[Bridge] Compilation detected during play exit - returning compilation results");
+                                Console.WriteLine($"[Bridge] Compilation started detected during play exit - will wait for compilation to finish");
                             }
                         }
 
@@ -663,6 +699,25 @@ public static class BridgeEndpoints
                             Result = finalResult,
                             Error = response.Error
                         };
+
+                        // For play exit: if compilation was triggered, a domain reload typically follows.
+                        // Wait for the reload to complete so the caller's next command doesn't hit a 503.
+                        if (domainReloadWaitTask != null && compilationTriggered)
+                        {
+                            var detectionDelay = Task.Delay(DomainReloadDetectionTimeout, context.RequestAborted);
+                            var completed = await Task.WhenAny(domainReloadWaitTask, detectionDelay);
+
+                            if (completed == domainReloadWaitTask && domainReloadWaitTask.IsCompletedSuccessfully)
+                            {
+                                Console.WriteLine($"[Bridge] Domain reload detected after play exit - waiting for Unity to reconnect");
+                                var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
+                                    DomainReloadReconnectTimeout, context.RequestAborted);
+                                if (reloadComplete)
+                                {
+                                    Console.WriteLine($"[Bridge] Unity reconnected after play exit domain reload");
+                                }
+                            }
+                        }
                     }
 
                     var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
@@ -670,10 +725,18 @@ public static class BridgeEndpoints
                 }
                 finally
                 {
-                    // Clean up pre-registered compilation waiter if not used
+                    // Clean up pre-registered waiters if not used
+                    if (compilationStartedWaitTask != null && !compilationStartedWaitTask.IsCompleted)
+                    {
+                        state.CancelEventWaiter(requestMessage.RequestId + "_compile_started_preregister");
+                    }
                     if (compilationWaitTask != null && !compilationWaitTask.IsCompleted)
                     {
                         state.CancelEventWaiter(requestMessage.RequestId + "_compile_preregister");
+                    }
+                    if (domainReloadWaitTask != null && !domainReloadWaitTask.IsCompleted)
+                    {
+                        state.CancelEventWaiter(requestMessage.RequestId + "_domain_reload_preregister");
                     }
                 }
             }
@@ -879,10 +942,9 @@ public static class BridgeEndpoints
         var eventMessage = JsonHelper.Deserialize<EventMessage>(json);
         if (eventMessage == null) return;
 
-        // Process event for any waiters first
-        state.ProcessEvent(eventMessage);
-
-        // Then handle specific events
+        // Handle state changes BEFORE notifying waiters, so that waiter continuations
+        // see the updated state (e.g., IsDomainReloadInProgress is set before the
+        // domain reload waiter's continuation checks it).
         switch (eventMessage.Event)
         {
             case UnityCtlEvents.Log:
@@ -897,12 +959,10 @@ public static class BridgeEndpoints
                 break;
 
             case UnityCtlEvents.PlayModeChanged:
-                // Extract play mode state from payload
                 var playModePayload = eventMessage.Payload as Newtonsoft.Json.Linq.JObject;
                 var playModeState = playModePayload?["state"]?.ToString();
                 Console.WriteLine($"[Event] Play mode changed: {playModeState}");
 
-                // Auto-clear on entering play mode
                 if (playModeState == "EnteredPlayMode")
                 {
                     state.ClearLogWatermark("entered play mode");
@@ -935,6 +995,9 @@ public static class BridgeEndpoints
                 state.OnDomainReloadStarting();
                 break;
         }
+
+        // Notify waiters after state changes are applied
+        state.ProcessEvent(eventMessage);
     }
 }
 
