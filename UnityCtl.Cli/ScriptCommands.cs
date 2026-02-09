@@ -3,14 +3,27 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.IO;
+using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityCtl.Protocol;
+
+[assembly: InternalsVisibleTo("UnityCtl.Tests")]
 
 namespace UnityCtl.Cli;
 
 public static class ScriptCommands
 {
+    private static readonly string[] DefaultUsings =
+    [
+        "System",
+        "System.Collections.Generic",
+        "System.Linq",
+        "UnityEngine",
+        "UnityEditor"
+    ];
+
     public static Command CreateCommand()
     {
         var scriptCommand = new Command("script", "C# script execution operations");
@@ -122,46 +135,139 @@ public static class ScriptCommands
                 return;
             }
 
-            var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(
-                JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
-                JsonHelper.Settings
-            );
+            DisplayScriptResult(context, response, json);
+        });
 
-            if (result != null && !result.Success)
+        scriptCommand.AddCommand(executeCommand);
+
+        // script eval
+        var evalCommand = new Command("eval", "Evaluate a C# expression in the Unity Editor");
+
+        var expressionArgument = new Argument<string>(
+            name: "expression",
+            description: "C# expression or method body to evaluate"
+        );
+
+        var usingOption = new Option<string[]>(
+            aliases: ["--using", "-u"],
+            description: "Additional using directives (e.g., UnityEngine.UI)",
+            getDefaultValue: () => Array.Empty<string>()
+        );
+
+        var evalScriptArgsArgument = new Argument<string[]>(
+            name: "script-args",
+            description: "Arguments to pass to Main (after --)",
+            getDefaultValue: () => Array.Empty<string>()
+        );
+
+        evalCommand.AddArgument(expressionArgument);
+        evalCommand.AddOption(usingOption);
+        evalCommand.AddArgument(evalScriptArgsArgument);
+
+        evalCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
+            var expression = context.ParseResult.GetValueForArgument(expressionArgument);
+            var extraUsings = context.ParseResult.GetValueForOption(usingOption) ?? Array.Empty<string>();
+            var scriptArgs = context.ParseResult.GetValueForArgument(evalScriptArgsArgument);
+
+            if (string.IsNullOrWhiteSpace(expression))
             {
+                Console.Error.WriteLine("Error: Expression cannot be empty.");
                 context.ExitCode = 1;
+                return;
             }
 
-            if (json)
+            var hasArgs = scriptArgs.Length > 0;
+            var csharpCode = BuildEvalCode(expression, extraUsings, hasArgs);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) { context.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
             {
-                Console.WriteLine(JsonHelper.Serialize(response.Result));
+                { "code", csharpCode },
+                { "className", "Script" },
+                { "methodName", "Main" },
+                { "scriptArgs", scriptArgs }
+            };
+
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args);
+            if (response == null) { context.ExitCode = 1; return; }
+
+            if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
+                return;
             }
-            else
+
+            DisplayScriptResult(context, response, json);
+        });
+
+        scriptCommand.AddCommand(evalCommand);
+
+        return scriptCommand;
+    }
+
+    internal static string BuildEvalCode(string expression, string[] extraUsings, bool hasArgs)
+    {
+        var usings = new List<string>(DefaultUsings);
+        foreach (var u in extraUsings)
+        {
+            if (!usings.Contains(u))
+                usings.Add(u);
+        }
+
+        var usingBlock = string.Join("\n", usings.Select(u => $"using {u};"));
+        var signature = hasArgs ? "public static object Main(string[] args)" : "public static object Main()";
+        var isBodyMode = expression.Contains(';');
+        var body = isBodyMode ? expression : $"return {expression};";
+
+        return usingBlock + "\n\npublic class Script\n{\n    " + signature + "\n    {\n        " + body + "\n    }\n}\n";
+    }
+
+    private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json)
+    {
+        var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(
+            JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+            JsonHelper.Settings
+        );
+
+        if (result != null && !result.Success)
+        {
+            context.ExitCode = 1;
+        }
+
+        if (json)
+        {
+            Console.WriteLine(JsonHelper.Serialize(response.Result));
+        }
+        else
+        {
+            if (result != null)
             {
-                if (result != null)
+                if (result.Success)
                 {
-                    if (result.Success)
+                    Console.WriteLine($"Result: {result.Result ?? "(void)"}");
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Execution failed: {result.Error}");
+                    if (result.Diagnostics != null && result.Diagnostics.Length > 0)
                     {
-                        Console.WriteLine($"Result: {result.Result ?? "(void)"}");
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine($"Execution failed: {result.Error}");
-                        if (result.Diagnostics != null && result.Diagnostics.Length > 0)
+                        Console.Error.WriteLine();
+                        Console.Error.WriteLine("Diagnostics:");
+                        foreach (var diagnostic in result.Diagnostics)
                         {
-                            Console.Error.WriteLine();
-                            Console.Error.WriteLine("Diagnostics:");
-                            foreach (var diagnostic in result.Diagnostics)
-                            {
-                                Console.Error.WriteLine($"  {diagnostic}");
-                            }
+                            Console.Error.WriteLine($"  {diagnostic}");
                         }
                     }
                 }
             }
-        });
-
-        scriptCommand.AddCommand(executeCommand);
-        return scriptCommand;
+        }
     }
 }

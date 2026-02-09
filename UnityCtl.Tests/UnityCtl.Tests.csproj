@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\UnityCtl.Protocol\UnityCtl.Protocol.csproj" />
     <ProjectReference Include="..\UnityCtl.Bridge\UnityCtl.Bridge.csproj" />
+    <ProjectReference Include="..\UnityCtl.Cli\UnityCtl.Cli.csproj" />
   </ItemGroup>
 
 </Project>

@@ -51,37 +51,31 @@ unityctl screenshot capture
 
 ## Script Execution
 
-Execute arbitrary C# in the running editor via Roslyn. Write scripts to `/tmp/` and execute:
-
-```cs
-// /tmp/DebugScript.cs
-using UnityEngine;
-
-public class Script
-{
-    public static object Main()
-    {
-        var player = GameObject.Find("Player");
-        return player?.transform.position.ToString() ?? "not found";
-    }
-}
-```
+Evaluate C# expressions directly (common usings like UnityEngine, UnityEditor, System auto-included):
 
 ```bash
-unityctl script execute -f /tmp/DebugScript.cs
+unityctl script eval "Application.version"
+unityctl script eval "GameObject.FindObjectsOfType<Camera>().Length"
+unityctl script eval "var p = GameObject.Find(\"Player\"); return p.transform.position;"
+unityctl script eval -u UnityEngine.SceneManagement "SceneManager.GetActiveScene().name"
 ```
 
-Inline execution with `-c`:
+Pass arguments to the script with `--`:
 ```bash
+unityctl script eval "args[0]" -- hello
+```
+
+### Full Script Execution
+
+For complex scripts with custom classes, multiple methods, or file-based execution:
+
+```bash
+unityctl script execute -f /tmp/MyScript.cs
 unityctl script execute -c "using UnityEngine; public class Script { public static object Main() => Application.version; }"
+unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 "My Object"
 ```
 
 Scripts require a class with static `Main()` returning `object`. Return value is JSON-serialized.
-
-**With arguments** (`Main(string[] args)`):
-```bash
-unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 "My Object"
-```
 
 ## Typical Workflow
 
