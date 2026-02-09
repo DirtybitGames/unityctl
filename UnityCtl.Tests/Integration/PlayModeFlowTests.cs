@@ -258,4 +258,77 @@ public class PlayModeFlowTests : IAsyncLifetime
         Assert.True(result["compilationTriggered"]?.Value<bool>());
         Assert.True(result["compilationSuccess"]?.Value<bool>());
     }
+
+    [Fact]
+    public async Task PlayExit_DomainReload_WaitsForReconnection()
+    {
+        // Reproduce the exact bug from conversation logs: play.exit triggers compilation
+        // which triggers domain reload. The next command should NOT get a 503.
+        //
+        // Sequence: ExitingPlayMode (compilationTriggered) -> compilation.finished
+        //   -> DomainReloadStarting -> Unity disconnects -> Unity reconnects
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
+            new PlayModeResult { State = PlayModeState.Transitioning },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "ExitingPlayMode", compilationTriggered = true }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.CompilationFinished,
+                new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(250),
+                UnityCtlEvents.DomainReloadStarting,
+                new { }));
+
+        // Start play.exit RPC in background
+        var rpcTask = _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
+
+        // Wait for bridge to detect domain reload
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!_fixture.BridgeState.IsDomainReloadInProgress && DateTime.UtcNow < deadline)
+            await Task.Delay(50);
+        Assert.True(_fixture.BridgeState.IsDomainReloadInProgress);
+
+        // Simulate Unity disconnecting during domain reload
+        await _fixture.FakeUnity.DisconnectAsync();
+        await Task.Delay(200);
+
+        // play.exit should still be waiting (not returned yet, because Fix B waits for reconnection)
+        Assert.False(rpcTask.IsCompleted, "play.exit should wait for domain reload to complete");
+
+        // Reconnect with new FakeUnity
+        var newFakeUnity = _fixture.CreateFakeUnity();
+        ConfigureDefaultHandlers(newFakeUnity);
+        await newFakeUnity.ConnectAsync(_fixture.BaseUri);
+
+        // play.exit should now complete
+        var response = await rpcTask;
+        AssertExtensions.IsOk(response);
+
+        // The next command should succeed immediately (Unity is connected)
+        var nextResponse = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayStatus);
+        AssertExtensions.IsOk(nextResponse);
+
+        await newFakeUnity.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PlayExit_NoDomainReload_ReturnsWithoutDelay()
+    {
+        // When play.exit does NOT trigger compilation/domain reload,
+        // it should return promptly without waiting for the detection timeout.
+        // The default handler has compilationTriggered=false and no DomainReloadStarting.
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
+        sw.Stop();
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("ExitingPlayMode", result["state"]?.ToString());
+
+        // play.exit has an existing 2s CompilationWaitTimeout for detecting late compilations.
+        // Our domain reload wait should NOT add latency when compilation wasn't triggered.
+        Assert.True(sw.ElapsedMilliseconds < 3500,
+            $"play.exit without domain reload took {sw.ElapsedMilliseconds}ms — should be under 3.5s (2s compilation detection + margin)");
+    }
 }

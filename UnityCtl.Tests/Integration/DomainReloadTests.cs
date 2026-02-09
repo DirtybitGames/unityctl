@@ -139,6 +139,48 @@ public class DomainReloadTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Rpc_DuringDomainReload_WaitsForReconnection()
+    {
+        // Configure scene.list so it works after reconnection
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.SceneList, _ =>
+            new SceneListResult
+            {
+                Scenes = new[] { new SceneInfo { Path = "Assets/Scenes/Main.unity", EnabledInBuild = true } }
+            });
+
+        // Trigger domain reload and disconnect
+        await _fixture.FakeUnity.SendEventAsync(
+            UnityCtlEvents.DomainReloadStarting, new { });
+        await Task.Delay(50);
+        await _fixture.FakeUnity.DisconnectAsync();
+        await Task.Delay(100);
+
+        // Verify: Unity is disconnected but domain reload is in progress
+        Assert.False(_fixture.BridgeState.IsUnityConnected);
+        Assert.True(_fixture.BridgeState.IsDomainReloadInProgress);
+
+        // Send RPC while Unity is disconnected — should NOT get 503 immediately
+        var rpcTask = _fixture.SendRpcAndParseAsync(UnityCtlCommands.SceneList);
+        await Task.Delay(200);
+        Assert.False(rpcTask.IsCompleted, "RPC should be waiting for reconnection, not failing with 503");
+
+        // Reconnect with a new FakeUnity
+        var newFakeUnity = _fixture.CreateFakeUnity();
+        newFakeUnity.OnCommand(UnityCtlCommands.SceneList, _ =>
+            new SceneListResult
+            {
+                Scenes = new[] { new SceneInfo { Path = "Assets/Scenes/Main.unity", EnabledInBuild = true } }
+            });
+        await newFakeUnity.ConnectAsync(_fixture.BaseUri);
+
+        // RPC should complete successfully now
+        var response = await rpcTask;
+        AssertExtensions.IsOk(response);
+
+        await newFakeUnity.DisposeAsync();
+    }
+
+    [Fact]
     public async Task PlayModeChanged_EnteredPlayMode_AutoClearsLogs()
     {
         // Add some logs
