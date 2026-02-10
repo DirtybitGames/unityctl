@@ -672,6 +672,39 @@ namespace UnityCtl
             return null;
         }
 
+        private static double? GetDoubleArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return null;
+
+            try
+            {
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return null;
+
+                    if (value is double d) return d;
+                    if (value is float f) return f;
+                    if (value is int i) return i;
+                    if (value is long l) return l;
+
+                    if (value is JToken jtoken)
+                        return jtoken.Value<double>();
+
+                    if (double.TryParse(value.ToString(), out var parsed))
+                        return parsed;
+
+                    DebugLog($"[UnityCtl] Could not parse argument '{key}' as double: {value}");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get double argument '{key}': {ex.Message}");
+            }
+
+            return null;
+        }
+
         private static string[] GetStringArrayArgument(RequestMessage request, string key)
         {
             if (request.Args == null) return null;
@@ -1052,21 +1085,7 @@ namespace UnityCtl
             var fps = GetIntArgument(request, "fps") ?? 30;
             var width = GetIntArgument(request, "width");
             var height = GetIntArgument(request, "height");
-
-            double? duration = null;
-            if (request.Args is System.Collections.IDictionary dict && dict.Contains("duration"))
-            {
-                var durationVal = dict["duration"];
-                if (durationVal != null)
-                {
-                    if (durationVal is Newtonsoft.Json.Linq.JToken jt)
-                        duration = jt.Value<double>();
-                    else if (durationVal is double d)
-                        duration = d;
-                    else if (double.TryParse(durationVal.ToString(), out var parsed))
-                        duration = parsed;
-                }
-            }
+            var duration = GetDoubleArgument(request, "duration");
 
             return Editor.RecordingManager.Instance.Start(outputName, duration, width, height, fps, payload =>
             {

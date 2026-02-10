@@ -15,6 +15,7 @@ namespace UnityCtl.Editor.Recorder
     {
         private RecorderController _controller;
         private RecorderControllerSettings _controllerSettings;
+        private MovieRecorderSettings _movieRecorder;
 
         public string StartRecording(string outputName, double? duration, int? width, int? height, int fps)
         {
@@ -49,12 +50,12 @@ namespace UnityCtl.Editor.Recorder
             }
 
             // Configure MovieRecorderSettings
-            var movieRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
-            movieRecorder.name = "UnityCtl Video Recorder";
-            movieRecorder.Enabled = true;
-            movieRecorder.OutputFile = outputPath;
-            movieRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
-            movieRecorder.VideoBitRateMode = VideoBitrateMode.High;
+            _movieRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+            _movieRecorder.name = "UnityCtl Video Recorder";
+            _movieRecorder.Enabled = true;
+            _movieRecorder.OutputFile = outputPath;
+            _movieRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+            _movieRecorder.VideoBitRateMode = VideoBitrateMode.High;
 
             // Configure input (game view)
             var inputSettings = new GameViewInputSettings();
@@ -70,9 +71,9 @@ namespace UnityCtl.Editor.Recorder
                 inputSettings.OutputWidth = EnsureEven(inputSettings.OutputWidth);
                 inputSettings.OutputHeight = EnsureEven(inputSettings.OutputHeight);
             }
-            movieRecorder.ImageInputSettings = inputSettings;
+            _movieRecorder.ImageInputSettings = inputSettings;
 
-            _controllerSettings.AddRecorderSettings(movieRecorder);
+            _controllerSettings.AddRecorderSettings(_movieRecorder);
 
             // Create controller and start
             _controller = new RecorderController(_controllerSettings);
@@ -99,6 +100,11 @@ namespace UnityCtl.Editor.Recorder
 
         public void Cleanup()
         {
+            if (_movieRecorder != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_movieRecorder);
+                _movieRecorder = null;
+            }
             if (_controllerSettings != null)
             {
                 UnityEngine.Object.DestroyImmediate(_controllerSettings);

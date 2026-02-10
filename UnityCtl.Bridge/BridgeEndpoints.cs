@@ -111,6 +111,17 @@ public static class BridgeEndpoints
         };
     }
 
+    private static double? GetDoubleArg(IDictionary<string, object?>? args, string key)
+    {
+        if (args == null || !args.TryGetValue(key, out var val) || val == null)
+            return null;
+
+        if (val is JToken jt) return jt.Value<double>();
+        if (val is double d) return d;
+        if (double.TryParse(val.ToString(), out var parsed)) return parsed;
+        return null;
+    }
+
     private static IResult JsonResponse(ResponseMessage response)
     {
         var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
@@ -699,17 +710,7 @@ public static class BridgeEndpoints
         CancellationToken cancellationToken)
     {
         // Check if duration is specified (determines blocking vs fire-and-forget)
-        var convertedArgs = requestMessage.Args as IDictionary<string, object?>;
-        double? duration = null;
-        if (convertedArgs != null && convertedArgs.TryGetValue("duration", out var durationVal) && durationVal != null)
-        {
-            if (durationVal is JToken jt)
-                duration = jt.Value<double>();
-            else if (durationVal is double d)
-                duration = d;
-            else if (double.TryParse(durationVal.ToString(), out var parsed))
-                duration = parsed;
-        }
+        var duration = GetDoubleArg(requestMessage.Args as IDictionary<string, object?>, "duration");
 
         // Auto-enter play mode if not already playing (with asset refresh + compilation)
         var playModeTimeout = CommandConfigs[UnityCtlCommands.PlayEnter].Timeout;
