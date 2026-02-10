@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using UnityEngine;
 using UnityEditor.Recorder;
+using UnityEditor.Recorder.Encoder;
 using UnityEditor.Recorder.Input;
 
 namespace UnityCtl.Editor.Recorder
@@ -55,8 +56,11 @@ namespace UnityCtl.Editor.Recorder
             _movieRecorder.name = "UnityCtl Video Recorder";
             _movieRecorder.Enabled = true;
             _movieRecorder.OutputFile = outputPath;
-            _movieRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
-            _movieRecorder.VideoBitRateMode = VideoBitrateMode.High;
+            _movieRecorder.EncoderSettings = new CoreEncoderSettings
+            {
+                Codec = CoreEncoderSettings.OutputCodec.MP4,
+                EncodingQuality = CoreEncoderSettings.VideoEncodingQuality.High
+            };
 
             // Configure input (game view)
             var inputSettings = new GameViewInputSettings();
