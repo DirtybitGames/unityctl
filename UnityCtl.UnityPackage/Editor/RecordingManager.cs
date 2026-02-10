@@ -1,12 +1,13 @@
 using System;
 using UnityEngine;
+using UnityEditor;
 using UnityCtl.Protocol;
 
 namespace UnityCtl.Editor
 {
     /// <summary>
     /// Manages video recording state. Delegates to IRecordingBackend when Unity Recorder is available.
-    /// The backend is registered by RecorderBackend (in the Recorder subfolder) when com.unity.recorder is installed.
+    /// The backend is discovered lazily via reflection when a record command first arrives.
     /// </summary>
     public class RecordingManager
     {
@@ -14,6 +15,7 @@ namespace UnityCtl.Editor
         public static RecordingManager Instance => _instance ??= new RecordingManager();
 
         private IRecordingBackend _backend;
+        private bool _backendResolved;
         private string _recordingId;
         private string _outputPath;
         private DateTime _startTime;
@@ -27,17 +29,22 @@ namespace UnityCtl.Editor
         public double Elapsed => _isRecording ? (DateTime.UtcNow - _startTime).TotalSeconds : 0;
         public int FrameCount => _isRecording ? (int)(Elapsed * _fps) : 0;
 
-        /// <summary>
-        /// Called by the Recorder assembly to register itself as the recording backend.
-        /// </summary>
-        public void RegisterBackend(IRecordingBackend backend)
+        private void EnsureBackend()
         {
-            _backend = backend;
-            Debug.Log("[UnityCtl] Recording backend registered (Unity Recorder available)");
+            if (_backendResolved) return;
+            _backendResolved = true;
+
+            var backendType = Type.GetType("UnityCtl.Editor.Recorder.RecorderBackend, UnityCtl.Recorder");
+            if (backendType != null)
+            {
+                _backend = (IRecordingBackend)Activator.CreateInstance(backendType);
+            }
         }
 
         public RecordStartResult Start(string outputName, double? duration, int? width, int? height, int fps, Action<RecordFinishedPayload> onFinished)
         {
+            EnsureBackend();
+
             if (_backend == null)
             {
                 throw new InvalidOperationException(
@@ -58,6 +65,11 @@ namespace UnityCtl.Editor
 
             _isRecording = true;
             _startTime = DateTime.UtcNow;
+
+            if (_hasDuration)
+            {
+                EditorApplication.update += PollRecordingFinished;
+            }
 
             Debug.Log($"[UnityCtl] Recording started: {_outputPath}.mp4 (fps: {fps}, duration: {(duration.HasValue ? $"{duration}s" : "manual")})");
 
@@ -93,16 +105,18 @@ namespace UnityCtl.Editor
             return result;
         }
 
-        /// <summary>
-        /// Called from EditorApplication.update to check if a duration-based recording has finished.
-        /// </summary>
-        public void Update()
+        private void PollRecordingFinished()
         {
             if (!_isRecording || !_hasDuration || _backend == null)
+            {
+                EditorApplication.update -= PollRecordingFinished;
                 return;
+            }
 
             if (!_backend.IsRecording())
             {
+                EditorApplication.update -= PollRecordingFinished;
+
                 var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
                 var frameCount = (int)(duration * _fps);
 
@@ -139,6 +153,7 @@ namespace UnityCtl.Editor
             _isRecording = false;
             _hasDuration = false;
             _onFinished = null;
+            EditorApplication.update -= PollRecordingFinished;
             _backend?.Cleanup();
             _recordingId = null;
             _outputPath = null;

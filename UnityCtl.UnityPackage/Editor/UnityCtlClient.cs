@@ -353,9 +353,6 @@ namespace UnityCtl
                 }
             }
 
-            // Check if a duration-based recording has finished
-            Editor.RecordingManager.Instance.Update();
-
             // Periodic connection health check and automatic reconnection
             var currentTime = Time.realtimeSinceStartup;
 

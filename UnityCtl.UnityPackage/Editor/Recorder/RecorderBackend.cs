@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using UnityEngine;
-using UnityEditor;
 using UnityEditor.Recorder;
 using UnityEditor.Recorder.Input;
 
@@ -10,18 +9,12 @@ namespace UnityCtl.Editor.Recorder
     /// <summary>
     /// Unity Recorder backend implementation. Only compiled when com.unity.recorder is installed
     /// (UNITYCTL_RECORDER define constraint on the asmdef).
+    /// Discovered lazily by RecordingManager via reflection when a record command arrives.
     /// </summary>
-    [InitializeOnLoad]
     public class RecorderBackend : IRecordingBackend
     {
         private RecorderController _controller;
         private RecorderControllerSettings _controllerSettings;
-
-        static RecorderBackend()
-        {
-            // Register this backend with the RecordingManager on domain load
-            RecordingManager.Instance.RegisterBackend(new RecorderBackend());
-        }
 
         public string StartRecording(string outputName, double? duration, int? width, int? height, int fps)
         {
