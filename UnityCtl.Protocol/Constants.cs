@@ -14,7 +14,6 @@ public static class UnityCtlCommands
     // Play mode
     public const string PlayEnter = "play.enter";
     public const string PlayExit = "play.exit";
-    public const string PlayToggle = "play.toggle";
     public const string PlayStatus = "play.status";
 
     // Menu items

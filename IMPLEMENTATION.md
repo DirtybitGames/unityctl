@@ -78,7 +78,7 @@ unityctl logs -f                # Stream logs
 unityctl logs clear             # Clear log history
 unityctl scene list             # List scenes
 unityctl scene load <path>      # Load a scene
-unityctl play enter/exit/toggle # Control play mode
+unityctl play enter/exit        # Control play mode
 unityctl play status            # Get play mode status
 unityctl asset import <path>    # Import an asset
 unityctl asset refresh          # Refresh assets (triggers compilation if needed)
@@ -105,7 +105,7 @@ unityctl asset refresh          # Refresh assets (triggers compilation if needed
 **Commands Handled:**
 - `scene.list` - List build settings or all scenes
 - `scene.load` - Load scene (single/additive)
-- `play.enter/exit/toggle/status` - Play mode control
+- `play.enter/exit/status` - Play mode control
 - `asset.import` - Asset import
 - `asset.refresh` - Refresh assets (triggers compilation)
 
@@ -312,7 +312,7 @@ The implementation includes a test Unity project at `unity-project/` with the Un
 - Read console and editor logs
 - Trigger asset import and script compilation
 - List and load scenes
-- Enter / exit / toggle play mode
+- Enter / exit play mode
 - Stable connection across domain reloads
 - Multi-agent support
 - Project isolation
@@ -321,7 +321,7 @@ The implementation includes a test Unity project at `unity-project/` with the Un
 ✅ All wire protocol commands implemented:
 - asset.import, asset.reimportAll (not exposed in CLI yet), asset.refresh
 - scene.list, scene.load
-- play.enter, play.exit, play.toggle, play.status
+- play.enter, play.exit, play.status
 
 ✅ All events implemented:
 - log
