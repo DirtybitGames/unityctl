@@ -19,7 +19,6 @@ namespace UnityCtl.Editor
         private string _recordingId;
         private string _outputPath;
         private DateTime _startTime;
-        private int _fps;
         private bool _isRecording;
         private bool _hasDuration;
         private Action<RecordFinishedPayload> _onFinished;
@@ -27,7 +26,7 @@ namespace UnityCtl.Editor
         public bool IsRecording => _isRecording;
 
         public double Elapsed => _isRecording ? (DateTime.UtcNow - _startTime).TotalSeconds : 0;
-        public int FrameCount => _isRecording ? (int)(Elapsed * _fps) : 0;
+        public int FrameCount => _isRecording ? _backend.GetRecordedFrameCount() : 0;
 
         private void EnsureBackend()
         {
@@ -58,7 +57,6 @@ namespace UnityCtl.Editor
             }
 
             _recordingId = Guid.NewGuid().ToString();
-            _fps = fps;
             _hasDuration = duration.HasValue;
             _onFinished = onFinished;
             _outputPath = _backend.StartRecording(outputName, duration, width, height, fps);
@@ -88,9 +86,9 @@ namespace UnityCtl.Editor
                 throw new InvalidOperationException("No recording in progress.");
             }
 
-            _backend?.StopRecording();
+            var frameCount = _backend.GetRecordedFrameCount();
+            _backend.StopRecording();
             var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
-            var frameCount = (int)(duration * _fps);
 
             var result = new RecordStopResult
             {
@@ -117,8 +115,8 @@ namespace UnityCtl.Editor
             {
                 EditorApplication.update -= PollRecordingFinished;
 
+                var frameCount = _backend.GetRecordedFrameCount();
                 var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
-                var frameCount = (int)(duration * _fps);
 
                 Debug.Log($"[UnityCtl] Recording finished: {_outputPath}.mp4 ({duration:F1}s, {frameCount} frames)");
 
@@ -166,6 +164,8 @@ namespace UnityCtl.Editor
         {
             if (!_isRecording) return;
 
+            var frameCount = _backend.GetRecordedFrameCount();
+
             try
             {
                 _backend?.StopRecording();
@@ -176,7 +176,6 @@ namespace UnityCtl.Editor
             }
 
             var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
-            var frameCount = (int)(duration * _fps);
 
             Debug.Log($"[UnityCtl] Recording stopped (play mode exited): {_outputPath}.mp4 ({duration:F1}s, {frameCount} frames)");
 
@@ -213,6 +212,12 @@ namespace UnityCtl.Editor
         /// Check if the recorder is currently recording (for detecting duration-based completion).
         /// </summary>
         bool IsRecording();
+
+        /// <summary>
+        /// Get the actual number of frames recorded (using Time.frameCount with CapFrameRate).
+        /// Valid while recording and after StopRecording() but before Cleanup().
+        /// </summary>
+        int GetRecordedFrameCount();
 
         /// <summary>
         /// Clean up recording resources.

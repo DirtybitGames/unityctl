@@ -16,6 +16,7 @@ namespace UnityCtl.Editor.Recorder
         private RecorderController _controller;
         private RecorderControllerSettings _controllerSettings;
         private MovieRecorderSettings _movieRecorder;
+        private int _startFrameCount;
 
         public string StartRecording(string outputName, double? duration, int? width, int? height, int fps)
         {
@@ -78,6 +79,7 @@ namespace UnityCtl.Editor.Recorder
             // Create controller and start
             _controller = new RecorderController(_controllerSettings);
             _controller.PrepareRecording();
+            _startFrameCount = Time.frameCount;
             _controller.StartRecording();
 
             return outputPath;
@@ -91,6 +93,11 @@ namespace UnityCtl.Editor.Recorder
         public bool IsRecording()
         {
             return _controller != null && _controller.IsRecording();
+        }
+
+        public int GetRecordedFrameCount()
+        {
+            return Time.frameCount - _startFrameCount;
         }
 
         private static int EnsureEven(int value)
