@@ -221,6 +221,39 @@ public class BridgeState
     }
 
     /// <summary>
+    /// Clears the Unity connection only if it is still the given WebSocket instance.
+    /// Prevents a stale connection handler from clobbering a newer connection.
+    /// Returns true if the connection was cleared, false if it was already replaced.
+    /// </summary>
+    public bool ClearUnityConnectionIfCurrent(WebSocket expected)
+    {
+        lock (_lock)
+        {
+            if (UnityConnection != expected)
+                return false;
+
+            // Still our connection — perform the full disconnect logic inline
+            // (same as SetUnityConnection(null) but within the same lock acquisition)
+            UnityConnection = null;
+            _unityHelloMessage = null;
+
+            if (_connectionSignal.Task.IsCompleted)
+                _connectionSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            if (_isDomainReloadInProgress)
+            {
+                Console.WriteLine($"[Bridge] Unity disconnected during domain reload grace period - keeping operations alive");
+            }
+            else
+            {
+                Console.WriteLine($"[Bridge] Unity disconnected - canceling all pending operations");
+                CancelAllPendingOperations();
+            }
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Forcefully abort the Unity WebSocket connection (used during shutdown)
     /// </summary>
     public void AbortUnityConnection()

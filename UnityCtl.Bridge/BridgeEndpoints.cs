@@ -1000,8 +1000,12 @@ public static class BridgeEndpoints
             }
             finally
             {
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Unity disconnected");
-                state.SetUnityConnection(null);
+                // Only clear connection if we still own it — a new connection may
+                // have already replaced us via SetUnityConnection(newSocket).
+                if (state.ClearUnityConnectionIfCurrent(webSocket))
+                {
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Unity disconnected");
+                }
             }
         });
     }
