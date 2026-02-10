@@ -21,6 +21,15 @@ dotnet build
 unity-project/
 ```
 
+## Testing
+
+```bash
+dotnet test
+```
+
+- Uses xUnit with `BridgeTestFixture` + `FakeUnityClient` for integration tests
+- See `UnityCtl.Tests/` for unit and integration test examples
+
 ## Key Conventions
 
 - Commands use RPC pattern via bridge (`asset.refresh`, `play.enter`, `scene.load`, etc.)
