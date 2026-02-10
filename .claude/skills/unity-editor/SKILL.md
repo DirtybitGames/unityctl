@@ -52,12 +52,9 @@ unityctl test run --mode playmode
 unityctl screenshot capture
 
 # Video Recording (requires com.unity.recorder package)
-unityctl record start                  # Start recording, returns immediately (manual stop)
+unityctl record start                  # Start recording (manual stop)
 unityctl record start --duration 10    # Record 10 seconds, blocks until done
-unityctl record start --output my-test # Custom output name (Recordings/my-test.mp4)
-unityctl record start --fps 60 --width 1920 --height 1080
 unityctl record stop                   # Stop recording, returns file path + duration
-unityctl record status                 # Check if recording is active
 ```
 
 ## Script Execution
