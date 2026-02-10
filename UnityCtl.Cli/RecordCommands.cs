@@ -128,7 +128,14 @@ public static class RecordCommands
 
             if (response.Status == ResponseStatus.Error)
             {
-                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                if (json)
+                {
+                    Console.WriteLine(JsonHelper.Serialize(response.Result));
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                }
                 context.ExitCode = 1;
                 return;
             }
@@ -170,7 +177,14 @@ public static class RecordCommands
 
             if (response.Status == ResponseStatus.Error)
             {
-                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                if (json)
+                {
+                    Console.WriteLine(JsonHelper.Serialize(response.Result));
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                }
                 context.ExitCode = 1;
                 return;
             }
