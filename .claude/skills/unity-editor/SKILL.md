@@ -1,6 +1,6 @@
 ---
 name: unity-editor
-description: Remote control Unity Editor via CLI using unityctl. Activate when user mentions Unity Editor, play mode, asset compilation, Unity console logs, C# script debugging, Unity tests, scene loading, or screenshots. Use for launching/stopping editor, entering/exiting play mode, compiling scripts, viewing logs, loading scenes, running tests, capturing screenshots, or executing arbitrary C# in Unity context.
+description: Remote control Unity Editor via CLI using unityctl. Activate when user mentions Unity Editor, play mode, asset compilation, Unity console logs, C# script debugging, Unity tests, scene loading, screenshots, or video recording. Use for launching/stopping editor, entering/exiting play mode, compiling scripts, viewing logs, loading scenes, running tests, capturing screenshots, recording video, or executing arbitrary C# in Unity context.
 ---
 
 # unityctl - Unity Editor Remote Control
@@ -50,6 +50,11 @@ unityctl test run --mode playmode
 
 # Screenshots
 unityctl screenshot capture
+
+# Video Recording (requires com.unity.recorder package)
+unityctl record start                  # Start recording (manual stop)
+unityctl record start --duration 10    # Record 10 seconds, blocks until done
+unityctl record stop                   # Stop recording, returns file path + duration
 ```
 
 ## Script Execution

@@ -469,6 +469,18 @@ namespace UnityCtl
                         result = HandleScriptExecute(request);
                         break;
 
+                    case UnityCtlCommands.RecordStart:
+                        result = HandleRecordStart(request);
+                        break;
+
+                    case UnityCtlCommands.RecordStop:
+                        result = HandleRecordStop(request);
+                        break;
+
+                    case UnityCtlCommands.RecordStatus:
+                        result = Editor.RecordingManager.Instance.GetStatus();
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
@@ -655,6 +667,39 @@ namespace UnityCtl
             catch (Exception ex)
             {
                 DebugLogError($"[UnityCtl] Failed to get int argument '{key}': {ex.Message}");
+            }
+
+            return null;
+        }
+
+        private static double? GetDoubleArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return null;
+
+            try
+            {
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return null;
+
+                    if (value is double d) return d;
+                    if (value is float f) return f;
+                    if (value is int i) return i;
+                    if (value is long l) return l;
+
+                    if (value is JToken jtoken)
+                        return jtoken.Value<double>();
+
+                    if (double.TryParse(value.ToString(), out var parsed))
+                        return parsed;
+
+                    DebugLog($"[UnityCtl] Could not parse argument '{key}' as double: {value}");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get double argument '{key}': {ex.Message}");
             }
 
             return null;
@@ -1032,6 +1077,39 @@ namespace UnityCtl
                 Error = result.Error,
                 Diagnostics = result.Diagnostics
             };
+        }
+
+        private object HandleRecordStart(RequestMessage request)
+        {
+            var outputName = GetStringArgument(request, "outputName");
+            var fps = GetIntArgument(request, "fps") ?? 30;
+            var width = GetIntArgument(request, "width");
+            var height = GetIntArgument(request, "height");
+            var duration = GetDoubleArgument(request, "duration");
+
+            return Editor.RecordingManager.Instance.Start(outputName, duration, width, height, fps, payload =>
+            {
+                SendRecordFinishedEvent(payload);
+            });
+        }
+
+        private object HandleRecordStop(RequestMessage request)
+        {
+            return Editor.RecordingManager.Instance.Stop();
+        }
+
+        public void SendRecordFinishedEvent(RecordFinishedPayload payload)
+        {
+            if (!IsConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.RecordFinished,
+                Payload = payload
+            };
+
+            _ = SendMessageAsync(eventMessage);
         }
 
         private void CollectMatchingTests(UnityEditor.TestTools.TestRunner.Api.ITestAdaptor test, string filter, System.Collections.Generic.List<string> results)

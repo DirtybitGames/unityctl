@@ -45,6 +45,12 @@ namespace UnityCtl
 
         private static void OnPlayModeStateChanged(PlayModeStateChange stateChange)
         {
+            // Stop any active recording when exiting play mode
+            if (stateChange == PlayModeStateChange.ExitingPlayMode)
+            {
+                Editor.RecordingManager.Instance.StopIfActive();
+            }
+
             UnityCtlClient.Instance.SendPlayModeChangedEvent(stateChange);
         }
 

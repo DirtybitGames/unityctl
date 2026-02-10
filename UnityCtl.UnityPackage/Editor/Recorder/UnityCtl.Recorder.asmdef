@@ -1,0 +1,29 @@
+{
+    "name": "UnityCtl.Recorder",
+    "rootNamespace": "UnityCtl.Editor.Recorder",
+    "references": [
+        "UnityCtl",
+        "Unity.Recorder.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "UnityCtl.Protocol.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "UNITYCTL_RECORDER"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.recorder",
+            "expression": "",
+            "define": "UNITYCTL_RECORDER"
+        }
+    ],
+    "noEngineReferences": false
+}

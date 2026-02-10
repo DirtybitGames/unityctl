@@ -28,6 +28,11 @@ public static class UnityCtlCommands
 
     // Script execution
     public const string ScriptExecute = "script.execute";
+
+    // Recording
+    public const string RecordStart = "record.start";
+    public const string RecordStop = "record.stop";
+    public const string RecordStatus = "record.status";
 }
 
 public static class UnityCtlEvents
@@ -42,6 +47,7 @@ public static class UnityCtlEvents
     public const string TestStarted = "test.started";
     public const string TestFinished = "test.finished";
     public const string DomainReloadStarting = "domain.reloadStarting";
+    public const string RecordFinished = "record.finished";
 }
 
 public static class MessageOrigin
