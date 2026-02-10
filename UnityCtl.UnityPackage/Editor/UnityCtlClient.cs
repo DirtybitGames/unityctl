@@ -427,14 +427,6 @@ namespace UnityCtl
                         }
                         break;
 
-                    case UnityCtlCommands.PlayToggle:
-                        EditorApplication.isPlaying = !EditorApplication.isPlaying;
-                        result = new PlayModeResult
-                        {
-                            State = EditorApplication.isPlaying ? PlayModeState.Playing : PlayModeState.Stopped
-                        };
-                        break;
-
                     case UnityCtlCommands.PlayStatus:
                         result = new PlayModeResult
                         {

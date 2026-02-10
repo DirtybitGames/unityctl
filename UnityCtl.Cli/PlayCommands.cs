@@ -23,11 +23,6 @@ public static class PlayCommands
         exitCommand.SetHandler(async (InvocationContext context) =>
             await HandlePlayCommand(context, UnityCtlCommands.PlayExit));
 
-        // play toggle
-        var toggleCommand = new Command("toggle", "Toggle play mode");
-        toggleCommand.SetHandler(async (InvocationContext context) =>
-            await HandlePlayCommand(context, UnityCtlCommands.PlayToggle));
-
         // play status
         var statusCommand = new Command("status", "Get play mode status");
         statusCommand.SetHandler(async (InvocationContext context) =>
@@ -35,7 +30,6 @@ public static class PlayCommands
 
         playCommand.AddCommand(enterCommand);
         playCommand.AddCommand(exitCommand);
-        playCommand.AddCommand(toggleCommand);
         playCommand.AddCommand(statusCommand);
         return playCommand;
     }
