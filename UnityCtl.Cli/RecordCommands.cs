@@ -76,8 +76,25 @@ public static class RecordCommands
             {
                 Console.WriteLine(JsonHelper.Serialize(response.Result));
             }
+            else if (duration.HasValue)
+            {
+                // Duration-based: bridge waited for completion and returns finished payload
+                var result = JsonConvert.DeserializeObject<RecordFinishedPayload>(
+                    JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                    JsonHelper.Settings
+                );
+
+                if (result != null)
+                {
+                    var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.OutputPath));
+                    var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
+                    Console.WriteLine($"Recording saved: {relativePath}");
+                    Console.WriteLine($"Duration: {result.Duration:F1}s ({result.FrameCount} frames)");
+                }
+            }
             else
             {
+                // Fire-and-forget: returns start result
                 var result = JsonConvert.DeserializeObject<RecordStartResult>(
                     JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
                     JsonHelper.Settings

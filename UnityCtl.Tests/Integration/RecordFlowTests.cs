@@ -304,6 +304,128 @@ public class RecordFlowTests : IAsyncLifetime
         Assert.Equal("my-test", reqArgs["outputName"]?.ToString());
     }
 
+    [Fact]
+    public async Task RecordStart_AlreadyRecording_ReturnsError()
+    {
+        // Override play.status to already playing
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayStatus, _ =>
+            new PlayModeResult { State = PlayModeState.Playing });
+
+        // Override record.start to return error (already recording)
+        _fixture.FakeUnity.OnCommandError(UnityCtlCommands.RecordStart,
+            "ALREADY_RECORDING", "Recording already in progress. Stop the current recording first.");
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.RecordStart);
+
+        AssertExtensions.IsError(response, "ALREADY_RECORDING");
+        Assert.Contains("already in progress", response.Error!.Message);
+    }
+
+    [Fact]
+    public async Task RecordStart_WithDuration_FromEditMode_FullFlow()
+    {
+        // Full flow: edit mode → asset refresh → play mode → record with duration → finish
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.RecordStart, _ =>
+            new RecordStartResult
+            {
+                RecordingId = "full-flow-id",
+                OutputPath = "Recordings/full-flow.mp4",
+                State = "recording"
+            },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(200),
+                UnityCtlEvents.RecordFinished,
+                new RecordFinishedPayload
+                {
+                    RecordingId = "full-flow-id",
+                    OutputPath = "Recordings/full-flow.mp4",
+                    Duration = 5.0,
+                    FrameCount = 150
+                }));
+
+        var args = new Dictionary<string, object?> { { "duration", 5.0 } };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.RecordStart, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+
+        // Should return the finished payload (not the start result)
+        Assert.Equal("full-flow-id", result["recordingId"]?.ToString());
+        Assert.Equal(5.0, result["duration"]?.Value<double>());
+        Assert.Equal(150, result["frameCount"]?.Value<int>());
+
+        // Verify the full sequence: play.status → asset.refresh → play.enter → record.start
+        var requests = _fixture.FakeUnity.ReceivedRequests.ToArray();
+        Assert.Contains(requests, r => r.Command == UnityCtlCommands.PlayStatus);
+        Assert.Contains(requests, r => r.Command == UnityCtlCommands.AssetRefresh);
+        Assert.Contains(requests, r => r.Command == UnityCtlCommands.PlayEnter);
+        Assert.Contains(requests, r => r.Command == UnityCtlCommands.RecordStart);
+    }
+
+    [Fact]
+    public async Task RecordStart_PassesDurationArgToUnity()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayStatus, _ =>
+            new PlayModeResult { State = PlayModeState.Playing });
+
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.RecordStart, _ =>
+            new RecordStartResult
+            {
+                RecordingId = "duration-arg-test",
+                OutputPath = "Recordings/test.mp4",
+                State = "recording"
+            },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(100),
+                UnityCtlEvents.RecordFinished,
+                new RecordFinishedPayload
+                {
+                    RecordingId = "duration-arg-test",
+                    OutputPath = "Recordings/test.mp4",
+                    Duration = 10.0,
+                    FrameCount = 300
+                }));
+
+        var args = new Dictionary<string, object?> { { "duration", 10.0 } };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.RecordStart, args);
+
+        AssertExtensions.IsOk(response);
+
+        // Verify duration was forwarded to Unity
+        var recordReq = _fixture.FakeUnity.ReceivedRequests
+            .FirstOrDefault(r => r.Command == UnityCtlCommands.RecordStart);
+        Assert.NotNull(recordReq);
+        var reqArgs = recordReq.Args;
+        Assert.NotNull(reqArgs);
+
+        // Duration should be present in the args
+        var durationVal = reqArgs["duration"];
+        Assert.NotNull(durationVal);
+        Assert.Equal(10.0, Convert.ToDouble(durationVal.ToString()));
+    }
+
+    [Fact]
+    public async Task RecordStart_DirectlyEntersPlayMode_WhenAlreadyInPlayMode()
+    {
+        // When play.status returns "playing", the second play.status check in
+        // the play enter loop should break immediately
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayStatus, _ =>
+            new PlayModeResult { State = PlayModeState.Playing });
+
+        var startTime = DateTime.UtcNow;
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.RecordStart);
+        var elapsed = DateTime.UtcNow - startTime;
+
+        AssertExtensions.IsOk(response);
+
+        // Should complete quickly (no play mode entry delay)
+        Assert.True(elapsed.TotalSeconds < 5, $"Should complete quickly, took {elapsed.TotalSeconds}s");
+
+        // Should only have play.status + record.start (no play.enter, no asset.refresh)
+        var requests = _fixture.FakeUnity.ReceivedRequests.ToArray();
+        Assert.Single(requests, r => r.Command == UnityCtlCommands.PlayStatus);
+        Assert.Single(requests, r => r.Command == UnityCtlCommands.RecordStart);
+        Assert.DoesNotContain(requests, r => r.Command == UnityCtlCommands.PlayEnter);
+    }
+
     // --- record.stop tests ---
 
     [Fact]
@@ -340,6 +462,49 @@ public class RecordFlowTests : IAsyncLifetime
         var result = AssertExtensions.GetResultJObject(response);
         Assert.False(result["isRecording"]?.Value<bool>());
         Assert.Null(result["recordingId"]?.Value<string>());
+    }
+
+    [Fact]
+    public async Task RecordStop_ReturnsAllExpectedFields()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.RecordStop, _ =>
+            new RecordStopResult
+            {
+                OutputPath = "Recordings/custom-name.mp4",
+                Duration = 12.5,
+                FrameCount = 375
+            });
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.RecordStop);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+
+        // Verify all expected fields are present
+        Assert.NotNull(result["outputPath"]);
+        Assert.NotNull(result["duration"]);
+        Assert.NotNull(result["frameCount"]);
+        Assert.Equal("Recordings/custom-name.mp4", result["outputPath"]?.ToString());
+        Assert.Equal(12.5, result["duration"]?.Value<double>());
+        Assert.Equal(375, result["frameCount"]?.Value<int>());
+    }
+
+    [Fact]
+    public async Task RecordStatus_NotRecording_NullOptionalFields()
+    {
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.RecordStatus);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.False(result["isRecording"]?.Value<bool>());
+
+        // Optional fields should be null/absent when not recording
+        Assert.True(
+            result["recordingId"] == null || result["recordingId"]!.Type == JTokenType.Null,
+            "recordingId should be null when not recording");
+        Assert.True(
+            result["outputPath"] == null || result["outputPath"]!.Type == JTokenType.Null,
+            "outputPath should be null when not recording");
     }
 
     [Fact]
