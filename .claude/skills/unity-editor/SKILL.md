@@ -109,22 +109,6 @@ unityctl logs                # Check runtime logs
 unityctl play exit
 ```
 
-### Record a Gameplay Sequence
-
-```bash
-# Fixed duration (blocks until done, auto-enters play mode if needed)
-unityctl record start --duration 10
-# Returns: { "outputPath": "Recordings/recording_2026-02-10_14-30-00.mp4", "duration": 10.0, ... }
-
-# Manual start/stop (useful for recording while performing actions)
-unityctl record start --output my-test
-# ... perform actions ...
-unityctl record stop
-# Returns: { "outputPath": "Recordings/my-test.mp4", "duration": 12.3, ... }
-```
-
-Note: `record start` auto-enters play mode with asset refresh if not already playing. Requires the `com.unity.recorder` Unity package.
-
 ## Troubleshooting
 
 Run `unityctl status` first to diagnose issues.
