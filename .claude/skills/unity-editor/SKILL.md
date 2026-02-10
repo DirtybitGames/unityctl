@@ -70,7 +70,21 @@ unityctl script eval "args[0]" -- hello
 
 ### Full Script Execution
 
-For complex scripts with custom classes, multiple methods, or file-based execution:
+For complex scripts with custom classes, multiple methods, or file-based execution. Write a script file with a class containing a static `Main()` method returning `object` (JSON-serialized):
+
+```cs
+// /tmp/MyScript.cs
+using UnityEngine;
+
+public class Script
+{
+    public static object Main()
+    {
+        var player = GameObject.Find("Player");
+        return player?.transform.position.ToString() ?? "not found";
+    }
+}
+```
 
 ```bash
 unityctl script execute -f /tmp/MyScript.cs
@@ -78,7 +92,7 @@ unityctl script execute -c "using UnityEngine; public class Script { public stat
 unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 "My Object"
 ```
 
-Scripts require a class with static `Main()` returning `object`. Return value is JSON-serialized.
+Use `Main(string[] args)` to accept arguments passed after `--`.
 
 ## Typical Workflow
 
