@@ -47,11 +47,13 @@ public class AssetRefreshFlowTests : IAsyncLifetime
     public Task DisposeAsync() => _fixture.DisposeAsync();
 
     [Fact]
-    public async Task AssetRefresh_NoCompilation_ReturnsOk()
+    public async Task AssetRefresh_NoCompilation_ReturnsOkWithCompilationTriggeredFalse()
     {
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.AssetRefresh);
 
         AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.False(result["compilationTriggered"]?.Value<bool>());
     }
 
     [Fact]
@@ -101,6 +103,25 @@ public class AssetRefreshFlowTests : IAsyncLifetime
         Assert.Equal("Foo.cs", errors[0].File);
         Assert.Equal(1, errors[0].Line);
         Assert.Equal("error", errors[0].Message);
+    }
+
+    [Fact]
+    public async Task AssetRefresh_NoCompilationButErrorsExist_ReturnsOkWithHasCompilationErrors()
+    {
+        // Simulate: no new compilation triggered, but previous errors still exist
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.AssetRefresh, _ =>
+            new { },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.AssetRefreshComplete,
+                new { compilationTriggered = false, hasCompilationErrors = true }));
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.AssetRefresh);
+
+        // Bridge returns ok (it's Unity's response), but the payload signals errors exist
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.False(result["compilationTriggered"]?.Value<bool>());
+        Assert.True(result["hasCompilationErrors"]?.Value<bool>());
     }
 
     [Fact]

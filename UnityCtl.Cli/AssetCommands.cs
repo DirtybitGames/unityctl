@@ -65,11 +65,13 @@ public static class AssetCommands
             var response = await client.SendCommandAsync(UnityCtlCommands.AssetRefresh, null);
             if (response == null) { context.ExitCode = 1; return; }
 
+            var hasCompilationErrors = ContextHelper.GetResultBool(response, "hasCompilationErrors") == true;
+            var compilationTriggered = ContextHelper.GetResultBool(response, "compilationTriggered") == true;
+
             if (json)
             {
-                // Always output JSON, including errors
                 Console.WriteLine(JsonHelper.Serialize(response.Result));
-                if (response.Status == ResponseStatus.Error)
+                if (response.Status == ResponseStatus.Error || hasCompilationErrors)
                 {
                     context.ExitCode = 1;
                 }
@@ -80,9 +82,17 @@ public static class AssetCommands
                 ContextHelper.DisplayCompilationErrors(response);
                 context.ExitCode = 1;
             }
+            else if (hasCompilationErrors && !compilationTriggered)
+            {
+                Console.Error.WriteLine("Error: Compilation errors exist from a previous build");
+                context.ExitCode = 1;
+            }
             else
             {
-                Console.WriteLine("Asset refresh completed");
+                if (compilationTriggered)
+                    Console.WriteLine("Asset refresh completed (compilation succeeded)");
+                else
+                    Console.WriteLine("Asset refresh completed (no compilation needed)");
             }
         });
         assetCommand.AddCommand(refreshCommand);

@@ -34,6 +34,14 @@ internal static class ContextHelper
         return option != null && parseResult.GetValueForOption(option);
     }
 
+    public static bool? GetResultBool(ResponseMessage response, string key)
+    {
+        if (response.Result == null) return null;
+        var resultJson = JsonConvert.SerializeObject(response.Result, JsonHelper.Settings);
+        var result = JObject.Parse(resultJson);
+        return result[key]?.Value<bool>();
+    }
+
     /// <summary>
     /// If response.Result contains compilation errors/warnings, print them to stderr.
     /// Used by asset refresh and play enter when compilation fails.
