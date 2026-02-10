@@ -225,6 +225,63 @@ public class ScriptExecuteResult
     public string[]? Diagnostics { get; init; }
 }
 
+public class RecordStartResult
+{
+    [JsonProperty("recordingId")]
+    public required string RecordingId { get; init; }
+
+    [JsonProperty("outputPath")]
+    public required string OutputPath { get; init; }
+
+    [JsonProperty("state")]
+    public required string State { get; init; }
+}
+
+public class RecordStopResult
+{
+    [JsonProperty("outputPath")]
+    public required string OutputPath { get; init; }
+
+    [JsonProperty("duration")]
+    public required double Duration { get; init; }
+
+    [JsonProperty("frameCount")]
+    public required int FrameCount { get; init; }
+}
+
+public class RecordStatusResult
+{
+    [JsonProperty("isRecording")]
+    public required bool IsRecording { get; init; }
+
+    [JsonProperty("recordingId")]
+    public string? RecordingId { get; init; }
+
+    [JsonProperty("outputPath")]
+    public string? OutputPath { get; init; }
+
+    [JsonProperty("elapsed")]
+    public double? Elapsed { get; init; }
+
+    [JsonProperty("frameCount")]
+    public int? FrameCount { get; init; }
+}
+
+public class RecordFinishedPayload
+{
+    [JsonProperty("recordingId")]
+    public required string RecordingId { get; init; }
+
+    [JsonProperty("outputPath")]
+    public required string OutputPath { get; init; }
+
+    [JsonProperty("duration")]
+    public required double Duration { get; init; }
+
+    [JsonProperty("frameCount")]
+    public required int FrameCount { get; init; }
+}
+
 public class ProjectStatusResult
 {
     [JsonProperty("projectPath")]

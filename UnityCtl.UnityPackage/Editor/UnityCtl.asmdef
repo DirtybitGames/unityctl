@@ -1,7 +1,9 @@
 {
     "name": "UnityCtl",
     "rootNamespace": "UnityCtl",
-    "references": [],
+    "references": [
+        "Unity.Recorder"
+    ],
     "includePlatforms": [
         "Editor"
     ],
@@ -20,6 +22,12 @@
     ],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.recorder",
+            "expression": "",
+            "define": "UNITYCTL_RECORDER"
+        }
+    ],
     "noEngineReferences": false
 }

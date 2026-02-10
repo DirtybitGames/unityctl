@@ -353,6 +353,9 @@ namespace UnityCtl
                 }
             }
 
+            // Check if a duration-based recording has finished
+            Editor.RecordingManager.Instance.Update();
+
             // Periodic connection health check and automatic reconnection
             var currentTime = Time.realtimeSinceStartup;
 
@@ -467,6 +470,18 @@ namespace UnityCtl
 
                     case UnityCtlCommands.ScriptExecute:
                         result = HandleScriptExecute(request);
+                        break;
+
+                    case UnityCtlCommands.RecordStart:
+                        result = HandleRecordStart(request);
+                        break;
+
+                    case UnityCtlCommands.RecordStop:
+                        result = HandleRecordStop(request);
+                        break;
+
+                    case UnityCtlCommands.RecordStatus:
+                        result = Editor.RecordingManager.Instance.GetStatus();
                         break;
 
                     default:
@@ -1032,6 +1047,53 @@ namespace UnityCtl
                 Error = result.Error,
                 Diagnostics = result.Diagnostics
             };
+        }
+
+        private object HandleRecordStart(RequestMessage request)
+        {
+            var outputName = GetStringArgument(request, "outputName");
+            var fps = GetIntArgument(request, "fps") ?? 30;
+            var width = GetIntArgument(request, "width");
+            var height = GetIntArgument(request, "height");
+
+            double? duration = null;
+            if (request.Args is System.Collections.IDictionary dict && dict.Contains("duration"))
+            {
+                var durationVal = dict["duration"];
+                if (durationVal != null)
+                {
+                    if (durationVal is Newtonsoft.Json.Linq.JToken jt)
+                        duration = jt.Value<double>();
+                    else if (durationVal is double d)
+                        duration = d;
+                    else if (double.TryParse(durationVal.ToString(), out var parsed))
+                        duration = parsed;
+                }
+            }
+
+            return Editor.RecordingManager.Instance.Start(outputName, duration, width, height, fps, payload =>
+            {
+                SendRecordFinishedEvent(payload);
+            });
+        }
+
+        private object HandleRecordStop(RequestMessage request)
+        {
+            return Editor.RecordingManager.Instance.Stop();
+        }
+
+        public void SendRecordFinishedEvent(RecordFinishedPayload payload)
+        {
+            if (!IsConnected) return;
+
+            var eventMessage = new EventMessage
+            {
+                Origin = MessageOrigin.Unity,
+                Event = UnityCtlEvents.RecordFinished,
+                Payload = payload
+            };
+
+            _ = SendMessageAsync(eventMessage);
         }
 
         private void CollectMatchingTests(UnityEditor.TestTools.TestRunner.Api.ITestAdaptor test, string filter, System.Collections.Generic.List<string> results)

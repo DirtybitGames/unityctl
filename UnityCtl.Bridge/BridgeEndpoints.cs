@@ -59,6 +59,11 @@ public static class BridgeEndpoints
         {
             TimeoutEnvVar = "UNITYCTL_TIMEOUT_TEST", TimeoutDefaultSeconds = 300,
             CompletionEvent = UnityCtlEvents.TestFinished
+        },
+        [UnityCtlCommands.RecordStart] = new CommandConfig
+        {
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_RECORD", TimeoutDefaultSeconds = 600,
+            CompletionEvent = UnityCtlEvents.RecordFinished
         }
     };
 
@@ -212,6 +217,9 @@ public static class BridgeEndpoints
 
             if (request.Command == UnityCtlCommands.PlayExit)
                 return await HandlePlayExitAsync(state, requestMessage, config!, timeout, context.RequestAborted);
+
+            if (request.Command == UnityCtlCommands.RecordStart)
+                return await HandleRecordStartAsync(state, requestMessage, request, config!, timeout, context.RequestAborted);
 
             return await HandleGenericCommandAsync(state, requestMessage, hasConfig ? config : null, timeout, context.RequestAborted);
         }
@@ -666,6 +674,217 @@ public static class BridgeEndpoints
         }
     }
 
+    private static async Task<IResult> HandleRecordStartAsync(
+        BridgeState state,
+        RequestMessage requestMessage,
+        RpcRequest request,
+        CommandConfig config,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        // Check if duration is specified (determines blocking vs fire-and-forget)
+        var convertedArgs = requestMessage.Args as IDictionary<string, object?>;
+        double? duration = null;
+        if (convertedArgs != null && convertedArgs.TryGetValue("duration", out var durationVal) && durationVal != null)
+        {
+            if (durationVal is JToken jt)
+                duration = jt.Value<double>();
+            else if (durationVal is double d)
+                duration = d;
+            else if (double.TryParse(durationVal.ToString(), out var parsed))
+                duration = parsed;
+        }
+
+        // Auto-enter play mode if not already playing (with asset refresh, same as play.enter)
+        var playModeTimeout = CommandConfigs[UnityCtlCommands.PlayEnter].Timeout;
+
+        var statusRequest = CreateInternalRequest(request.AgentId, UnityCtlCommands.PlayStatus);
+        var statusResponse = await state.SendCommandToUnityAsync(statusRequest, playModeTimeout, cancellationToken);
+        var currentState = (statusResponse.Result as JObject)?["state"]?.ToString();
+
+        if (currentState != "playing")
+        {
+            Console.WriteLine($"[Bridge] Record start: not in play mode, entering play mode first");
+
+            // Asset refresh first
+            var refreshRequest = CreateInternalRequest(request.AgentId, UnityCtlCommands.AssetRefresh);
+            var refreshWaitTask = state.WaitForEventAsync(
+                refreshRequest.RequestId,
+                UnityCtlEvents.AssetRefreshComplete,
+                playModeTimeout,
+                cancellationToken);
+
+            await state.SendCommandToUnityAsync(refreshRequest, playModeTimeout, cancellationToken);
+            var refreshEvent = await refreshWaitTask;
+            var refreshPayload = refreshEvent.Payload as JObject;
+            var refreshCompilationTriggered = refreshPayload?["compilationTriggered"]?.Value<bool>() ?? false;
+            var hasCompilationErrors = refreshPayload?["hasCompilationErrors"]?.Value<bool>() ?? false;
+
+            Console.WriteLine($"[Bridge] Record: asset refresh complete, compilationTriggered: {refreshCompilationTriggered}, hasCompilationErrors: {hasCompilationErrors}");
+
+            if (hasCompilationErrors && !refreshCompilationTriggered)
+            {
+                return Results.Json(ErrorResponse(
+                    requestMessage.RequestId,
+                    new { state = "CompilationFailed" },
+                    "COMPILATION_ERROR",
+                    "Cannot start recording - compilation errors exist. Fix the errors and try again."), statusCode: 200);
+            }
+
+            if (refreshCompilationTriggered)
+            {
+                Console.WriteLine($"[Bridge] Record: waiting for compilation to finish...");
+                var compResult = await WaitForCompilationAsync(
+                    state,
+                    refreshRequest.RequestId + "_compile",
+                    playModeTimeout,
+                    cancellationToken);
+
+                if (compResult != null && !compResult.Success)
+                {
+                    var errorCount = compResult.Errors?.Length ?? 0;
+                    return Results.Json(ErrorResponse(
+                        requestMessage.RequestId,
+                        new
+                        {
+                            state = "CompilationFailed",
+                            errors = compResult.Errors,
+                            warnings = compResult.Warnings
+                        },
+                        "COMPILATION_ERROR",
+                        $"Compilation failed with {errorCount} error(s)"), statusCode: 200);
+                }
+            }
+
+            // Enter play mode using the same retry loop pattern as HandlePlayEnterAsync
+            var playEnterRequest = CreateInternalRequest(request.AgentId, UnityCtlCommands.PlayEnter);
+            var playEnterStartTime = DateTime.UtcNow;
+
+            while (DateTime.UtcNow - playEnterStartTime < playModeTimeout)
+            {
+                if (!state.IsUnityConnected)
+                {
+                    var remaining = playModeTimeout - (DateTime.UtcNow - playEnterStartTime);
+                    if (remaining <= TimeSpan.Zero || !await state.WaitForUnityConnectionAsync(remaining, cancellationToken))
+                        throw new TimeoutException("Unity did not reconnect after domain reload");
+                }
+
+                try
+                {
+                    var loopStatusRequest = CreateInternalRequest(request.AgentId, UnityCtlCommands.PlayStatus);
+                    var loopStatusResponse = await state.SendCommandToUnityAsync(loopStatusRequest, StatusCheckTimeout, cancellationToken);
+                    var currentPlayState = (loopStatusResponse.Result as JObject)?["state"]?.ToString();
+
+                    if (currentPlayState == "playing")
+                        break; // Already in play mode
+                }
+                catch (TimeoutException)
+                {
+                    continue;
+                }
+
+                var shortTimeout = ShortEventTimeout;
+                var playEnterWaitTask = state.WaitForEventAsync(
+                    playEnterRequest.RequestId + "_" + Guid.NewGuid().ToString("N")[..8],
+                    UnityCtlEvents.PlayModeChanged,
+                    shortTimeout,
+                    cancellationToken);
+
+                try
+                {
+                    await state.SendCommandToUnityAsync(playEnterRequest, StatusCheckTimeout, cancellationToken);
+                }
+                catch (TimeoutException)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var firstEvent = await playEnterWaitTask;
+                    var firstState = (firstEvent.Payload as JObject)?["state"]?.ToString();
+
+                    if (firstState == "EnteredPlayMode")
+                        break;
+
+                    if (firstState == "ExitingEditMode")
+                    {
+                        var secondWaitTask = state.WaitForEventAsync(
+                            playEnterRequest.RequestId + "_second_" + Guid.NewGuid().ToString("N")[..8],
+                            UnityCtlEvents.PlayModeChanged,
+                            shortTimeout,
+                            cancellationToken);
+
+                        try
+                        {
+                            var secondEvent = await secondWaitTask;
+                            var secondState = (secondEvent.Payload as JObject)?["state"]?.ToString();
+
+                            if (secondState == "EnteredPlayMode")
+                                break;
+
+                            if (secondState == "EnteredEditMode")
+                            {
+                                return Results.Json(ErrorResponse(
+                                    requestMessage.RequestId,
+                                    new { state = "PlayModeEntryFailed" },
+                                    "PLAY_MODE_FAILED",
+                                    "Cannot start recording - play mode entry failed"), statusCode: 200);
+                            }
+                        }
+                        catch (TimeoutException) { continue; }
+                    }
+                }
+                catch (TimeoutException)
+                {
+                    if (state.IsDomainReloadInProgress || !state.IsUnityConnected)
+                        continue;
+                    continue;
+                }
+            }
+        }
+
+        Console.WriteLine($"[Bridge] Record start: in play mode, sending record.start to Unity");
+
+        // If duration is specified, pre-register the event waiter for record.finished
+        Task<EventMessage>? recordFinishedTask = null;
+        if (duration.HasValue)
+        {
+            var recordTimeout = TimeSpan.FromSeconds(duration.Value + 30); // duration + buffer
+            recordFinishedTask = state.WaitForEventAsync(
+                requestMessage.RequestId,
+                config.CompletionEvent!,
+                recordTimeout,
+                cancellationToken);
+        }
+
+        // Send record.start to Unity
+        var response = await state.SendCommandToUnityAsync(requestMessage, timeout, cancellationToken);
+
+        if (response.Status == ResponseStatus.Error)
+        {
+            return JsonResponse(response);
+        }
+
+        // If duration is specified, wait for the record.finished event
+        if (recordFinishedTask != null)
+        {
+            Console.WriteLine($"[Bridge] Record start: waiting for recording to finish (duration: {duration}s)");
+            var finishedEvent = await recordFinishedTask;
+
+            // Return the finished event payload as the result
+            response = new ResponseMessage
+            {
+                Origin = response.Origin,
+                RequestId = response.RequestId,
+                Status = ResponseStatus.Ok,
+                Result = finishedEvent.Payload
+            };
+        }
+
+        return JsonResponse(response);
+    }
+
     private static async Task<IResult> HandleGenericCommandAsync(
         BridgeState state,
         RequestMessage requestMessage,
@@ -1080,6 +1299,10 @@ public static class BridgeEndpoints
 
             case UnityCtlEvents.TestFinished:
                 Console.WriteLine($"[Event] Tests finished");
+                break;
+
+            case UnityCtlEvents.RecordFinished:
+                Console.WriteLine($"[Event] Recording finished");
                 break;
 
             case UnityCtlEvents.DomainReloadStarting:

@@ -1,6 +1,6 @@
 ---
 name: unity-editor
-description: Remote control Unity Editor via CLI using unityctl. Activate when user mentions Unity Editor, play mode, asset compilation, Unity console logs, C# script debugging, Unity tests, scene loading, or screenshots. Use for launching/stopping editor, entering/exiting play mode, compiling scripts, viewing logs, loading scenes, running tests, capturing screenshots, or executing arbitrary C# in Unity context.
+description: Remote control Unity Editor via CLI using unityctl. Activate when user mentions Unity Editor, play mode, asset compilation, Unity console logs, C# script debugging, Unity tests, scene loading, screenshots, or video recording. Use for launching/stopping editor, entering/exiting play mode, compiling scripts, viewing logs, loading scenes, running tests, capturing screenshots, recording video, or executing arbitrary C# in Unity context.
 ---
 
 # unityctl - Unity Editor Remote Control
@@ -50,6 +50,14 @@ unityctl test run --mode playmode
 
 # Screenshots
 unityctl screenshot capture
+
+# Video Recording (requires com.unity.recorder package)
+unityctl record start                  # Start recording, returns immediately (manual stop)
+unityctl record start --duration 10    # Record 10 seconds, blocks until done
+unityctl record start --output my-test # Custom output name (Recordings/my-test.mp4)
+unityctl record start --fps 60 --width 1920 --height 1080
+unityctl record stop                   # Stop recording, returns file path + duration
+unityctl record status                 # Check if recording is active
 ```
 
 ## Script Execution
@@ -103,6 +111,22 @@ unityctl play enter
 unityctl logs                # Check runtime logs
 unityctl play exit
 ```
+
+### Record a Gameplay Sequence
+
+```bash
+# Fixed duration (blocks until done, auto-enters play mode if needed)
+unityctl record start --duration 10
+# Returns: { "outputPath": "Recordings/recording_2026-02-10_14-30-00.mp4", "duration": 10.0, ... }
+
+# Manual start/stop (useful for recording while performing actions)
+unityctl record start --output my-test
+# ... perform actions ...
+unityctl record stop
+# Returns: { "outputPath": "Recordings/my-test.mp4", "duration": 12.3, ... }
+```
+
+Note: `record start` auto-enters play mode with asset refresh if not already playing. Requires the `com.unity.recorder` Unity package.
 
 ## Troubleshooting
 
