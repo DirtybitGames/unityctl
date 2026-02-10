@@ -28,7 +28,6 @@ public static class WaitCommand
             var projectPath = ContextHelper.GetProjectPath(context);
             var json = ContextHelper.GetJson(context);
             var timeoutArg = context.ParseResult.GetValueForOption(timeoutOption);
-            var timeout = timeoutArg ?? ReadConfiguredTimeout() ?? DefaultTimeout;
 
             var projectRoot = projectPath ?? ProjectLocator.FindProjectRoot();
             if (projectRoot == null)
@@ -47,6 +46,8 @@ public static class WaitCommand
                 return;
             }
 
+            var timeout = timeoutArg ?? ReadConfiguredTimeout(projectRoot) ?? DefaultTimeout;
+
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) =>
             {
@@ -61,6 +62,8 @@ public static class WaitCommand
 
             var bridgeFound = false;
             var elapsed = 0;
+            BridgeClient? client = null;
+            int? lastPort = null;
 
             while (elapsed < timeout)
             {
@@ -70,9 +73,15 @@ public static class WaitCommand
                 var bridgeConfig = ProjectLocator.ReadBridgeConfig(projectRoot);
                 if (bridgeConfig != null)
                 {
+                    // Reuse client if the port hasn't changed
+                    if (client == null || lastPort != bridgeConfig.Port)
+                    {
+                        client = new BridgeClient($"http://localhost:{bridgeConfig.Port}");
+                        lastPort = bridgeConfig.Port;
+                    }
+
                     try
                     {
-                        var client = new BridgeClient($"http://localhost:{bridgeConfig.Port}");
                         var health = await client.GetAsync<HealthResult>("/health");
                         if (health != null)
                         {
@@ -144,24 +153,18 @@ public static class WaitCommand
         return waitCommand;
     }
 
-    private static int? ReadConfiguredTimeout()
+    private static int? ReadConfiguredTimeout(string projectRoot)
     {
         try
         {
-            var current = new DirectoryInfo(Directory.GetCurrentDirectory());
-            while (current != null)
+            var configPath = Path.Combine(projectRoot, ProjectLocator.BridgeConfigDir, ProjectLocator.ConfigFile);
+            if (File.Exists(configPath))
             {
-                var configPath = Path.Combine(current.FullName, ProjectLocator.BridgeConfigDir, ProjectLocator.ConfigFile);
-                if (File.Exists(configPath))
-                {
-                    var content = File.ReadAllText(configPath);
-                    var config = JsonNode.Parse(content);
-                    var value = config?["waitTimeout"];
-                    if (value != null)
-                        return (int)value;
-                    return null;
-                }
-                current = current.Parent;
+                var content = File.ReadAllText(configPath);
+                var config = JsonNode.Parse(content);
+                var value = config?["waitTimeout"];
+                if (value != null)
+                    return value.GetValue<int>();
             }
         }
         catch

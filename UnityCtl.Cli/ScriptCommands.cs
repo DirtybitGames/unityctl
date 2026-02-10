@@ -135,7 +135,7 @@ public static class ScriptCommands
                 return;
             }
 
-            DisplayScriptResult(context, response, json);
+            DisplayScriptResult(context, response, json, isEval: false);
         });
 
         scriptCommand.AddCommand(executeCommand);
@@ -205,7 +205,7 @@ public static class ScriptCommands
                 return;
             }
 
-            DisplayScriptResult(context, response, json);
+            DisplayScriptResult(context, response, json, isEval: true);
         });
 
         scriptCommand.AddCommand(evalCommand);
@@ -224,13 +224,13 @@ public static class ScriptCommands
 
         var usingBlock = string.Join("\n", usings.Select(u => $"using {u};"));
         var signature = hasArgs ? "public static object Main(string[] args)" : "public static object Main()";
-        var isBodyMode = expression.Contains(';');
+        var isBodyMode = expression.TrimEnd().EndsWith(';');
         var body = isBodyMode ? expression : $"return {expression};";
 
         return usingBlock + "\n\npublic class Script\n{\n    " + signature + "\n    {\n        " + body + "\n    }\n}\n";
     }
 
-    private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json)
+    private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json, bool isEval)
     {
         var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(
             JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
@@ -265,6 +265,14 @@ public static class ScriptCommands
                         {
                             Console.Error.WriteLine($"  {diagnostic}");
                         }
+                    }
+
+                    if (isEval)
+                    {
+                        Console.Error.WriteLine();
+                        Console.Error.WriteLine("Hint: Expressions are wrapped in 'return <expr>;' automatically.");
+                        Console.Error.WriteLine("  For multi-statement code (ending with ;), use explicit 'return' to return a value.");
+                        Console.Error.WriteLine("  Example: unityctl script eval \"var x = 42; return x;\"");
                     }
                 }
             }

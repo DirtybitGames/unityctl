@@ -78,4 +78,21 @@ public class EvalCodeGeneratorTests
         Assert.Contains("public class Script", code);
         Assert.Contains("public static object Main()", code);
     }
+
+    [Fact]
+    public void ExpressionWithSemicolonInString_TreatedAsExpression()
+    {
+        var code = ScriptCommands.BuildEvalCode("\"hello; world\".Length", [], hasArgs: false);
+
+        Assert.Contains("return \"hello; world\".Length;", code);
+    }
+
+    [Fact]
+    public void ExpressionWithTrailingSemicolon_TreatedAsBody()
+    {
+        var code = ScriptCommands.BuildEvalCode("Debug.Log(\"test\");", [], hasArgs: false);
+
+        Assert.Contains("Debug.Log(\"test\");", code);
+        Assert.DoesNotContain("return Debug.Log", code);
+    }
 }
