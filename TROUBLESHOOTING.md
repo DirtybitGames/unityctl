@@ -369,5 +369,5 @@ If you've tried these solutions and still have issues:
    dotnet --version
 
    # Check Unity logs (last 50 lines)
-   unityctl console tail --lines 50
+   unityctl logs -n 50
    ```
