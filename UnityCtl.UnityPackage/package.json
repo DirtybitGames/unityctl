@@ -3,7 +3,7 @@
   "version": "0.4.1",
   "displayName": "UnityCtl",
   "description": "Remote control plugin for Unity Editor",
-  "unity": "6000.0",
+  "unity": "2022.3",
   "author": {
     "name": "Dirtybit"
   },
