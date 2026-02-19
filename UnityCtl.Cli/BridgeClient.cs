@@ -23,7 +23,11 @@ public class BridgeClient
         _baseUrl = baseUrl;
         _agentId = agentId;
         _projectRoot = projectRoot;
-        _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        _httpClient = new HttpClient
+        {
+            BaseAddress = new Uri(baseUrl),
+            Timeout = System.Threading.Timeout.InfiniteTimeSpan
+        };
     }
 
     public static BridgeClient? TryCreateFromProject(string? projectPath, string? agentId)

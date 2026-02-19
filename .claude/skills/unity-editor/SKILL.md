@@ -99,6 +99,12 @@ unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 "My Object"
 
 Use `Main(string[] args)` to accept arguments passed after `--`.
 
+Use `-t <seconds>` on `script eval`/`script execute` for long-running operations (default 30s):
+
+```bash
+unityctl script eval -t 300 -u UnityEditor 'return BuildPipeline.BuildPlayer(opts).summary.result.ToString();'
+```
+
 ## Typical Workflow
 
 ```bash
