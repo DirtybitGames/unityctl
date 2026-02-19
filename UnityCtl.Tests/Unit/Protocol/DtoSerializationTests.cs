@@ -14,6 +14,7 @@ public class DtoSerializationTests
             Status = "ok",
             ProjectId = "proj-abc",
             UnityConnected = true,
+            EditorReady = true,
             BridgeVersion = "0.3.6",
             UnityPluginVersion = "0.3.6"
         };
@@ -24,6 +25,7 @@ public class DtoSerializationTests
         Assert.Equal("ok", jObj["status"]?.ToString());
         Assert.Equal("proj-abc", jObj["projectId"]?.ToString());
         Assert.True(jObj["unityConnected"]?.Value<bool>());
+        Assert.True(jObj["editorReady"]?.Value<bool>());
         Assert.Equal("0.3.6", jObj["bridgeVersion"]?.ToString());
     }
 

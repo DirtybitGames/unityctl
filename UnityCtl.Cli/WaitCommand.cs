@@ -15,7 +15,7 @@ public static class WaitCommand
 
     public static Command CreateCommand()
     {
-        var waitCommand = new Command("wait", "Wait until Unity is connected to the bridge");
+        var waitCommand = new Command("wait", "Wait until Unity Editor is connected and ready to accept commands");
 
         var timeoutOption = new Option<int?>(
             "--timeout",
@@ -57,10 +57,11 @@ public static class WaitCommand
 
             if (!json)
             {
-                Console.WriteLine("Waiting for Unity to connect...");
+                Console.WriteLine("Waiting for Unity Editor to be ready...");
             }
 
             var bridgeFound = false;
+            var unityConnected = false;
             var elapsed = 0;
             BridgeClient? client = null;
             int? lastPort = null;
@@ -86,19 +87,28 @@ public static class WaitCommand
                         if (health != null)
                         {
                             bridgeFound = true;
-                            if (health.UnityConnected)
+
+                            // Log transition to connected (once)
+                            if (health.UnityConnected && !unityConnected && !json)
+                            {
+                                Console.WriteLine("Unity connected, waiting for editor to be ready...");
+                                unityConnected = true;
+                            }
+
+                            if (health.EditorReady)
                             {
                                 if (json)
                                 {
                                     Console.WriteLine(JsonHelper.Serialize(new
                                     {
                                         unityConnected = true,
+                                        editorReady = true,
                                         bridgeRunning = true
                                     }));
                                 }
                                 else
                                 {
-                                    Console.WriteLine("Connected!");
+                                    Console.WriteLine("Editor ready!");
                                 }
                                 return;
                             }
@@ -127,7 +137,8 @@ public static class WaitCommand
             {
                 Console.WriteLine(JsonHelper.Serialize(new
                 {
-                    unityConnected = false,
+                    unityConnected,
+                    editorReady = false,
                     bridgeRunning = bridgeFound
                 }));
             }
@@ -142,9 +153,13 @@ public static class WaitCommand
                     Console.Error.WriteLine($"Timed out after {timeout}s. Bridge not found.");
                     Console.Error.WriteLine("  Run 'unityctl bridge start' first.");
                 }
-                else
+                else if (!unityConnected)
                 {
                     Console.Error.WriteLine($"Timed out after {timeout}s. Unity is not connected to the bridge.");
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Timed out after {timeout}s. Unity is connected but the editor is not ready (may still be importing assets).");
                 }
             }
             context.ExitCode = 1;

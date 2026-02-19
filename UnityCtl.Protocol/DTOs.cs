@@ -19,6 +19,9 @@ public class HealthResult
 
     [JsonProperty("unityPluginVersion")]
     public string? UnityPluginVersion { get; init; }
+
+    [JsonProperty("editorReady")]
+    public required bool EditorReady { get; init; }
 }
 
 public class LogEntry
