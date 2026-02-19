@@ -22,13 +22,7 @@ public class BridgeClient
         _baseUrl = baseUrl;
         _agentId = agentId;
         _projectRoot = projectRoot;
-        _httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(baseUrl),
-            // The bridge enforces per-command timeouts server-side.
-            // The CLI should not race against those with a shorter HTTP timeout.
-            Timeout = TimeSpan.FromMinutes(15)
-        };
+        _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
     }
 
     public static BridgeClient? TryCreateFromProject(string? projectPath, string? agentId)
@@ -139,7 +133,15 @@ public class BridgeClient
             var json = JsonHelper.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/rpc", content);
+            // The bridge enforces the real timeout server-side. The HTTP timeout
+            // just needs to be long enough to not race it. Add a 30s buffer so the
+            // bridge always gets to respond first (with a proper 504) rather than
+            // the HTTP client throwing a TaskCanceledException.
+            using var cts = new CancellationTokenSource();
+            if (timeoutSeconds.HasValue)
+                cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value + 30));
+
+            var response = await _httpClient.PostAsync("/rpc", content, cts.Token);
 
             if (!response.IsSuccessStatusCode)
             {
