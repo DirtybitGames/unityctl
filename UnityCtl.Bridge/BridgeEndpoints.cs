@@ -903,6 +903,58 @@ public static class BridgeEndpoints
         return JsonResponse(response);
     }
 
+    // --- Editor readiness probing ---
+
+    /// <summary>
+    /// Sends editor.ping commands to Unity until one succeeds, proving the main thread
+    /// is responsive (not blocked on asset import, safe mode dialog, etc.).
+    /// </summary>
+    private static async Task ProbeEditorReadinessAsync(BridgeState state, CancellationToken ct)
+    {
+        var pingInterval = TimeSpan.FromSeconds(1);
+        var pingTimeout = TimeSpan.FromSeconds(5);
+
+        Console.WriteLine($"[Bridge] Starting editor readiness probe...");
+
+        while (!ct.IsCancellationRequested && state.IsUnityConnected)
+        {
+            try
+            {
+                var pingRequest = CreateInternalRequest(null, UnityCtlCommands.EditorPing);
+                var response = await state.SendCommandToUnityAsync(pingRequest, pingTimeout, ct);
+
+                if (response.Status == ResponseStatus.Ok)
+                {
+                    state.SetEditorReady(true);
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Editor ready (ping succeeded)");
+                    return;
+                }
+            }
+            catch (TimeoutException)
+            {
+                // Unity main thread is blocked — retry after interval
+            }
+            catch (InvalidOperationException)
+            {
+                // Unity disconnected — stop probing
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(pingInterval, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
     // --- Endpoint mapping ---
 
     public static void MapEndpoints(WebApplication app)
@@ -919,7 +971,8 @@ public static class BridgeEndpoints
                 ProjectId = state.ProjectId,
                 UnityConnected = state.IsUnityConnected,
                 BridgeVersion = VersionInfo.Version,
-                UnityPluginVersion = unityHello?.PluginVersion
+                UnityPluginVersion = unityHello?.PluginVersion,
+                EditorReady = state.IsEditorReady
             };
         });
 
@@ -1145,6 +1198,9 @@ public static class BridgeEndpoints
             true,
             cancellationToken
         );
+
+        // Start background readiness probe — pings Unity until its main thread responds
+        _ = Task.Run(() => ProbeEditorReadinessAsync(state, cancellationToken), cancellationToken);
     }
 
     private static void HandleResponse(string json, BridgeState state)

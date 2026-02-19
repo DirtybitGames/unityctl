@@ -17,6 +17,12 @@ public class HealthEndpointTests : IAsyncLifetime
     [Fact]
     public async Task Health_ReturnsOk_WhenUnityConnected()
     {
+        // EditorReady is set asynchronously after hello handshake via editor.ping probe.
+        // FakeUnity auto-responds OK to unknown commands, so the probe completes quickly.
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.IsEditorReady,
+            timeout: TimeSpan.FromSeconds(10));
+
         var response = await _fixture.HttpClient.GetAsync("/health");
         response.EnsureSuccessStatusCode();
 
@@ -27,6 +33,7 @@ public class HealthEndpointTests : IAsyncLifetime
         Assert.Equal("ok", health.Status);
         Assert.Equal(_fixture.ProjectId, health.ProjectId);
         Assert.True(health.UnityConnected);
+        Assert.True(health.EditorReady);
         Assert.NotNull(health.BridgeVersion);
         Assert.Equal("0.3.6", health.UnityPluginVersion);
     }

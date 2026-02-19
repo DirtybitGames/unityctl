@@ -66,11 +66,70 @@ public class BridgeState
     private DateTime _domainReloadGracePeriodEnd = DateTime.MinValue;
     private static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(60);
 
+    // Editor readiness tracking (main thread responsive after hello handshake)
+    private bool _isEditorReady = false;
+    private TaskCompletionSource _editorReadySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     // Event-driven signals (replace polling loops)
     private TaskCompletionSource _connectionSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource _domainReloadCompleteSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
+
+    public bool IsEditorReady
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _isEditorReady && IsUnityConnected;
+            }
+        }
+    }
+
+    public void SetEditorReady(bool ready)
+    {
+        lock (_lock)
+        {
+            _isEditorReady = ready;
+            if (ready)
+            {
+                _editorReadySignal.TrySetResult();
+            }
+            else
+            {
+                if (_editorReadySignal.Task.IsCompleted)
+                    _editorReadySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Wait for the editor main thread to become responsive.
+    /// Returns true if ready within timeout, false if timeout expired.
+    /// </summary>
+    public async Task<bool> WaitForEditorReadyAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        Task signal;
+        lock (_lock)
+        {
+            if (_isEditorReady && IsUnityConnected) return true;
+            signal = _editorReadySignal.Task;
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+
+        try
+        {
+            await signal.WaitAsync(cts.Token);
+            return true;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// Wait for Unity to connect (or reconnect after domain reload).
@@ -183,6 +242,11 @@ public class BridgeState
                 // Clear hello message when Unity disconnects
                 _unityHelloMessage = null;
 
+                // Reset editor readiness — must re-probe after reconnect
+                _isEditorReady = false;
+                if (_editorReadySignal.Task.IsCompleted)
+                    _editorReadySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
                 // Reset connection signal so future waiters block until next connection
                 if (_connectionSignal.Task.IsCompleted)
                     _connectionSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -236,6 +300,11 @@ public class BridgeState
             // (same as SetUnityConnection(null) but within the same lock acquisition)
             UnityConnection = null;
             _unityHelloMessage = null;
+
+            // Reset editor readiness — must re-probe after reconnect
+            _isEditorReady = false;
+            if (_editorReadySignal.Task.IsCompleted)
+                _editorReadySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             if (_connectionSignal.Task.IsCompleted)
                 _connectionSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -312,6 +381,11 @@ public class BridgeState
     {
         lock (_lock)
         {
+            // Reset editor readiness — domain reload means main thread is blocked
+            _isEditorReady = false;
+            if (_editorReadySignal.Task.IsCompleted)
+                _editorReadySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
             _isDomainReloadInProgress = true;
             _domainReloadGracePeriodEnd = DateTime.UtcNow.Add(DefaultGracePeriod);
 

@@ -481,6 +481,10 @@ namespace UnityCtl
                         result = Editor.RecordingManager.Instance.GetStatus();
                         break;
 
+                    case UnityCtlCommands.EditorPing:
+                        result = new { status = "pong" };
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
