@@ -5,6 +5,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityCtl.Protocol;
 
@@ -22,7 +23,11 @@ public class BridgeClient
         _baseUrl = baseUrl;
         _agentId = agentId;
         _projectRoot = projectRoot;
-        _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        _httpClient = new HttpClient
+        {
+            BaseAddress = new Uri(baseUrl),
+            Timeout = System.Threading.Timeout.InfiniteTimeSpan
+        };
     }
 
     public static BridgeClient? TryCreateFromProject(string? projectPath, string? agentId)
@@ -118,7 +123,7 @@ public class BridgeClient
         }
     }
 
-    public async Task<ResponseMessage?> SendCommandAsync(string command, Dictionary<string, object?>? args = null)
+    public async Task<ResponseMessage?> SendCommandAsync(string command, Dictionary<string, object?>? args = null, int? timeoutSeconds = null)
     {
         try
         {
@@ -126,13 +131,22 @@ public class BridgeClient
             {
                 agentId = _agentId,
                 command = command,
-                args = args
+                args = args,
+                timeout = timeoutSeconds
             };
 
             var json = JsonHelper.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/rpc", content);
+            // The bridge enforces the real timeout server-side. The HTTP timeout
+            // just needs to be long enough to not race it. Add a 30s buffer so the
+            // bridge always gets to respond first (with a proper 504) rather than
+            // the HTTP client throwing a TaskCanceledException.
+            using var cts = new CancellationTokenSource();
+            if (timeoutSeconds.HasValue)
+                cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value + 30));
+
+            var response = await _httpClient.PostAsync("/rpc", content, cts.Token);
 
             if (!response.IsSuccessStatusCode)
             {

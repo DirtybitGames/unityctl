@@ -427,7 +427,10 @@ public static class BridgeEndpoints
         try
         {
             var hasConfig = CommandConfigs.TryGetValue(request.Command, out var config);
-            var timeout = hasConfig ? config!.Timeout : GetDefaultTimeout();
+            // Request-level timeout (from caller) takes precedence over per-command config
+            var timeout = request.Timeout.HasValue
+                ? TimeSpan.FromSeconds(request.Timeout.Value)
+                : hasConfig ? config!.Timeout : GetDefaultTimeout();
 
             if (request.Command == UnityCtlCommands.PlayEnter)
                 return await HandlePlayEnterAsync(state, requestMessage, request, timeout, context.RequestAborted);
@@ -1229,6 +1232,13 @@ public class RpcRequest
     public string? AgentId { get; set; }
     public required string Command { get; set; }
     public Dictionary<string, object?>? Args { get; set; }
+
+    /// <summary>
+    /// Optional timeout override in seconds. When set, takes precedence over
+    /// per-command and default timeouts. Useful for long-running script executions
+    /// like player builds.
+    /// </summary>
+    public int? Timeout { get; set; }
 }
 
 internal class CommandConfig

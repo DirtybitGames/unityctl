@@ -28,6 +28,11 @@ public static class ScriptCommands
     {
         var scriptCommand = new Command("script", "C# script execution operations");
 
+        var timeoutOption = new Option<int?>(
+            aliases: ["--timeout", "-t"],
+            description: "Timeout in seconds (overrides the default 30s for long-running operations like player builds)"
+        );
+
         // script execute
         var executeCommand = new Command("execute", "Execute C# code in the Unity Editor");
 
@@ -63,6 +68,7 @@ public static class ScriptCommands
         executeCommand.AddOption(fileOption);
         executeCommand.AddOption(classOption);
         executeCommand.AddOption(methodOption);
+        executeCommand.AddOption(timeoutOption);
         executeCommand.AddArgument(scriptArgsArgument);
 
         executeCommand.SetHandler(async (InvocationContext context) =>
@@ -125,7 +131,9 @@ public static class ScriptCommands
                 { "scriptArgs", scriptArgs }
             };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args);
+            var timeout = context.ParseResult.GetValueForOption(timeoutOption);
+
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
@@ -162,6 +170,7 @@ public static class ScriptCommands
 
         evalCommand.AddArgument(expressionArgument);
         evalCommand.AddOption(usingOption);
+        evalCommand.AddOption(timeoutOption);
         evalCommand.AddArgument(evalScriptArgsArgument);
 
         evalCommand.SetHandler(async (InvocationContext context) =>
@@ -195,7 +204,9 @@ public static class ScriptCommands
                 { "scriptArgs", scriptArgs }
             };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args);
+            var timeout = context.ParseResult.GetValueForOption(timeoutOption);
+
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
