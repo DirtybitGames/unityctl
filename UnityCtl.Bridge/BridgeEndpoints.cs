@@ -64,6 +64,10 @@ public static class BridgeEndpoints
         {
             TimeoutEnvVar = "UNITYCTL_TIMEOUT_RECORD", TimeoutDefaultSeconds = 600,
             CompletionEvent = UnityCtlEvents.RecordFinished
+        },
+        [UnityCtlCommands.BuildPlayer] = new CommandConfig
+        {
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_BUILD", TimeoutDefaultSeconds = 600
         }
     };
 
@@ -438,6 +442,9 @@ public static class BridgeEndpoints
             if (request.Command == UnityCtlCommands.RecordStart)
                 return await HandleRecordStartAsync(state, requestMessage, request, config!, timeout, context.RequestAborted);
 
+            if (request.Command == UnityCtlCommands.BuildPlayer)
+                return await HandleBuildPlayerAsync(state, requestMessage, timeout, context.RequestAborted);
+
             return await HandleGenericCommandAsync(state, requestMessage, hasConfig ? config : null, timeout, context.RequestAborted);
         }
         catch (OperationCanceledException)
@@ -786,6 +793,29 @@ public static class BridgeEndpoints
             };
         }
 
+        return JsonResponse(response);
+    }
+
+    private static async Task<IResult> HandleBuildPlayerAsync(
+        BridgeState state,
+        RequestMessage requestMessage,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        // Rewrite build.player → script.execute so Unity handles it via the existing ScriptExecutor.
+        // The bridge owns the longer timeout; Unity sees a normal script.execute.
+        var scriptRequest = new RequestMessage
+        {
+            Origin = requestMessage.Origin,
+            RequestId = requestMessage.RequestId,
+            AgentId = requestMessage.AgentId,
+            Command = UnityCtlCommands.ScriptExecute,
+            Args = requestMessage.Args
+        };
+
+        Console.WriteLine($"[Bridge] build.player: forwarding as script.execute (timeout: {timeout.TotalSeconds}s)");
+
+        var response = await state.SendCommandToUnityAsync(scriptRequest, timeout, cancellationToken);
         return JsonResponse(response);
     }
 

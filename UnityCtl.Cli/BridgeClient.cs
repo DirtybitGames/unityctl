@@ -22,7 +22,13 @@ public class BridgeClient
         _baseUrl = baseUrl;
         _agentId = agentId;
         _projectRoot = projectRoot;
-        _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        _httpClient = new HttpClient
+        {
+            BaseAddress = new Uri(baseUrl),
+            // The bridge enforces per-command timeouts server-side.
+            // The CLI should not race against those with a shorter HTTP timeout.
+            Timeout = TimeSpan.FromMinutes(15)
+        };
     }
 
     public static BridgeClient? TryCreateFromProject(string? projectPath, string? agentId)
