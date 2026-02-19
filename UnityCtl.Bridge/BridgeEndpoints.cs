@@ -64,10 +64,6 @@ public static class BridgeEndpoints
         {
             TimeoutEnvVar = "UNITYCTL_TIMEOUT_RECORD", TimeoutDefaultSeconds = 600,
             CompletionEvent = UnityCtlEvents.RecordFinished
-        },
-        [UnityCtlCommands.BuildPlayer] = new CommandConfig
-        {
-            TimeoutEnvVar = "UNITYCTL_TIMEOUT_BUILD", TimeoutDefaultSeconds = 600
         }
     };
 
@@ -431,7 +427,10 @@ public static class BridgeEndpoints
         try
         {
             var hasConfig = CommandConfigs.TryGetValue(request.Command, out var config);
-            var timeout = hasConfig ? config!.Timeout : GetDefaultTimeout();
+            // Request-level timeout (from caller) takes precedence over per-command config
+            var timeout = request.Timeout.HasValue
+                ? TimeSpan.FromSeconds(request.Timeout.Value)
+                : hasConfig ? config!.Timeout : GetDefaultTimeout();
 
             if (request.Command == UnityCtlCommands.PlayEnter)
                 return await HandlePlayEnterAsync(state, requestMessage, request, timeout, context.RequestAborted);
@@ -441,9 +440,6 @@ public static class BridgeEndpoints
 
             if (request.Command == UnityCtlCommands.RecordStart)
                 return await HandleRecordStartAsync(state, requestMessage, request, config!, timeout, context.RequestAborted);
-
-            if (request.Command == UnityCtlCommands.BuildPlayer)
-                return await HandleBuildPlayerAsync(state, requestMessage, timeout, context.RequestAborted);
 
             return await HandleGenericCommandAsync(state, requestMessage, hasConfig ? config : null, timeout, context.RequestAborted);
         }
@@ -793,29 +789,6 @@ public static class BridgeEndpoints
             };
         }
 
-        return JsonResponse(response);
-    }
-
-    private static async Task<IResult> HandleBuildPlayerAsync(
-        BridgeState state,
-        RequestMessage requestMessage,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
-    {
-        // Rewrite build.player → script.execute so Unity handles it via the existing ScriptExecutor.
-        // The bridge owns the longer timeout; Unity sees a normal script.execute.
-        var scriptRequest = new RequestMessage
-        {
-            Origin = requestMessage.Origin,
-            RequestId = requestMessage.RequestId,
-            AgentId = requestMessage.AgentId,
-            Command = UnityCtlCommands.ScriptExecute,
-            Args = requestMessage.Args
-        };
-
-        Console.WriteLine($"[Bridge] build.player: forwarding as script.execute (timeout: {timeout.TotalSeconds}s)");
-
-        var response = await state.SendCommandToUnityAsync(scriptRequest, timeout, cancellationToken);
         return JsonResponse(response);
     }
 
@@ -1259,6 +1232,13 @@ public class RpcRequest
     public string? AgentId { get; set; }
     public required string Command { get; set; }
     public Dictionary<string, object?>? Args { get; set; }
+
+    /// <summary>
+    /// Optional timeout override in seconds. When set, takes precedence over
+    /// per-command and default timeouts. Useful for long-running script executions
+    /// like player builds.
+    /// </summary>
+    public int? Timeout { get; set; }
 }
 
 internal class CommandConfig

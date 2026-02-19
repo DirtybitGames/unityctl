@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using Newtonsoft.Json.Linq;
 using UnityCtl.Protocol;
 using UnityCtl.Tests.Fakes;
@@ -7,46 +8,46 @@ using Xunit;
 
 namespace UnityCtl.Tests.Integration;
 
+/// <summary>
+/// Tests for the request-level timeout override, which enables long-running
+/// script executions like player builds without a dedicated bridge command.
+/// </summary>
 public class BuildFlowTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
     public Task InitializeAsync()
     {
-        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_BUILD", "5");
+        // Set a very short default so we can verify the override works
+        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_DEFAULT", "2");
         return _fixture.InitializeAsync();
     }
 
     public async Task DisposeAsync()
     {
-        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_BUILD", null);
+        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_DEFAULT", null);
         await _fixture.DisposeAsync();
     }
 
     [Fact]
-    public async Task BuildPlayer_ForwardsAsScriptExecute()
+    public async Task ScriptExecute_WithTimeoutOverride_UsesRequestTimeout()
     {
-        // The bridge should forward build.player as script.execute to Unity
-        _fixture.FakeUnity.OnCommand(UnityCtlCommands.ScriptExecute, request =>
-        {
-            // Verify the args contain the build code
-            var args = request.Args;
-            Assert.NotNull(args);
-            Assert.True(args!.ContainsKey("code"));
+        // Default timeout is 2s, but the request asks for 10s.
+        // Unity responds in 4s — should succeed with override, fail without.
+        _fixture.FakeUnity.OnCommandWithDelay(
+            UnityCtlCommands.ScriptExecute,
+            TimeSpan.FromSeconds(4),
+            _ => new ScriptExecuteResult { Success = true, Result = "build done" });
 
-            return new ScriptExecuteResult
+        var response = await SendRpcWithTimeoutAsync(
+            UnityCtlCommands.ScriptExecute,
+            new Dictionary<string, object?>
             {
-                Success = true,
-                Result = "{ \"result\": \"Succeeded\" }"
-            };
-        });
-
-        var response = await _fixture.SendRpcAsync(UnityCtlCommands.BuildPlayer, new Dictionary<string, object?>
-        {
-            { "code", "public class Script { public static object Main() { return \"ok\"; } }" },
-            { "className", "Script" },
-            { "methodName", "Main" }
-        });
+                { "code", "public class Script { public static object Main() { return \"ok\"; } }" },
+                { "className", "Script" },
+                { "methodName", "Main" }
+            },
+            timeoutSeconds: 10);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -55,19 +56,44 @@ public class BuildFlowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BuildPlayer_UnityReturnsError_PropagatesError()
+    public async Task ScriptExecute_WithoutTimeoutOverride_UsesDefault()
+    {
+        // Default timeout is 2s, Unity responds in 4s — should time out
+        _fixture.FakeUnity.OnCommandWithDelay(
+            UnityCtlCommands.ScriptExecute,
+            TimeSpan.FromSeconds(4),
+            _ => new ScriptExecuteResult { Success = true, Result = "build done" });
+
+        var response = await SendRpcWithTimeoutAsync(
+            UnityCtlCommands.ScriptExecute,
+            new Dictionary<string, object?>
+            {
+                { "code", "public class Script { public static object Main() { return \"ok\"; } }" },
+                { "className", "Script" },
+                { "methodName", "Main" }
+            },
+            timeoutSeconds: null);
+
+        Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ScriptExecute_ErrorResult_PropagatesWithTimeout()
     {
         _fixture.FakeUnity.OnCommandError(
             UnityCtlCommands.ScriptExecute,
             "command_failed",
             "Build failed: missing scenes");
 
-        var response = await _fixture.SendRpcAsync(UnityCtlCommands.BuildPlayer, new Dictionary<string, object?>
-        {
-            { "code", "public class Script { public static object Main() { return null; } }" },
-            { "className", "Script" },
-            { "methodName", "Main" }
-        });
+        var response = await SendRpcWithTimeoutAsync(
+            UnityCtlCommands.ScriptExecute,
+            new Dictionary<string, object?>
+            {
+                { "code", "public class Script { public static object Main() { return null; } }" },
+                { "className", "Script" },
+                { "methodName", "Main" }
+            },
+            timeoutSeconds: 600);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -77,61 +103,37 @@ public class BuildFlowTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BuildPlayer_TimesOutOnSlowBuild()
+    public async Task ScriptExecute_TimeoutOverride_StillTimesOut()
     {
-        // Build takes longer than the 5-second test timeout
+        // Request timeout is 3s, Unity responds in 10s — should time out
         _fixture.FakeUnity.OnCommandWithDelay(
             UnityCtlCommands.ScriptExecute,
             TimeSpan.FromSeconds(10),
             _ => new ScriptExecuteResult { Success = true, Result = "done" });
 
-        var response = await _fixture.SendRpcAsync(UnityCtlCommands.BuildPlayer, new Dictionary<string, object?>
-        {
-            { "code", "public class Script { public static object Main() { return null; } }" },
-            { "className", "Script" },
-            { "methodName", "Main" }
-        });
+        var response = await SendRpcWithTimeoutAsync(
+            UnityCtlCommands.ScriptExecute,
+            new Dictionary<string, object?>
+            {
+                { "code", "public class Script { public static object Main() { return null; } }" },
+                { "className", "Script" },
+                { "methodName", "Main" }
+            },
+            timeoutSeconds: 3);
 
         Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
     }
 
-    [Fact]
-    public async Task BuildPlayer_CommandReceivedByUnityAsScriptExecute()
+    /// <summary>
+    /// Send an RPC with an optional timeout override — matches what the CLI does.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendRpcWithTimeoutAsync(
+        string command, Dictionary<string, object?>? args, int? timeoutSeconds)
     {
-        // Verify Unity sees script.execute, not build.player
-        _fixture.FakeUnity.OnCommand(UnityCtlCommands.ScriptExecute, _ =>
-            new ScriptExecuteResult { Success = true, Result = "ok" });
-
-        await _fixture.SendRpcAsync(UnityCtlCommands.BuildPlayer, new Dictionary<string, object?>
-        {
-            { "code", "test code" },
-            { "className", "Script" },
-            { "methodName", "Main" }
-        });
-
-        var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.ScriptExecute);
-        Assert.Equal(UnityCtlCommands.ScriptExecute, received.Command);
-    }
-
-    [Fact]
-    public async Task BuildPlayer_PreservesCodeArgs()
-    {
-        var buildCode = "public class Script { public static object Main() { return BuildPipeline.BuildPlayer(new string[0], \"out\", BuildTarget.WebGL, BuildOptions.None); } }";
-
-        _fixture.FakeUnity.OnCommand(UnityCtlCommands.ScriptExecute, _ =>
-            new ScriptExecuteResult { Success = true, Result = "ok" });
-
-        await _fixture.SendRpcAsync(UnityCtlCommands.BuildPlayer, new Dictionary<string, object?>
-        {
-            { "code", buildCode },
-            { "className", "Script" },
-            { "methodName", "Main" }
-        });
-
-        var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.ScriptExecute);
-        var codeArg = (received.Args?["code"] as JValue)?.Value<string>()
-                   ?? received.Args?["code"]?.ToString();
-        Assert.Equal(buildCode, codeArg);
+        var request = new { command, args, timeout = timeoutSeconds };
+        var json = JsonHelper.Serialize(request);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await _fixture.HttpClient.PostAsync("/rpc", content);
     }
 
     private static async Task<ResponseMessage> ParseResponseAsync(HttpResponseMessage response)

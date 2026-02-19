@@ -33,9 +33,6 @@ public static class UnityCtlCommands
     public const string RecordStart = "record.start";
     public const string RecordStop = "record.stop";
     public const string RecordStatus = "record.status";
-
-    // Build
-    public const string BuildPlayer = "build.player";
 }
 
 public static class UnityCtlEvents

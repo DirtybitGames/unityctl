@@ -124,7 +124,7 @@ public class BridgeClient
         }
     }
 
-    public async Task<ResponseMessage?> SendCommandAsync(string command, Dictionary<string, object?>? args = null)
+    public async Task<ResponseMessage?> SendCommandAsync(string command, Dictionary<string, object?>? args = null, int? timeoutSeconds = null)
     {
         try
         {
@@ -132,7 +132,8 @@ public class BridgeClient
             {
                 agentId = _agentId,
                 command = command,
-                args = args
+                args = args,
+                timeout = timeoutSeconds
             };
 
             var json = JsonHelper.Serialize(request);

@@ -143,7 +143,7 @@ public static class BuildCommands
                 { "methodName", "Main" }
             };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.BuildPlayer, args);
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args, timeoutSeconds: 600);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
