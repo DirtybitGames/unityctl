@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using Newtonsoft.Json.Linq;
 using UnityCtl.Protocol;
 using UnityCtl.Tests.Fakes;
 using UnityCtl.Tests.Helpers;
@@ -9,10 +8,9 @@ using Xunit;
 namespace UnityCtl.Tests.Integration;
 
 /// <summary>
-/// Tests for the request-level timeout override, which enables long-running
-/// script executions like player builds without a dedicated bridge command.
+/// Tests for the request-level timeout override on RpcRequest.
 /// </summary>
-public class BuildFlowTests : IAsyncLifetime
+public class RequestTimeoutTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
