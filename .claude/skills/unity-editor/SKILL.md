@@ -102,7 +102,7 @@ Use `Main(string[] args)` to accept arguments passed after `--`.
 Use `-t <seconds>` on `script eval`/`script execute` for long-running operations (default 30s):
 
 ```bash
-unityctl script eval -t 300 -u UnityEditor 'return BuildPipeline.BuildPlayer(opts).summary.result.ToString();'
+unityctl script eval -t 600 -u UnityEditor 'return BuildPipeline.BuildPlayer(opts).summary.result.ToString();'
 ```
 
 ## Typical Workflow
@@ -125,5 +125,5 @@ Run `unityctl status` first to diagnose issues.
 | Editor not connected | Normal - exponential backoff, up to 15 seconds |
 | Connection lost after compile | Normal - domain reload, auto-reconnects |
 | "Project not found" | `unityctl setup` or `unityctl config set project-path <path>` |
-| Can't tell when Unity is ready | `unityctl wait --timeout 120` |
+| Can't tell when Unity is ready | `unityctl wait --timeout 300` |
 | Editor not found | Use `--unity-path` to specify Unity executable |
