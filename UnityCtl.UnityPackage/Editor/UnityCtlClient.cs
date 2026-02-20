@@ -34,6 +34,7 @@ namespace UnityCtl
         private float _lastConnectionCheck;
         private float _lastReconnectAttempt;
         private int _reconnectAttempts;
+        private bool _connecting;
 
         // Public connection status
         public bool IsConnected
@@ -139,6 +140,15 @@ namespace UnityCtl
                     return;
                 }
 
+                // Skip if another connection attempt is already in-flight
+                if (_connecting)
+                {
+                    DebugLog("[UnityCtl] Connection attempt already in progress, skipping");
+                    return;
+                }
+
+                _connecting = true;
+
                 oldSocket = _webSocket;
                 newSocket = new ClientWebSocket();
                 _webSocket = newSocket;
@@ -165,11 +175,16 @@ namespace UnityCtl
 
             try
             {
-                await newSocket.ConnectAsync(uri, newCts.Token);
+                // Timeout the connection attempt so it can't hang indefinitely
+                using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(newCts.Token);
+                connectCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+                await newSocket.ConnectAsync(uri, connectCts.Token);
 
                 lock (_connectionLock)
                 {
                     _isConnected = true;
+                    _connecting = false;
                 }
                 _reconnectAttempts = 0; // Reset reconnection counter on successful connection
 
@@ -181,15 +196,21 @@ namespace UnityCtl
                 // Flush any logs that were buffered before connection
                 FlushLogBuffer();
 
-                // Start receive loop
-                _ = Task.Run(() => ReceiveLoopAsync(newCts.Token));
+                // Start receive loop (pass socket ref so finally block can check staleness)
+                var socketRef = newSocket;
+                _ = Task.Run(() => ReceiveLoopAsync(socketRef, newCts.Token));
             }
             catch (Exception ex)
             {
                 DebugLogWarning($"[UnityCtl] ✗ Connection failed: {ex.Message}");
                 lock (_connectionLock)
                 {
-                    _isConnected = false;
+                    // Only update state if we're still the current attempt
+                    if (_webSocket == newSocket)
+                    {
+                        _isConnected = false;
+                    }
+                    _connecting = false;
                 }
             }
         }
@@ -228,7 +249,7 @@ namespace UnityCtl
             return "unknown";
         }
 
-        private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
+        private async Task ReceiveLoopAsync(ClientWebSocket ownSocket, CancellationToken cancellationToken)
         {
             var buffer = new byte[1024 * 16];
             var messageBuilder = new System.Text.StringBuilder();
@@ -286,7 +307,11 @@ namespace UnityCtl
             {
                 lock (_connectionLock)
                 {
-                    _isConnected = false;
+                    // Only clear connected state if we're still the active connection
+                    if (_webSocket == ownSocket)
+                    {
+                        _isConnected = false;
+                    }
                 }
                 DebugLog("[UnityCtl] Disconnected from bridge - will attempt to reconnect");
             }
