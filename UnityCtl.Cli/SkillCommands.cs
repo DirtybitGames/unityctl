@@ -162,6 +162,22 @@ public static class SkillCommands
         return reader.ReadToEnd();
     }
 
+    /// <summary>
+    /// Updates the skill file at the given path with the latest embedded content.
+    /// Returns true if successful, false if embedded content was not found.
+    /// </summary>
+    public static async Task<bool> UpdateSkillFileAsync(string skillPath)
+    {
+        var content = GetEmbeddedSkillContent();
+        if (content == null) return false;
+
+        var dir = Path.GetDirectoryName(skillPath);
+        if (dir != null) Directory.CreateDirectory(dir);
+
+        await File.WriteAllTextAsync(skillPath, content);
+        return true;
+    }
+
     public static async Task AddSkillAsync(bool global, string? claudeDir, bool force, bool json)
     {
         var skillsDir = GetSkillsDirectory(global, claudeDir);

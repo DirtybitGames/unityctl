@@ -30,7 +30,7 @@ public static class UpdateCommands
 
         var toolsOnlyOption = new Option<bool>(
             "--tools-only",
-            "Only update CLI and Bridge tools (skip Unity package)"
+            "Only update CLI and Bridge tools (skip Unity package and skill)"
         );
 
         var packageOnlyOption = new Option<bool>(
@@ -50,11 +50,17 @@ public static class UpdateCommands
         );
         yesOption.AddAlias("-y");
 
+        var skipSkillOption = new Option<bool>(
+            "--skip-skill",
+            "Skip Claude Code skill update"
+        );
+
         updateCommand.AddOption(checkOption);
         updateCommand.AddOption(toolsOnlyOption);
         updateCommand.AddOption(packageOnlyOption);
         updateCommand.AddOption(versionOption);
         updateCommand.AddOption(yesOption);
+        updateCommand.AddOption(skipSkillOption);
 
         updateCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -64,9 +70,10 @@ public static class UpdateCommands
             var packageOnly = context.ParseResult.GetValueForOption(packageOnlyOption);
             var version = context.ParseResult.GetValueForOption(versionOption);
             var yes = context.ParseResult.GetValueForOption(yesOption);
+            var skipSkill = context.ParseResult.GetValueForOption(skipSkillOption);
             var json = ContextHelper.GetJson(context);
 
-            await ExecuteAsync(projectPath, check, toolsOnly, packageOnly, version, yes, json);
+            await ExecuteAsync(projectPath, check, toolsOnly, packageOnly, version, yes, skipSkill, json);
         });
 
         return updateCommand;
@@ -100,18 +107,18 @@ public static class UpdateCommands
 
     private static async Task<UpdateResult> RunDotnetToolUpdateAsync(string packageId, string? version = null, bool isSelf = false)
     {
-        var args = $"tool update -g {packageId}";
-        if (!string.IsNullOrEmpty(version))
-        {
-            args += $" --version {version}";
-        }
-
         // On Windows, updating the currently-running CLI requires a workaround:
         // spawn a script that waits for this process to exit, then performs the update
         if (isSelf && OperatingSystem.IsWindows())
         {
             var scheduled = await ScheduleSelfUpdateViaScriptAsync(packageId, version);
             return scheduled ? UpdateResult.Scheduled : UpdateResult.Failed;
+        }
+
+        var args = $"tool update -g {packageId}";
+        if (!string.IsNullOrEmpty(version))
+        {
+            args += $" --version {version}";
         }
 
         var psi = new ProcessStartInfo
@@ -129,8 +136,71 @@ public static class UpdateCommands
             using var process = Process.Start(psi);
             if (process == null) return UpdateResult.Failed;
 
+            var stderr = await process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
-            return process.ExitCode == 0 ? UpdateResult.Success : UpdateResult.Failed;
+
+            if (process.ExitCode == 0)
+                return UpdateResult.Success;
+
+            // If a specific version was requested and update failed, try uninstall+install
+            // (dotnet tool update rejects versions lower than current)
+            if (!string.IsNullOrEmpty(version))
+            {
+                return await UninstallAndInstallAsync(packageId, version);
+            }
+
+            return UpdateResult.Failed;
+        }
+        catch
+        {
+            return UpdateResult.Failed;
+        }
+    }
+
+    private static async Task<UpdateResult> UninstallAndInstallAsync(string packageId, string version)
+    {
+        // Uninstall
+        var uninstallPsi = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = $"tool uninstall -g {packageId}",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        try
+        {
+            using var uninstallProcess = Process.Start(uninstallPsi);
+            if (uninstallProcess == null) return UpdateResult.Failed;
+
+            await uninstallProcess.WaitForExitAsync();
+            if (uninstallProcess.ExitCode != 0) return UpdateResult.Failed;
+        }
+        catch
+        {
+            return UpdateResult.Failed;
+        }
+
+        // Install specific version
+        var installPsi = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = $"tool install -g {packageId} --version {version}",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        try
+        {
+            using var installProcess = Process.Start(installPsi);
+            if (installProcess == null) return UpdateResult.Failed;
+
+            await installProcess.WaitForExitAsync();
+            return installProcess.ExitCode == 0 ? UpdateResult.Success : UpdateResult.Failed;
         }
         catch
         {
@@ -150,7 +220,7 @@ public static class UpdateCommands
 
         // Create a temporary PowerShell script that:
         // 1. Waits for the current process to exit
-        // 2. Runs the dotnet tool update command
+        // 2. Runs the dotnet tool update command (with uninstall+install fallback for downgrades)
         // 3. Deletes itself
         var tempDir = Path.GetTempPath();
         var scriptPath = Path.Combine(tempDir, $"unityctl-update-{Guid.NewGuid():N}.ps1");
@@ -170,8 +240,13 @@ while ($waited -lt $maxWait) {{
     }}
 }}
 
-# Run the update
+# Try update first
 dotnet tool update -g {packageId}{versionArg} 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0 -and '{version}' -ne '') {{
+    # Fallback to uninstall+install for downgrades
+    dotnet tool uninstall -g {packageId} 2>&1 | Out-Null
+    dotnet tool install -g {packageId}{versionArg} 2>&1 | Out-Null
+}}
 
 # Clean up this script
 Remove-Item -Path $MyInvocation.MyCommand.Path -Force
@@ -217,6 +292,7 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
         bool packageOnly,
         string? targetVersion,
         bool yes,
+        bool skipSkill,
         bool json)
     {
         var currentVersion = VersionInfo.Version;
@@ -241,6 +317,7 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
 
         var isUpToDate = currentParsed >= targetParsed && targetVersion == null;
 
+        // Display version info and handle --check
         if (json)
         {
             Console.WriteLine(JsonHelper.Serialize(new
@@ -252,7 +329,7 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
                 checkOnly
             }));
 
-            if (checkOnly || isUpToDate)
+            if (checkOnly)
                 return;
         }
         else
@@ -267,22 +344,29 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
 
             Console.WriteLine();
 
-            if (isUpToDate)
+            if (checkOnly)
             {
-                Console.WriteLine("You are already running the latest version.");
+                if (isUpToDate)
+                    Console.WriteLine("You are already running the latest version.");
+                else
+                {
+                    Console.WriteLine($"Update available: {currentVersion} -> {effectiveTargetVersion}");
+                    Console.WriteLine("Run 'unityctl update' to install the update.");
+                }
                 return;
             }
 
-            if (checkOnly)
+            if (isUpToDate)
             {
-                Console.WriteLine($"Update available: {currentVersion} -> {effectiveTargetVersion}");
-                Console.WriteLine("Run 'unityctl update' to install the update.");
-                return;
+                Console.WriteLine("CLI and Bridge are already up to date.");
+                if (toolsOnly)
+                    return;
+                Console.WriteLine();
             }
         }
 
-        // Confirm update
-        if (!yes && !json)
+        // Confirm update (only when tools will be updated)
+        if (!yes && !json && !isUpToDate)
         {
             Console.Write($"Update to version {effectiveTargetVersion}? [y/N]: ");
             var response = Console.ReadLine()?.Trim().ToLowerInvariant();
@@ -297,26 +381,40 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
         var results = new List<UpdateStepResult>();
 
         // Update CLI and Bridge tools
-        if (!packageOnly)
+        if (!packageOnly && !isUpToDate)
         {
             Console.WriteLine("Updating CLI tools...");
             Console.WriteLine();
 
-            // Check if bridge is running and stop it
-            var bridgeWasRunning = false;
+            // Save current project's bridge config for restart later
             var projectRoot = projectPath ?? ProjectLocator.FindProjectRoot();
             BridgeConfig? bridgeConfig = null;
 
             if (projectRoot != null)
             {
                 bridgeConfig = ProjectLocator.ReadBridgeConfig(projectRoot);
-                if (bridgeConfig != null)
+            }
+
+            // Kill ALL bridge processes to release DLL locks
+            var bridgeProcesses = Process.GetProcessesByName("unityctl-bridge");
+            if (bridgeProcesses.Length > 0)
+            {
+                Console.WriteLine($"  Stopping {bridgeProcesses.Length} bridge process(es)...");
+                foreach (var proc in bridgeProcesses)
                 {
-                    Console.WriteLine("  Stopping bridge daemon...");
-                    await BridgeClient.StopBridgeAsync(projectPath);
-                    bridgeWasRunning = true;
-                    // Give it a moment to shut down
-                    await Task.Delay(1000);
+                    try { proc.Kill(true); } catch { }
+                    proc.Dispose();
+                }
+
+                // Wait for processes to fully exit (max 10s) to release DLL locks
+                var sw = Stopwatch.StartNew();
+                while (sw.Elapsed < TimeSpan.FromSeconds(10))
+                {
+                    var remaining = Process.GetProcessesByName("unityctl-bridge");
+                    var anyLeft = remaining.Length > 0;
+                    foreach (var p in remaining) p.Dispose();
+                    if (!anyLeft) break;
+                    await Task.Delay(500);
                 }
             }
 
@@ -352,8 +450,8 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
             });
             Console.WriteLine(bridgeSuccess ? $"    Updated {BridgePackageId}" : $"    Failed to update {BridgePackageId}");
 
-            // Restart bridge if it was running
-            if (bridgeWasRunning && bridgeSuccess)
+            // Restart bridge if it was running for the current project
+            if (bridgeConfig != null && bridgeSuccess)
             {
                 Console.WriteLine("  Restarting bridge daemon...");
                 await BridgeClient.StartBridgeAsync(projectPath);
@@ -403,7 +501,74 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
             Console.WriteLine();
         }
 
-        // Summary
+        // Update Claude Code skill
+        if (!toolsOnly && !packageOnly && !skipSkill)
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var globalSkillPath = Path.Combine(home, ".claude", "skills", "unity-editor", "SKILL.md");
+            var localSkillPath = Path.Combine(Directory.GetCurrentDirectory(), ".claude", "skills", "unity-editor", "SKILL.md");
+
+            var globalExists = File.Exists(globalSkillPath);
+            var localExists = File.Exists(localSkillPath);
+
+            if (globalExists || localExists)
+            {
+                Console.WriteLine("Updating Claude Code skill...");
+
+                try
+                {
+                    var updated = new List<string>();
+
+                    if (globalExists)
+                    {
+                        if (await SkillCommands.UpdateSkillFileAsync(globalSkillPath))
+                            updated.Add("global");
+                    }
+
+                    if (localExists)
+                    {
+                        if (await SkillCommands.UpdateSkillFileAsync(localSkillPath))
+                            updated.Add("local");
+                    }
+
+                    if (updated.Count > 0)
+                    {
+                        Console.WriteLine($"  Updated skill ({string.Join(" + ", updated)})");
+                        results.Add(new UpdateStepResult
+                        {
+                            Step = "Claude Code Skill",
+                            Success = true
+                        });
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine("  Could not find embedded skill content");
+                        results.Add(new UpdateStepResult
+                        {
+                            Step = "Claude Code Skill",
+                            Success = false,
+                            Error = "Embedded SKILL.md resource not found"
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new UpdateStepResult
+                    {
+                        Step = "Claude Code Skill",
+                        Success = false,
+                        Error = ex.Message
+                    });
+                }
+
+                Console.WriteLine();
+            }
+        }
+
+        // Summary (only if any steps ran)
+        if (results.Count == 0)
+            return;
+
         if (!json)
         {
             Console.WriteLine("========================================");
