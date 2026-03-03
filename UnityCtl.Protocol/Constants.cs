@@ -36,6 +36,11 @@ public static class UnityCtlCommands
 
     // Editor readiness
     public const string EditorPing = "editor.ping";
+
+    // Device commands (Android/player builds)
+    public const string DeviceEval = "device.eval";
+    public const string DeviceExecute = "device.execute";
+    public const string DeviceHealth = "device.health";
 }
 
 public static class UnityCtlEvents

@@ -149,7 +149,7 @@ public static class ScriptCommands
         scriptCommand.AddCommand(executeCommand);
 
         // script eval
-        var evalCommand = new Command("eval", "Evaluate a C# expression in the Unity Editor");
+        var evalCommand = new Command("eval", "Evaluate a C# expression in the Unity Editor or on a connected device");
 
         var expressionArgument = new Argument<string>(
             name: "expression",
@@ -162,6 +162,17 @@ public static class ScriptCommands
             getDefaultValue: () => Array.Empty<string>()
         );
 
+        var deviceOption = new Option<bool>(
+            aliases: ["--device", "-d"],
+            description: "Evaluate on a connected device (Android via ADB) instead of Unity Editor"
+        );
+
+        var devicePortOption = new Option<int>(
+            aliases: ["--device-port"],
+            getDefaultValue: () => 7400,
+            description: "TCP port for device connection (default: 7400)"
+        );
+
         var evalScriptArgsArgument = new Argument<string[]>(
             name: "script-args",
             description: "Arguments to pass to Main (after --)",
@@ -171,17 +182,16 @@ public static class ScriptCommands
         evalCommand.AddArgument(expressionArgument);
         evalCommand.AddOption(usingOption);
         evalCommand.AddOption(timeoutOption);
+        evalCommand.AddOption(deviceOption);
+        evalCommand.AddOption(devicePortOption);
         evalCommand.AddArgument(evalScriptArgsArgument);
 
         evalCommand.SetHandler(async (InvocationContext context) =>
         {
-            var projectPath = ContextHelper.GetProjectPath(context);
-            var agentId = ContextHelper.GetAgentId(context);
             var json = ContextHelper.GetJson(context);
-
             var expression = context.ParseResult.GetValueForArgument(expressionArgument);
             var extraUsings = context.ParseResult.GetValueForOption(usingOption) ?? Array.Empty<string>();
-            var scriptArgs = context.ParseResult.GetValueForArgument(evalScriptArgsArgument);
+            var isDevice = context.ParseResult.GetValueForOption(deviceOption);
 
             if (string.IsNullOrWhiteSpace(expression))
             {
@@ -190,33 +200,69 @@ public static class ScriptCommands
                 return;
             }
 
-            var hasArgs = scriptArgs.Length > 0;
-            var csharpCode = BuildEvalCode(expression, extraUsings, hasArgs);
-
-            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
-            if (client == null) { context.ExitCode = 1; return; }
-
-            var args = new Dictionary<string, object?>
+            if (isDevice)
             {
-                { "code", csharpCode },
-                { "className", "Script" },
-                { "methodName", "Main" },
-                { "scriptArgs", scriptArgs }
-            };
+                // Device path: send expression directly to player for reflection-based eval
+                var port = context.ParseResult.GetValueForOption(devicePortOption);
+                var timeout = context.ParseResult.GetValueForOption(timeoutOption) ?? 30;
 
-            var timeout = context.ParseResult.GetValueForOption(timeoutOption);
+                using var deviceClient = new DeviceClient(port: port);
+                try
+                {
+                    await deviceClient.ConnectAsync();
+                    var deviceArgs = new Dictionary<string, object?>
+                    {
+                        { "expression", expression },
+                        { "namespaces", extraUsings.Length > 0 ? extraUsings : null }
+                    };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args, timeout);
-            if (response == null) { context.ExitCode = 1; return; }
+                    var response = await deviceClient.SendCommandAsync(
+                        UnityCtlCommands.DeviceEval, deviceArgs, timeout);
+                    if (response == null) { context.ExitCode = 1; return; }
 
-            if (response.Status == ResponseStatus.Error)
-            {
-                Console.Error.WriteLine($"Error: {response.Error?.Message}");
-                context.ExitCode = 1;
-                return;
+                    DisplayDeviceEvalResult(context, response, json);
+                }
+                catch (DeviceConnectionException ex)
+                {
+                    Console.Error.WriteLine($"Error: {ex.Message}");
+                    context.ExitCode = 1;
+                }
             }
+            else
+            {
+                // Editor path: wrap in class, compile via Roslyn in Unity Editor
+                var projectPath = ContextHelper.GetProjectPath(context);
+                var agentId = ContextHelper.GetAgentId(context);
+                var scriptArgs = context.ParseResult.GetValueForArgument(evalScriptArgsArgument);
 
-            DisplayScriptResult(context, response, json, isEval: true);
+                var hasArgs = scriptArgs.Length > 0;
+                var csharpCode = BuildEvalCode(expression, extraUsings, hasArgs);
+
+                var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+                if (client == null) { context.ExitCode = 1; return; }
+
+                var args = new Dictionary<string, object?>
+                {
+                    { "code", csharpCode },
+                    { "className", "Script" },
+                    { "methodName", "Main" },
+                    { "scriptArgs", scriptArgs }
+                };
+
+                var timeout = context.ParseResult.GetValueForOption(timeoutOption);
+
+                var response = await client.SendCommandAsync(UnityCtlCommands.ScriptExecute, args, timeout);
+                if (response == null) { context.ExitCode = 1; return; }
+
+                if (response.Status == ResponseStatus.Error)
+                {
+                    Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                    context.ExitCode = 1;
+                    return;
+                }
+
+                DisplayScriptResult(context, response, json, isEval: true);
+            }
         });
 
         scriptCommand.AddCommand(evalCommand);
@@ -239,6 +285,32 @@ public static class ScriptCommands
         var body = isBodyMode ? expression : $"return {expression};";
 
         return usingBlock + "\n\npublic class Script\n{\n    " + signature + "\n    {\n        " + body + "\n    }\n}\n";
+    }
+
+    private static void DisplayDeviceEvalResult(InvocationContext context, System.Text.Json.JsonDocument response, bool json)
+    {
+        var result = response.RootElement.GetProperty("result");
+        var success = result.GetProperty("success").GetBoolean();
+
+        if (json)
+        {
+            Console.WriteLine(result.GetRawText());
+            if (!success) context.ExitCode = 1;
+            return;
+        }
+
+        if (success)
+        {
+            var value = result.TryGetProperty("result", out var r) && r.ValueKind != System.Text.Json.JsonValueKind.Null
+                ? r.GetString() : "(void)";
+            Console.WriteLine($"Result: {value}");
+        }
+        else
+        {
+            var error = result.TryGetProperty("error", out var e) ? e.GetString() : "Unknown error";
+            Console.Error.WriteLine($"Evaluation failed: {error}");
+            context.ExitCode = 1;
+        }
     }
 
     private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json, bool isEval)

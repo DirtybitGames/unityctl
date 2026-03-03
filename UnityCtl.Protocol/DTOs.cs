@@ -315,6 +315,42 @@ public class ProjectStatusResult
     public required bool UnityConnectedToBridge { get; init; }
 }
 
+public class DeviceEvalResult
+{
+    [JsonProperty("success")]
+    public required bool Success { get; init; }
+
+    [JsonProperty("result")]
+    public string? Result { get; init; }
+
+    [JsonProperty("error")]
+    public string? Error { get; init; }
+
+    [JsonProperty("resultType")]
+    public string? ResultType { get; init; }
+}
+
+public class DeviceHealthResult
+{
+    [JsonProperty("status")]
+    public required string Status { get; init; }
+
+    [JsonProperty("platform")]
+    public required string Platform { get; init; }
+
+    [JsonProperty("scriptingBackend")]
+    public required string ScriptingBackend { get; init; }
+
+    [JsonProperty("unityVersion")]
+    public string? UnityVersion { get; init; }
+
+    [JsonProperty("deviceModel")]
+    public string? DeviceModel { get; init; }
+
+    [JsonProperty("supportsFullEval")]
+    public required bool SupportsFullEval { get; init; }
+}
+
 /// <summary>
 /// Unified log entry that can come from either editor.log or console (Debug.Log)
 /// </summary>
