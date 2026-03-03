@@ -474,6 +474,7 @@ print('NOTFOUND')
     /// <summary>
     /// Run a process and return stdout, or null on failure.
     /// When stdinContent is provided and args ends with "-", pipes content to stdin.
+    /// Kills the process after 5 seconds to avoid hanging on permission prompts (e.g. macOS Accessibility).
     /// </summary>
     private static string? RunProcess(string fileName, string arguments, string? stdinContent = null)
     {
@@ -519,8 +520,18 @@ print('NOTFOUND')
                 process.StandardInput.Close();
             }
 
-            var output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit(10_000);
+            // Use async read + WaitForExit with timeout to avoid blocking forever
+            // when the child process hangs (e.g. macOS Accessibility permission prompt)
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            if (!process.WaitForExit(5_000))
+            {
+                try { process.Kill(); } catch { }
+                return null;
+            }
+
+            // Process exited within timeout — get the output
+            outputTask.Wait(1_000);
+            var output = outputTask.IsCompleted ? outputTask.Result : null;
 
             return process.ExitCode == 0 ? output : null;
         }
