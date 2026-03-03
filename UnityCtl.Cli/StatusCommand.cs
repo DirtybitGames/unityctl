@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityCtl.Protocol;
 
@@ -93,9 +94,29 @@ public static class StatusCommand
                 UnityConnectedToBridge = unityConnected
             };
 
+            // Detect popup dialogs if Unity is running
+            DialogInfo[]? detectedDialogs = null;
+            if (result.UnityEditorRunning)
+            {
+                var unityProcess = EditorCommands.FindUnityProcessForProject(
+                    System.IO.Path.GetFullPath(projectRoot));
+                if (unityProcess != null)
+                {
+                    var dialogs = DialogDetector.DetectDialogs(unityProcess.Id);
+                    if (dialogs.Count > 0)
+                    {
+                        detectedDialogs = dialogs.Select(d => new DialogInfo
+                        {
+                            Title = d.Title,
+                            Buttons = d.Buttons.Select(b => b.Text).ToArray()
+                        }).ToArray();
+                    }
+                }
+            }
+
             if (json)
             {
-                // Include version info in JSON output
+                // Include version info and dialogs in JSON output
                 var jsonResult = new
                 {
                     result.ProjectPath,
@@ -107,6 +128,7 @@ public static class StatusCommand
                     result.BridgePort,
                     result.BridgePid,
                     result.UnityConnectedToBridge,
+                    Dialogs = detectedDialogs,
                     Versions = health != null ? new
                     {
                         Cli = VersionInfo.Version,
@@ -118,14 +140,14 @@ public static class StatusCommand
             }
             else
             {
-                PrintHumanReadableStatus(result, unityStatus.Message, health);
+                PrintHumanReadableStatus(result, unityStatus.Message, health, detectedDialogs);
             }
         });
 
         return statusCommand;
     }
 
-    private static void PrintHumanReadableStatus(ProjectStatusResult status, string? unityStatusMessage, HealthResult? health)
+    private static void PrintHumanReadableStatus(ProjectStatusResult status, string? unityStatusMessage, HealthResult? health, DialogInfo[]? dialogs = null)
     {
         Console.WriteLine("Project Status:");
         Console.WriteLine($"  Path: {status.ProjectPath}");
@@ -190,6 +212,27 @@ public static class StatusCommand
                     Console.WriteLine("  Note: The Unity plugin uses exponential backoff (max 15s) when reconnecting.");
                 }
             }
+        }
+
+        // Popup dialogs
+        if (dialogs != null && dialogs.Length > 0)
+        {
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write($"Popups: [!] {dialogs.Length} dialog{(dialogs.Length > 1 ? "s" : "")} detected");
+            Console.ResetColor();
+            Console.WriteLine();
+            foreach (var dialog in dialogs)
+            {
+                Console.Write($"  \"{dialog.Title}\"");
+                if (dialog.Buttons.Length > 0)
+                {
+                    var buttonLabels = dialog.Buttons.Select(b => $"[{b}]");
+                    Console.Write($" {string.Join(" ", buttonLabels)}");
+                }
+                Console.WriteLine();
+            }
+            Console.WriteLine("  Use 'unityctl dialog dismiss' to dismiss");
         }
 
         // Version information

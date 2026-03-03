@@ -315,6 +315,15 @@ public class ProjectStatusResult
     public required bool UnityConnectedToBridge { get; init; }
 }
 
+public class DialogInfo
+{
+    [JsonProperty("title")]
+    public required string Title { get; init; }
+
+    [JsonProperty("buttons")]
+    public required string[] Buttons { get; init; }
+}
+
 /// <summary>
 /// Unified log entry that can come from either editor.log or console (Debug.Log)
 /// </summary>
