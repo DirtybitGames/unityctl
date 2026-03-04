@@ -94,7 +94,7 @@ public static class StatusCommand
                 UnityConnectedToBridge = unityConnected
             };
 
-            // Detect popup dialogs if Unity is running
+            // Detect popup dialogs (including progress bars) if Unity is running
             DialogInfo[]? detectedDialogs = null;
             if (result.UnityEditorRunning)
             {
@@ -108,7 +108,9 @@ public static class StatusCommand
                         detectedDialogs = dialogs.Select(d => new DialogInfo
                         {
                             Title = d.Title,
-                            Buttons = d.Buttons.Select(b => b.Text).ToArray()
+                            Buttons = d.Buttons.Select(b => b.Text).ToArray(),
+                            Description = d.Description,
+                            Progress = d.Progress
                         }).ToArray();
                     }
                 }
@@ -214,7 +216,7 @@ public static class StatusCommand
             }
         }
 
-        // Popup dialogs
+        // Popup dialogs (including progress bars)
         if (dialogs != null && dialogs.Length > 0)
         {
             Console.WriteLine();
@@ -230,9 +232,17 @@ public static class StatusCommand
                     var buttonLabels = dialog.Buttons.Select(b => $"[{b}]");
                     Console.Write($" {string.Join(" ", buttonLabels)}");
                 }
+                if (dialog.Progress.HasValue)
+                {
+                    var pct = (int)(dialog.Progress.Value * 100);
+                    Console.Write($" ({pct}%)");
+                }
+                if (dialog.Description != null)
+                    Console.Write($" - {dialog.Description}");
                 Console.WriteLine();
             }
-            Console.WriteLine("  Use 'unityctl dialog dismiss' to dismiss");
+            if (dialogs.Any(d => d.Buttons.Length > 0))
+                Console.WriteLine("  Use 'unityctl dialog dismiss' to dismiss");
         }
 
         // Version information

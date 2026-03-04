@@ -21,6 +21,12 @@ internal class DetectedDialog
 
     /// <summary>Platform-specific context needed for clicking buttons (e.g., macOS process name).</summary>
     public string? ProcessContext { get; init; }
+
+    /// <summary>Description text from static labels (e.g., progress bar description).</summary>
+    public string? Description { get; init; }
+
+    /// <summary>Progress value 0.0-1.0 if this dialog contains a progress bar, null otherwise.</summary>
+    public float? Progress { get; init; }
 }
 
 internal static class DialogDetector
@@ -81,10 +87,14 @@ internal static class DialogDetector
             if (!Win32.IsWindowVisible(hWnd))
                 return true;
 
-            // Check for dialog class (#32770)
             var classNameBuf = new StringBuilder(256);
             Win32.GetClassName(hWnd, classNameBuf, classNameBuf.Capacity);
-            if (classNameBuf.ToString() != "#32770")
+            var className = classNameBuf.ToString();
+
+            // Match dialog windows (#32770) and Unity splash/loading windows
+            var isDialog = className == "#32770";
+            var isSplash = className == "UnitySplashWindow";
+            if (!isDialog && !isSplash)
                 return true;
 
             // Get title
@@ -92,13 +102,18 @@ internal static class DialogDetector
             Win32.GetWindowText(hWnd, titleBuf, titleBuf.Capacity);
             var title = titleBuf.ToString();
 
-            // Enumerate child buttons
+            // Enumerate child controls — buttons, progress bars, static text
             var buttons = new List<DetectedButton>();
+            float? progress = null;
+            string? description = null;
+
             Win32.EnumChildWindows(hWnd, (childHwnd, __) =>
             {
                 var childClassBuf = new StringBuilder(256);
                 Win32.GetClassName(childHwnd, childClassBuf, childClassBuf.Capacity);
-                if (childClassBuf.ToString() == "Button")
+                var childClass = childClassBuf.ToString();
+
+                if (childClass == "Button")
                 {
                     var btnTextBuf = new StringBuilder(256);
                     Win32.GetWindowText(childHwnd, btnTextBuf, btnTextBuf.Capacity);
@@ -114,6 +129,28 @@ internal static class DialogDetector
                         });
                     }
                 }
+                else if (childClass == "msctls_progress32")
+                {
+                    // Read progress position and range
+                    var pos = (int)Win32.SendMessage(childHwnd, Win32.PBM_GETPOS, IntPtr.Zero, IntPtr.Zero);
+                    var rangeHigh = (int)Win32.SendMessage(childHwnd, Win32.PBM_GETRANGE, IntPtr.Zero, IntPtr.Zero);
+                    if (rangeHigh <= 0)
+                        rangeHigh = 100; // default range
+                    progress = Math.Clamp((float)pos / rangeHigh, 0f, 1f);
+                }
+                else if (childClass == "Static")
+                {
+                    var textBuf = new StringBuilder(512);
+                    Win32.GetWindowText(childHwnd, textBuf, textBuf.Capacity);
+                    var text = textBuf.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        // Keep the longest static text as the description
+                        if (description == null || text.Length > description.Length)
+                            description = text;
+                    }
+                }
+
                 return true;
             }, IntPtr.Zero);
 
@@ -121,7 +158,9 @@ internal static class DialogDetector
             {
                 Title = title,
                 Buttons = buttons,
-                NativeHandle = hWnd
+                NativeHandle = hWnd,
+                Description = description,
+                Progress = progress
             });
 
             return true; // continue looking for more dialogs
@@ -548,6 +587,8 @@ print('NOTFOUND')
     {
         public const uint BM_CLICK = 0x00F5;
         public const uint WM_COMMAND = 0x0111;
+        public const uint PBM_GETPOS = 0x0408;
+        public const uint PBM_GETRANGE = 0x0407;
 
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 

@@ -28,7 +28,9 @@ public static class DialogCommands
                 var infos = dialogs.Select(d => new DialogInfo
                 {
                     Title = d.Title,
-                    Buttons = d.Buttons.Select(b => b.Text).ToArray()
+                    Buttons = d.Buttons.Select(b => b.Text).ToArray(),
+                    Description = d.Description,
+                    Progress = d.Progress
                 }).ToArray();
 
                 Console.WriteLine(JsonHelper.Serialize(infos));
@@ -51,6 +53,13 @@ public static class DialogCommands
                             var buttonLabels = dialog.Buttons.Select(b => $"[{b.Text}]");
                             Console.Write($" {string.Join(" ", buttonLabels)}");
                         }
+                        if (dialog.Progress.HasValue)
+                        {
+                            var pct = (int)(dialog.Progress.Value * 100);
+                            Console.Write($" ({pct}%)");
+                        }
+                        if (dialog.Description != null)
+                            Console.Write($" - {dialog.Description}");
                         Console.WriteLine();
                     }
                 }

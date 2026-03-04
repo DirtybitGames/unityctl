@@ -322,6 +322,12 @@ public class DialogInfo
 
     [JsonProperty("buttons")]
     public required string[] Buttons { get; init; }
+
+    [JsonProperty("description")]
+    public string? Description { get; init; }
+
+    [JsonProperty("progress")]
+    public float? Progress { get; init; }
 }
 
 /// <summary>

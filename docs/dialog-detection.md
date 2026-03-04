@@ -1,12 +1,12 @@
 # Dialog Detection
 
-Unity Editor shows modal dialog popups in various situations — compilation errors triggering Safe Mode, license issues, import failures, etc. These dialogs block Unity's main thread, which means:
+Unity Editor shows modal dialog popups and progress bars in various situations — compilation errors triggering Safe Mode, license issues, import failures, asset imports, builds, editor startup, etc. These block Unity's main thread, which means:
 
 - The UnityCtl plugin cannot process any RPC commands
 - `unityctl wait` hangs indefinitely
 - The bridge reports Unity as connected, but all commands time out (504)
 
-The `dialog` command detects these popups from the CLI side (no bridge or plugin needed) and can dismiss them programmatically.
+The `dialog` command detects these popups from the CLI side (no bridge or plugin needed) and can dismiss them programmatically. Progress bars (e.g., asset imports, builds, editor startup) are treated as dialogs — they may have no buttons but include progress percentage and description text.
 
 ## Commands
 
@@ -24,6 +24,29 @@ Detected 1 dialog(s):
 ```
 $ unityctl dialog list --json
 [{"title":"Enter Safe Mode?","buttons":["Enter Safe Mode","Ignore","Quit"]}]
+```
+
+Progress bars show additional fields:
+
+```
+$ unityctl dialog list
+Detected 1 dialog(s):
+
+  "Building Player (busy for 35s)..." [Cancel] [Skip Transcoding] (100%) - Write asset files
+```
+
+```
+$ unityctl dialog list --json
+[{"title":"Building Player (busy for 35s)...","buttons":["Cancel","Skip Transcoding"],"description":"Write asset files","progress":1.0}]
+```
+
+During editor startup, the loading splash is detected as a button-less dialog with progress:
+
+```
+$ unityctl dialog list
+Detected 1 dialog(s):
+
+  "Opening project..." (46%)
 ```
 
 ### `unityctl dialog dismiss`
@@ -47,14 +70,22 @@ Popups: [!] 1 dialog detected
   Use 'unityctl dialog dismiss' to dismiss
 ```
 
+Progress bars also appear in status output:
+
+```
+Popups: [!] 1 dialog detected
+  "Compiling Scripts (busy for 23s)..." [Cancel] [Skip Transcoding] (10%) - Compiling C# (UnityEngine.UI)
+  Use 'unityctl dialog dismiss' to dismiss
+```
+
 ## Architecture
 
 Dialog detection is purely client-side — it runs in the CLI process using OS-level window APIs. This is necessary because dialogs block Unity's main thread, so the plugin can't respond to bridge commands.
 
 The flow is:
 1. Find the Unity process for the project (`FindUnityProcessForProject`)
-2. Use platform-specific APIs to enumerate that process's dialog windows
-3. Extract window titles and button labels
+2. Use platform-specific APIs to enumerate that process's dialog and splash windows
+3. Extract window titles, button labels, progress bar values, and description text
 4. Optionally click a button to dismiss
 
 ## Platform Support
@@ -63,10 +94,21 @@ The flow is:
 
 Uses Win32 P/Invoke APIs to detect and interact with dialogs:
 
-- **Detection**: `EnumWindows` to find visible windows belonging to the Unity PID, filtering for the `#32770` dialog window class
+- **Detection**: `EnumWindows` to find visible windows belonging to the Unity PID, filtering for the `#32770` dialog window class and `UnitySplashWindow` (Unity's startup/loading window)
 - **Button enumeration**: `EnumChildWindows` to find child controls with the `Button` class, reading text via `GetWindowText`
 - **Button text cleanup**: Win32 button text includes `&` accelerator prefixes (e.g., `&OK`, `&Cancel`) — these are stripped automatically
+- **Progress bars**: Detects `msctls_progress32` child controls, reads position via `SendMessage(PBM_GETPOS)` and range via `SendMessage(PBM_GETRANGE)`, normalizes to 0.0-1.0
+- **Description text**: Reads `Static` child controls for description labels (e.g., "Compiling C# (UnityEngine.UI)")
 - **Clicking**: `SendMessage(WM_COMMAND)` to the parent dialog with the button's control ID (via `GetDlgCtrlID`). `SetForegroundWindow` is called first to ensure the dialog processes messages
+
+**Window classes detected:**
+
+| Class | What | Examples |
+|-------|------|----------|
+| `#32770` | Standard Win32 dialog | Safe Mode prompt, `EditorUtility.DisplayDialog`, `DisplayProgressBar`, `DisplayCancelableProgressBar` |
+| `UnitySplashWindow` | Unity startup/loading splash | "Opening project..." with progress bar during editor launch |
+
+Both classes can contain `msctls_progress32` progress bar controls and `Static` text labels. The `UnitySplashWindow` typically has no buttons (or an empty-text button), while `#32770` dialogs from `DisplayCancelableProgressBar` include Cancel and Skip Transcoding buttons.
 
 **Why `SendMessage(WM_COMMAND)` instead of `PostMessage(BM_CLICK)`**: During testing, `PostMessage(BM_CLICK)` proved unreliable across processes — the dismiss would report success but the dialog wouldn't actually close. `SendMessage(WM_COMMAND)` mimics exactly what the dialog's own message loop does when a button is clicked, making it reliable cross-process. Falls back to `SendMessage(BM_CLICK)` if control ID lookup fails.
 
@@ -184,17 +226,30 @@ Key details:
 
 ### `DialogDetector.cs`
 
-Single static class with platform dispatch (`DetectDialogs`, `ClickButton`). Best-effort on all platforms — if detection fails (missing tools, no permissions), returns empty list silently. Never fails the parent command.
+Single static class with platform dispatch (`DetectDialogs`, `ClickButton`). Best-effort on all platforms — if detection fails (missing tools, no permissions), returns empty list silently. Never fails the parent command. Returns `DetectedDialog` objects with optional `Description` (from static text labels) and `Progress` (0.0-1.0 from progress bar controls).
 
 ### `DialogCommands.cs`
 
 Two subcommands under `unityctl dialog`:
-- `list` — enumerates dialogs, outputs human-readable or JSON
+- `list` — enumerates dialogs, outputs human-readable or JSON. Shows progress percentage and description when present.
 - `dismiss --button <text>` — clicks the named button (case-insensitive), defaults to first button
 
 ### `StatusCommand.cs`
 
-If Unity is running, calls `DialogDetector.DetectDialogs` and includes any detected dialogs in both human-readable and JSON output.
+If Unity is running, calls `DialogDetector.DetectDialogs` and includes any detected dialogs (including progress bars) in both human-readable and JSON output. The "Use 'unityctl dialog dismiss' to dismiss" hint is only shown when at least one dialog has buttons.
+
+### `DialogInfo` (Protocol DTO)
+
+```json
+{
+  "title": "Building Player (busy for 35s)...",
+  "buttons": ["Cancel", "Skip Transcoding"],
+  "description": "Write asset files",
+  "progress": 1.0
+}
+```
+
+The `description` and `progress` fields are nullable — omitted from JSON when not present (e.g., for plain button dialogs like Safe Mode prompts).
 
 ### Subprocess timeout
 
