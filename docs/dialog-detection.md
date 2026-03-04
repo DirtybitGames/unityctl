@@ -118,7 +118,9 @@ Both classes can contain `msctls_progress32` progress bar controls and `Static` 
 
 Uses AppleScript via `osascript` to interact with System Events:
 
-- **Detection**: Enumerates windows of the Unity process by PID, looking for windows that have button controls
+- **Detection**: Enumerates windows of the Unity process by PID, looking for windows that have buttons or progress indicators
+- **Progress bars**: Reads `progress indicator` elements and their `value` property, normalizes to 0.0-1.0
+- **Description text**: Reads `static text` elements, keeps the longest as the description
 - **Clicking**: Uses `click button "<name>" of window "<title>" of process "<name>"`
 - **Script delivery**: Scripts are piped via stdin to avoid shell quoting issues
 
@@ -147,7 +149,10 @@ The fundamental macOS limitation is that **any API that can read window content 
 Uses a combination of tools:
 
 - **Window listing**: `xdotool search --pid <PID>` (X11 only) + `xdotool getwindowname` for titles
-- **Button enumeration**: `python3` with `pyatspi` (AT-SPI2 accessibility framework) to enumerate `ROLE_PUSH_BUTTON` controls within dialog/alert windows
+- **Button enumeration**: `python3` with `pyatspi` (AT-SPI2 accessibility framework) to enumerate `ROLE_PUSH_BUTTON` controls
+- **Progress bars**: Reads `ROLE_PROGRESS_BAR` elements via `queryValue()`, normalizes `currentValue / maximumValue` to 0.0-1.0
+- **Description text**: Reads `ROLE_LABEL` elements, keeps the longest as the description
+- **Role matching**: pyatspi-only path detects `ROLE_DIALOG`, `ROLE_ALERT`, and any window with a progress bar (regardless of role)
 - **Clicking**: `pyatspi` `doAction(0)` on the target button
 
 **Fallback behavior**:

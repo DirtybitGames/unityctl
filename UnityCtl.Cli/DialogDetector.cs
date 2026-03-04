@@ -207,8 +207,10 @@ internal static class DialogDetector
     [SupportedOSPlatform("macos")]
     private static List<DetectedDialog> DetectDialogsMacOS(int processId)
     {
-        // AppleScript to enumerate windows and buttons for a process by PID.
-        // Returns lines like: DIALOG:windowTitle|btn1,btn2,btn3
+        // AppleScript to enumerate windows with buttons, progress indicators, and static text.
+        // Returns lines like:
+        //   DIALOG:windowTitle|btn1,btn2|progressValue|description
+        // Progress value is empty if no progress indicator found.
         var script = $@"
 tell application ""System Events""
     set unityProcs to every process whose unix id is {processId}
@@ -219,17 +221,44 @@ tell application ""System Events""
     repeat with w in (every window of unityProc)
         set wName to name of w
         set btns to """"
+        set prog to """"
+        set desc to """"
+        set hasContent to false
         try
             repeat with b in (every button of w)
                 set bName to name of b
                 if bName is not missing value then
                     if btns is not """" then set btns to btns & "",""
                     set btns to btns & bName
+                    set hasContent to true
                 end if
             end repeat
         end try
-        if btns is not """" then
-            set output to output & ""DIALOG:"" & wName & ""|"" & btns & linefeed
+        try
+            set progIndicators to every progress indicator of w
+            if (count of progIndicators) > 0 then
+                set progVal to value of item 1 of progIndicators
+                if progVal is not missing value then
+                    set prog to (progVal as text)
+                    set hasContent to true
+                end if
+            end if
+        end try
+        try
+            set staticTexts to every static text of w
+            if (count of staticTexts) > 0 then
+                repeat with st in staticTexts
+                    set stVal to value of st
+                    if stVal is not missing value and stVal is not """" then
+                        if (count of stVal) > (count of desc) then
+                            set desc to stVal
+                        end if
+                    end if
+                end repeat
+            end if
+        end try
+        if hasContent then
+            set output to output & ""DIALOG:"" & wName & ""|"" & btns & ""|"" & prog & ""|"" & desc & linefeed
         end if
     end repeat
     return ""PROC:"" & procName & linefeed & output
@@ -253,24 +282,45 @@ end tell";
                 continue;
 
             var payload = line.Substring(7);
-            var pipeIdx = payload.IndexOf('|');
-            if (pipeIdx < 0) continue;
+            // Format: title|buttons|progress|description
+            var parts = payload.Split('|');
+            if (parts.Length < 1) continue;
 
-            var title = payload.Substring(0, pipeIdx);
-            var buttonNames = payload.Substring(pipeIdx + 1).Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var title = parts[0];
 
             var buttons = new List<DetectedButton>();
-            foreach (var name in buttonNames)
+            if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
             {
-                var trimmed = name.Trim();
-                if (trimmed.Length > 0)
+                foreach (var name in parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    buttons.Add(new DetectedButton
+                    var trimmed = name.Trim();
+                    if (trimmed.Length > 0)
                     {
-                        Text = trimmed,
-                        NativeHandle = trimmed // macOS uses button name for clicking
-                    });
+                        buttons.Add(new DetectedButton
+                        {
+                            Text = trimmed,
+                            NativeHandle = trimmed // macOS uses button name for clicking
+                        });
+                    }
                 }
+            }
+
+            float? progress = null;
+            if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
+            {
+                if (float.TryParse(parts[2], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var progVal))
+                {
+                    // AppleScript progress indicator value is typically 0-100
+                    if (progVal > 1f) progVal /= 100f;
+                    progress = Math.Clamp(progVal, 0f, 1f);
+                }
+            }
+
+            string? description = null;
+            if (parts.Length > 3 && !string.IsNullOrWhiteSpace(parts[3]))
+            {
+                description = parts[3].Trim();
             }
 
             dialogs.Add(new DetectedDialog
@@ -278,7 +328,9 @@ end tell";
                 Title = title,
                 Buttons = buttons,
                 NativeHandle = title, // window name for clicking
-                ProcessContext = processName
+                ProcessContext = processName,
+                Description = description,
+                Progress = progress
             });
         }
 
@@ -346,28 +398,30 @@ end tell";
             windowName = windowName.Trim();
             if (windowName.Length == 0) continue;
 
-            // Try to get buttons via pyatspi
-            var buttons = GetButtonsPyatspi(processId, windowName);
+            // Try to get buttons, progress, and description via pyatspi
+            var windowInfo = GetWindowInfoPyatspi(processId, windowName);
 
             dialogs.Add(new DetectedDialog
             {
                 Title = windowName,
-                Buttons = buttons,
-                NativeHandle = windowId
+                Buttons = windowInfo.Buttons,
+                NativeHandle = windowId,
+                Description = windowInfo.Description,
+                Progress = windowInfo.Progress
             });
         }
 
-        // Filter to only windows that have buttons (likely dialogs)
+        // Filter to only windows that have buttons or progress (likely dialogs/progress bars)
         // If pyatspi isn't available, keep all windows (titles are still useful)
         var hasPyatspi = false;
         foreach (var d in dialogs)
         {
-            if (d.Buttons.Count > 0) { hasPyatspi = true; break; }
+            if (d.Buttons.Count > 0 || d.Progress.HasValue) { hasPyatspi = true; break; }
         }
 
         if (hasPyatspi)
         {
-            dialogs.RemoveAll(d => d.Buttons.Count == 0);
+            dialogs.RemoveAll(d => d.Buttons.Count == 0 && !d.Progress.HasValue);
         }
 
         return dialogs;
@@ -376,9 +430,38 @@ end tell";
     [SupportedOSPlatform("linux")]
     private static List<DetectedDialog> DetectDialogsLinuxPyatspi(int processId)
     {
-        // Full pyatspi-based detection for Wayland or when xdotool is unavailable
+        // Full pyatspi-based detection for Wayland or when xdotool is unavailable.
+        // Looks for dialogs, alerts, and frames/windows that contain progress bars.
+        // Output format: DIALOG:title|btn1,btn2|progressValue|description
         var pyScript = $@"
 import pyatspi, sys
+
+def scan_children(frame):
+    btns, prog, desc = [], '', ''
+    for i in range(frame.childCount):
+        try:
+            child = frame.getChildAtIndex(i)
+            if not child: continue
+            role = child.getRole()
+            if role == pyatspi.ROLE_PUSH_BUTTON:
+                btns.append(child.name or '')
+            elif role == pyatspi.ROLE_PROGRESS_BAR:
+                try:
+                    val = child.queryValue()
+                    cur = val.currentValue
+                    mx = val.maximumValue
+                    if mx > 0:
+                        prog = str(cur / mx)
+                    else:
+                        prog = str(cur)
+                except: pass
+            elif role == pyatspi.ROLE_LABEL:
+                name = child.name or ''
+                if len(name) > len(desc):
+                    desc = name
+        except: pass
+    return btns, prog, desc
+
 for app in pyatspi.Registry.getDesktop(0):
     try:
         if app.get_process_id() != {processId}: continue
@@ -386,15 +469,12 @@ for app in pyatspi.Registry.getDesktop(0):
     for frame in app:
         try:
             role = frame.getRole()
-            if role not in (pyatspi.ROLE_DIALOG, pyatspi.ROLE_ALERT):
-                continue
             title = frame.name or ''
-            btns = []
-            for i in range(frame.childCount):
-                child = frame.getChildAtIndex(i)
-                if child and child.getRole() == pyatspi.ROLE_PUSH_BUTTON:
-                    btns.append(child.name or '')
-            print(f'DIALOG:{{title}}|{{"","".join(btns)}}')
+            btns, prog, desc = scan_children(frame)
+            is_dialog = role in (pyatspi.ROLE_DIALOG, pyatspi.ROLE_ALERT)
+            has_progress = prog != ''
+            if is_dialog or has_progress:
+                print(f'DIALOG:{{title}}|{{"","".join(btns)}}|{{prog}}|{{desc}}')
         except: pass
 ";
 
@@ -402,37 +482,64 @@ for app in pyatspi.Registry.getDesktop(0):
         if (result == null)
             return [];
 
+        return ParseLinuxDialogOutput(result);
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static List<DetectedDialog> ParseLinuxDialogOutput(string output)
+    {
         var dialogs = new List<DetectedDialog>();
-        foreach (var line in result.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             if (!line.StartsWith("DIALOG:")) continue;
 
             var payload = line.Substring(7);
-            var pipeIdx = payload.IndexOf('|');
-            if (pipeIdx < 0) continue;
+            // Format: title|buttons|progress|description
+            var parts = payload.Split('|');
+            if (parts.Length < 1) continue;
 
-            var title = payload.Substring(0, pipeIdx);
-            var buttonNames = payload.Substring(pipeIdx + 1).Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var title = parts[0];
 
             var buttons = new List<DetectedButton>();
-            foreach (var name in buttonNames)
+            if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
             {
-                var trimmed = name.Trim();
-                if (trimmed.Length > 0)
+                foreach (var name in parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    buttons.Add(new DetectedButton
+                    var trimmed = name.Trim();
+                    if (trimmed.Length > 0)
                     {
-                        Text = trimmed,
-                        NativeHandle = trimmed
-                    });
+                        buttons.Add(new DetectedButton
+                        {
+                            Text = trimmed,
+                            NativeHandle = trimmed
+                        });
+                    }
                 }
+            }
+
+            float? progress = null;
+            if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
+            {
+                if (float.TryParse(parts[2], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var progVal))
+                {
+                    progress = Math.Clamp(progVal, 0f, 1f);
+                }
+            }
+
+            string? description = null;
+            if (parts.Length > 3 && !string.IsNullOrWhiteSpace(parts[3]))
+            {
+                description = parts[3].Trim();
             }
 
             dialogs.Add(new DetectedDialog
             {
                 Title = title,
                 Buttons = buttons,
-                NativeHandle = title
+                NativeHandle = title,
+                Description = description,
+                Progress = progress
             });
         }
 
@@ -440,9 +547,10 @@ for app in pyatspi.Registry.getDesktop(0):
     }
 
     [SupportedOSPlatform("linux")]
-    private static List<DetectedButton> GetButtonsPyatspi(int processId, string windowName)
+    private static (List<DetectedButton> Buttons, float? Progress, string? Description) GetWindowInfoPyatspi(int processId, string windowName)
     {
         var escapedName = windowName.Replace("'", "\\'");
+        // Output format: BUTTONS:btn1,btn2\nPROGRESS:value\nDESCRIPTION:text
         var pyScript = $@"
 import pyatspi, sys
 for app in pyatspi.Registry.getDesktop(0):
@@ -452,32 +560,74 @@ for app in pyatspi.Registry.getDesktop(0):
     for frame in app:
         try:
             if frame.name == '{escapedName}':
+                btns, desc = [], ''
                 for i in range(frame.childCount):
                     child = frame.getChildAtIndex(i)
-                    if child and child.getRole() == pyatspi.ROLE_PUSH_BUTTON:
-                        print(child.name or '')
+                    if not child: continue
+                    role = child.getRole()
+                    if role == pyatspi.ROLE_PUSH_BUTTON:
+                        btns.append(child.name or '')
+                    elif role == pyatspi.ROLE_PROGRESS_BAR:
+                        try:
+                            val = child.queryValue()
+                            cur = val.currentValue
+                            mx = val.maximumValue
+                            if mx > 0:
+                                print(f'PROGRESS:{{cur / mx}}')
+                            else:
+                                print(f'PROGRESS:{{cur}}')
+                        except: pass
+                    elif role == pyatspi.ROLE_LABEL:
+                        name = child.name or ''
+                        if len(name) > len(desc):
+                            desc = name
+                if btns:
+                    print(f'BUTTONS:{{"","".join(btns)}}')
+                if desc:
+                    print(f'DESCRIPTION:{{desc}}')
         except: pass
 ";
 
         var result = RunProcess("python3", "-c -", pyScript);
         var buttons = new List<DetectedButton>();
+        float? progress = null;
+        string? description = null;
+
         if (result == null)
-            return buttons;
+            return (buttons, progress, description);
 
         foreach (var line in result.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
-            var name = line.Trim();
-            if (name.Length > 0)
+            if (line.StartsWith("BUTTONS:"))
             {
-                buttons.Add(new DetectedButton
+                foreach (var name in line.Substring(8).Split(',', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    Text = name,
-                    NativeHandle = name
-                });
+                    var trimmed = name.Trim();
+                    if (trimmed.Length > 0)
+                    {
+                        buttons.Add(new DetectedButton
+                        {
+                            Text = trimmed,
+                            NativeHandle = trimmed
+                        });
+                    }
+                }
+            }
+            else if (line.StartsWith("PROGRESS:"))
+            {
+                if (float.TryParse(line.Substring(9), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var progVal))
+                {
+                    progress = Math.Clamp(progVal, 0f, 1f);
+                }
+            }
+            else if (line.StartsWith("DESCRIPTION:"))
+            {
+                description = line.Substring(12).Trim();
             }
         }
 
-        return buttons;
+        return (buttons, progress, description);
     }
 
     [SupportedOSPlatform("linux")]
