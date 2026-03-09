@@ -1572,7 +1572,8 @@ namespace UnityCtl
                         return go.name.StartsWith(filterValue.TrimEnd('*'), StringComparison.OrdinalIgnoreCase);
                     return string.Equals(go.name, filterValue, StringComparison.OrdinalIgnoreCase);
                 case "tag":
-                    return go.CompareTag(filterValue);
+                    return go.CompareTag(filterValue)
+                        || CheckChildrenForTag(go.transform, filterValue);
                 default:
                     return true;
             }
@@ -1586,6 +1587,19 @@ namespace UnityCtl
                 if (child.GetComponents<Component>().Any(c => c != null && c.GetType().Name == typeName))
                     return true;
                 if (CheckChildrenForType(child, typeName))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool CheckChildrenForTag(Transform parent, string tag)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (child.CompareTag(tag))
+                    return true;
+                if (CheckChildrenForTag(child, tag))
                     return true;
             }
             return false;

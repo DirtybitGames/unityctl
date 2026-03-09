@@ -249,34 +249,46 @@ public static class ScriptCommands
         var preamble = "";
         if (!string.IsNullOrEmpty(instanceIds))
         {
-            preamble = BuildInstanceIdPreamble(instanceIds);
+            var ids = ParseInstanceIds(instanceIds);
+            preamble = BuildInstanceIdPreamble(ids);
         }
 
         return usingBlock + "\n\npublic class Script\n{\n    " + signature + "\n    {\n        " + preamble + body + "\n    }\n}\n";
     }
 
-    internal static string BuildInstanceIdPreamble(string idArg)
+    internal static int[] ParseInstanceIds(string idArg)
     {
-        var ids = idArg.Split(',').Select(s => s.Trim()).ToArray();
+        var parts = idArg.Split(',');
+        var ids = new int[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i].Trim(), out ids[i]))
+                throw new ArgumentException($"Invalid instance ID: '{parts[i].Trim()}' — must be an integer");
+        }
+        return ids;
+    }
+
+    internal static string BuildInstanceIdPreamble(int[] ids)
+    {
+        const string pad = "\n        ";
         var sb = new System.Text.StringBuilder();
 
         if (ids.Length == 1)
         {
-            sb.AppendLine($"var target = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[0]});");
-            sb.AppendLine($"        if (target == null) throw new System.Exception(\"Object {ids[0]} not found (destroyed?)\");");
+            sb.Append($"var target = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[0]});");
+            sb.Append($"{pad}if (target == null) throw new System.Exception(\"Object {ids[0]} not found (destroyed?)\");");
         }
         else
         {
-            // Multiple targets: inject targets[] array
-            sb.AppendLine($"var targets = new GameObject[{ids.Length}];");
+            sb.Append($"var targets = new GameObject[{ids.Length}];");
             for (int i = 0; i < ids.Length; i++)
             {
-                sb.AppendLine($"        targets[{i}] = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[i]});");
-                sb.AppendLine($"        if (targets[{i}] == null) throw new System.Exception(\"Object {ids[i]} not found (destroyed?)\");");
+                sb.Append($"{pad}targets[{i}] = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[i]});");
+                sb.Append($"{pad}if (targets[{i}] == null) throw new System.Exception(\"Object {ids[i]} not found (destroyed?)\");");
             }
         }
 
-        sb.Append("        ");
+        sb.Append(pad);
         return sb.ToString();
     }
 
