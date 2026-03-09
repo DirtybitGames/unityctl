@@ -209,17 +209,20 @@ public class PlayModeFlowTests : IAsyncLifetime
         await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
 
         // Reconnect with new FakeUnity that reports "playing" on status check
+        // and has default handlers for the retry's asset.refresh + play.enter flow
         var newFakeUnity = _fixture.CreateFakeUnity();
+        ConfigureDefaultHandlers(newFakeUnity);
+        // Override play.status AFTER default handlers so it reports "playing"
         newFakeUnity.OnCommand(UnityCtlCommands.PlayStatus, _ =>
             new PlayModeResult { State = PlayModeState.Playing });
         await newFakeUnity.ConnectAsync(_fixture.BaseUri);
 
-        // The Bridge's retry loop should detect "playing" on status re-check
+        // The Bridge detects domain reload, retries play.enter, finds already playing
         var response = await rpcTask;
 
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
-        Assert.Equal("EnteredPlayMode", result["state"]?.ToString());
+        Assert.Equal("AlreadyPlaying", result["state"]?.ToString());
 
         await newFakeUnity.DisposeAsync();
     }

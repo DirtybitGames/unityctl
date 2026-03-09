@@ -393,80 +393,118 @@ public static class BridgeEndpoints
 
     private static async Task<IResult> HandleRpcAsync(BridgeState state, HttpContext context, RpcRequest request)
     {
-        if (!state.IsUnityConnected)
+        const int maxAttempts = 2;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
-            if (state.IsDomainReloadInProgress)
+            if (!state.IsUnityConnected)
             {
-                // Unity is temporarily disconnected during domain reload — wait for reconnection
-                Console.WriteLine($"[Bridge] RPC received during domain reload - waiting for Unity to reconnect");
-                var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
-                    DomainReloadReconnectTimeout, context.RequestAborted);
-                if (!reloadComplete)
+                if (state.IsDomainReloadInProgress)
+                {
+                    // Unity is temporarily disconnected during domain reload — wait for reconnection
+                    Console.WriteLine($"[Bridge] RPC received during domain reload - waiting for Unity to reconnect");
+                    var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
+                        DomainReloadReconnectTimeout, context.RequestAborted);
+                    if (!reloadComplete)
+                    {
+                        return Results.Problem(
+                            statusCode: 503,
+                            title: "Unity Offline",
+                            detail: "Unity Editor did not reconnect after domain reload"
+                        );
+                    }
+                    Console.WriteLine($"[Bridge] Unity reconnected after domain reload - processing RPC");
+                }
+                else
                 {
                     return Results.Problem(
                         statusCode: 503,
                         title: "Unity Offline",
-                        detail: "Unity Editor did not reconnect after domain reload"
+                        detail: "Unity Editor is not connected to the bridge"
                     );
                 }
-                Console.WriteLine($"[Bridge] Unity reconnected after domain reload - processing RPC");
             }
-            else
+
+            // Snapshot domain reload count to detect if a reload occurs during execution
+            var domainReloadCount = state.DomainReloadCount;
+
+            // Create a fresh request message each attempt (new RequestId)
+            var convertedArgs = ConvertArgs(request.Args);
+            var requestMessage = CreateRequestMessage(request, convertedArgs);
+
+            try
+            {
+                var hasConfig = CommandConfigs.TryGetValue(request.Command, out var config);
+                // Request-level timeout (from caller) takes precedence over per-command config
+                var timeout = request.Timeout.HasValue
+                    ? TimeSpan.FromSeconds(request.Timeout.Value)
+                    : hasConfig ? config!.Timeout : GetDefaultTimeout();
+
+                if (request.Command == UnityCtlCommands.PlayEnter)
+                    return await HandlePlayEnterAsync(state, requestMessage, request, timeout, context.RequestAborted);
+
+                if (request.Command == UnityCtlCommands.PlayExit)
+                    return await HandlePlayExitAsync(state, requestMessage, config!, timeout, context.RequestAborted);
+
+                if (request.Command == UnityCtlCommands.RecordStart)
+                    return await HandleRecordStartAsync(state, requestMessage, request, config!, timeout, context.RequestAborted);
+
+                return await HandleGenericCommandAsync(state, requestMessage, hasConfig ? config : null, timeout, context.RequestAborted);
+            }
+            catch (OperationCanceledException)
+            {
+                var clientAborted = context.RequestAborted.IsCancellationRequested;
+                var currentReloadCount = state.DomainReloadCount;
+                var domainReloadOccurred = currentReloadCount > domainReloadCount;
+                var canRetry = attempt < maxAttempts - 1;
+
+                if (!clientAborted && domainReloadOccurred && canRetry)
+                {
+                    Console.WriteLine($"[Bridge] Command '{request.Command}' interrupted by domain reload - retrying");
+
+                    // Wait for domain reload to fully complete and connection to stabilize
+                    if (state.IsDomainReloadInProgress)
+                    {
+                        await state.WaitForDomainReloadCompleteAsync(
+                            DomainReloadReconnectTimeout, context.RequestAborted);
+                    }
+                    // Wait for editor readiness (main thread responsive after reload)
+                    await state.WaitForEditorReadyAsync(
+                        DomainReloadReconnectTimeout, context.RequestAborted);
+
+                    continue;
+                }
+
+                return Results.Problem(
+                    statusCode: 499,
+                    title: "Request Cancelled",
+                    detail: "Request was cancelled (client disconnected or server shutting down)"
+                );
+            }
+            catch (TimeoutException ex)
             {
                 return Results.Problem(
-                    statusCode: 503,
-                    title: "Unity Offline",
-                    detail: "Unity Editor is not connected to the bridge"
+                    statusCode: 504,
+                    title: "Request Timeout",
+                    detail: ex.Message
+                );
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(
+                    statusCode: 500,
+                    title: "Request Failed",
+                    detail: ex.Message
                 );
             }
         }
 
-        var convertedArgs = ConvertArgs(request.Args);
-        var requestMessage = CreateRequestMessage(request, convertedArgs);
-
-        try
-        {
-            var hasConfig = CommandConfigs.TryGetValue(request.Command, out var config);
-            // Request-level timeout (from caller) takes precedence over per-command config
-            var timeout = request.Timeout.HasValue
-                ? TimeSpan.FromSeconds(request.Timeout.Value)
-                : hasConfig ? config!.Timeout : GetDefaultTimeout();
-
-            if (request.Command == UnityCtlCommands.PlayEnter)
-                return await HandlePlayEnterAsync(state, requestMessage, request, timeout, context.RequestAborted);
-
-            if (request.Command == UnityCtlCommands.PlayExit)
-                return await HandlePlayExitAsync(state, requestMessage, config!, timeout, context.RequestAborted);
-
-            if (request.Command == UnityCtlCommands.RecordStart)
-                return await HandleRecordStartAsync(state, requestMessage, request, config!, timeout, context.RequestAborted);
-
-            return await HandleGenericCommandAsync(state, requestMessage, hasConfig ? config : null, timeout, context.RequestAborted);
-        }
-        catch (OperationCanceledException)
-        {
-            return Results.Problem(
-                statusCode: 499,
-                title: "Request Cancelled",
-                detail: "Request was cancelled (client disconnected or server shutting down)"
-            );
-        }
-        catch (TimeoutException ex)
-        {
-            return Results.Problem(
-                statusCode: 504,
-                title: "Request Timeout",
-                detail: ex.Message
-            );
-        }
-        catch (Exception ex)
-        {
-            return Results.Problem(
-                statusCode: 500,
-                title: "Request Failed",
-                detail: ex.Message
-            );
-        }
+        // Should not reach here, but just in case
+        return Results.Problem(
+            statusCode: 500,
+            title: "Request Failed",
+            detail: "Exhausted retry attempts"
+        );
     }
 
     // --- Command handlers ---

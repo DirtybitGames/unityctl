@@ -64,6 +64,7 @@ public class BridgeState
     // Domain reload grace period tracking
     private bool _isDomainReloadInProgress = false;
     private DateTime _domainReloadGracePeriodEnd = DateTime.MinValue;
+    private long _domainReloadCount = 0;
     private static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(60);
 
     // Editor readiness tracking (main thread responsive after hello handshake)
@@ -75,6 +76,15 @@ public class BridgeState
     private TaskCompletionSource _domainReloadCompleteSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public bool IsUnityConnected => UnityConnection?.State == WebSocketState.Open;
+
+    /// <summary>
+    /// Counter that increments each time a domain reload completes (Unity reconnects).
+    /// Used by RPC handlers to detect if a domain reload occurred during command execution.
+    /// </summary>
+    public long DomainReloadCount
+    {
+        get { lock (_lock) return _domainReloadCount; }
+    }
 
     public bool IsEditorReady
     {
@@ -271,9 +281,14 @@ public class BridgeState
 
                 if (_isDomainReloadInProgress)
                 {
-                    Console.WriteLine($"[Bridge] Unity reconnected after domain reload - resuming operations");
+                    Console.WriteLine($"[Bridge] Unity reconnected after domain reload - cancelling stale operations for retry");
                     _isDomainReloadInProgress = false;
                     _domainReloadGracePeriodEnd = DateTime.MinValue;
+                    _domainReloadCount++;
+                    // Cancel all stale pending operations — the new Unity instance has no
+                    // knowledge of old requests or events. RPC handlers detect the domain
+                    // reload via DomainReloadCount and retry automatically.
+                    CancelAllPendingOperations();
                     _domainReloadCompleteSignal.TrySetResult();
                 }
                 else
@@ -356,10 +371,8 @@ public class BridgeState
     /// </summary>
     public void CancelAllPendingOperations()
     {
-        // Snapshot before iterating to avoid concurrent modification during foreach
         var pendingRequests = PendingRequests.ToArray();
         PendingRequests.Clear();
-
         foreach (var kvp in pendingRequests)
         {
             kvp.Value.TrySetCanceled();
@@ -373,6 +386,7 @@ public class BridgeState
             kvp.Value.CompletionSource.TrySetCanceled();
         }
     }
+
 
     /// <summary>
     /// Called when Unity sends DomainReloadStarting event - enter grace period
