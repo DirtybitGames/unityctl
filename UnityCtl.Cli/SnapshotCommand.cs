@@ -45,12 +45,24 @@ public static class SnapshotCommand
             "Filter by type:T, name:N*, or tag:T"
         );
 
+        var sceneOption = new Option<string?>(
+            "--scene",
+            "Snapshot a specific scene (opens additively if not loaded)"
+        );
+
+        var prefabOption = new Option<string?>(
+            "--prefab",
+            "Snapshot a prefab asset"
+        );
+
         snapshotCommand.AddOption(idOption);
         snapshotCommand.AddOption(depthOption);
         snapshotCommand.AddOption(componentsOption);
         snapshotCommand.AddOption(interactiveOption);
         snapshotCommand.AddOption(layoutOption);
         snapshotCommand.AddOption(filterOption);
+        snapshotCommand.AddOption(sceneOption);
+        snapshotCommand.AddOption(prefabOption);
 
         snapshotCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -64,6 +76,15 @@ public static class SnapshotCommand
             var interactive = context.ParseResult.GetValueForOption(interactiveOption);
             var layout = context.ParseResult.GetValueForOption(layoutOption);
             var filter = context.ParseResult.GetValueForOption(filterOption);
+            var scene = context.ParseResult.GetValueForOption(sceneOption);
+            var prefab = context.ParseResult.GetValueForOption(prefabOption);
+
+            if (!string.IsNullOrEmpty(scene) && !string.IsNullOrEmpty(prefab))
+            {
+                Console.Error.WriteLine("Error: Cannot use both --scene and --prefab");
+                context.ExitCode = 1;
+                return;
+            }
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
@@ -75,7 +96,9 @@ public static class SnapshotCommand
                 { "components", components },
                 { "interactive", interactive },
                 { "layout", layout },
-                { "filter", filter }
+                { "filter", filter },
+                { "scenePath", scene },
+                { "prefabPath", prefab }
             };
 
             var response = await client.SendCommandAsync(UnityCtlCommands.Snapshot, args);
@@ -115,7 +138,29 @@ public static class SnapshotCommand
 
         if (!isDrillDown)
         {
-            sb.AppendLine($"Scene: {result.SceneName}{(result.IsPlaying ? " (playing)" : "")}");
+            // Header: stage context
+            if (!string.IsNullOrEmpty(result.PrefabAssetPath) && result.Stage == null)
+            {
+                // --prefab asset inspection
+                sb.AppendLine($"Prefab: {result.PrefabAssetPath}");
+            }
+            else if (!string.IsNullOrEmpty(result.PrefabAssetPath))
+            {
+                // In prefab editing stage
+                sb.AppendLine($"Stage: {result.Stage}");
+                sb.AppendLine($"Prefab: {result.PrefabAssetPath}");
+                if (result.HasUnsavedChanges == true)
+                    sb.AppendLine("Unsaved changes: yes");
+                if (result.OpenedFromInstanceId.HasValue)
+                    sb.AppendLine($"Opened from: [i:{result.OpenedFromInstanceId}]");
+            }
+            else
+            {
+                // Scene mode
+                var playIndicator = result.IsPlaying ? " (playing)" : "";
+                sb.AppendLine($"Scene: {result.SceneName}{playIndicator}");
+            }
+
             sb.AppendLine($"{result.RootObjectCount} root objects");
             sb.AppendLine();
         }
@@ -132,7 +177,7 @@ public static class SnapshotCommand
     {
         var prefix = new string(' ', indent * 2);
 
-        // Main line: Name [i:ID] Components  tag:Tag
+        // Main line: Name [i:ID] Components  tag:Tag  prefab:path
         sb.Append(prefix);
         sb.Append(obj.Name);
         if (!obj.Active) sb.Append(" [inactive]");
@@ -149,6 +194,8 @@ public static class SnapshotCommand
 
         if (!string.IsNullOrEmpty(obj.Tag)) sb.Append($"  tag:{obj.Tag}");
         if (!string.IsNullOrEmpty(obj.Layer)) sb.Append($"  layer:{obj.Layer}");
+        if (obj.IsPrefabInstanceRoot == true && !string.IsNullOrEmpty(obj.PrefabAssetPath))
+            sb.Append($"  prefab:{obj.PrefabAssetPath}");
         sb.AppendLine();
 
         // Position/layout info
@@ -217,6 +264,12 @@ public static class SnapshotCommand
                     sb.AppendLine($"{prefix}    pivot: {obj.Pivot}");
             }
 
+            // Prefab info in drill-down
+            if (obj.IsPrefabInstanceRoot == true && !string.IsNullOrEmpty(obj.PrefabAssetPath))
+            {
+                sb.AppendLine($"{prefix}  Prefab: {obj.PrefabAssetPath} ({obj.PrefabAssetType ?? "Unknown"})");
+            }
+
             foreach (var comp in obj.Components)
             {
                 sb.AppendLine($"{prefix}  {comp.TypeName}:");
@@ -224,7 +277,7 @@ public static class SnapshotCommand
                 {
                     foreach (var kvp in comp.Properties)
                     {
-                        sb.AppendLine($"{prefix}    {kvp.Key}: {kvp.Value}");
+                        FormatPropertyValue(sb, kvp.Key, kvp.Value, $"{prefix}    ");
                     }
                 }
             }
@@ -244,9 +297,53 @@ public static class SnapshotCommand
                         sb.Append(' ');
                         sb.Append(string.Join(", ", Array.ConvertAll(child.Components, c => c.TypeName)));
                     }
+                    if (child.IsPrefabInstanceRoot == true && !string.IsNullOrEmpty(child.PrefabAssetPath))
+                        sb.Append($"  prefab:{child.PrefabAssetPath}");
                     sb.AppendLine();
                 }
             }
+        }
+    }
+
+    private static void FormatPropertyValue(StringBuilder sb, string key, object value, string indent)
+    {
+        if (value is Newtonsoft.Json.Linq.JObject jobj)
+        {
+            sb.AppendLine($"{indent}{key}:");
+            foreach (var prop in jobj.Properties())
+            {
+                FormatPropertyValue(sb, prop.Name, prop.Value, indent + "  ");
+            }
+        }
+        else if (value is Newtonsoft.Json.Linq.JArray jarr)
+        {
+            if (jarr.Count == 0)
+            {
+                sb.AppendLine($"{indent}{key}: []");
+            }
+            else
+            {
+                sb.AppendLine($"{indent}{key}:");
+                foreach (var item in jarr)
+                {
+                    if (item is Newtonsoft.Json.Linq.JObject itemObj)
+                    {
+                        sb.AppendLine($"{indent}  -");
+                        foreach (var prop in itemObj.Properties())
+                        {
+                            FormatPropertyValue(sb, prop.Name, prop.Value, indent + "    ");
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine($"{indent}  - {item}");
+                    }
+                }
+            }
+        }
+        else
+        {
+            sb.AppendLine($"{indent}{key}: {value}");
         }
     }
 }

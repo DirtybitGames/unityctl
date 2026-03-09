@@ -510,6 +510,14 @@ namespace UnityCtl
                         result = HandleSnapshot(request);
                         break;
 
+                    case UnityCtlCommands.PrefabOpen:
+                        result = HandlePrefabOpen(request);
+                        break;
+
+                    case UnityCtlCommands.PrefabClose:
+                        result = HandlePrefabClose(request);
+                        break;
+
                     case UnityCtlCommands.EditorPing:
                         result = new { status = "pong" };
                         break;
@@ -1148,41 +1156,219 @@ namespace UnityCtl
             var interactive = GetBoolArgument(request, "interactive");
             var layout = GetBoolArgument(request, "layout");
             var filter = GetStringArgument(request, "filter");
+            var scenePath = GetStringArgument(request, "scenePath");
+            var prefabPath = GetStringArgument(request, "prefabPath");
 
+            // Validate mutual exclusivity
+            if (!string.IsNullOrEmpty(scenePath) && !string.IsNullOrEmpty(prefabPath))
+                throw new ArgumentException("Cannot use both --scene and --prefab");
+
+            // Drill-down by instance ID
             if (targetId.HasValue)
             {
                 var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
                 if (go == null)
                     throw new ArgumentException($"No GameObject with instance ID {targetId}");
 
+                var stageInfo = GetStageInfo();
                 var scene = go.scene;
                 return new Protocol.SnapshotResult
                 {
-                    SceneName = scene.name,
-                    ScenePath = scene.path,
+                    Stage = stageInfo.Stage,
+                    SceneName = scene.IsValid() ? scene.name : null,
+                    ScenePath = scene.IsValid() ? scene.path : null,
+                    PrefabAssetPath = stageInfo.PrefabAssetPath,
+                    HasUnsavedChanges = stageInfo.HasUnsavedChanges,
+                    OpenedFromInstanceId = stageInfo.OpenedFromInstanceId,
                     IsPlaying = EditorApplication.isPlaying,
                     RootObjectCount = 1,
                     Objects = new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
                 };
             }
 
-            var activeScene = SceneManager.GetActiveScene();
-            var roots = activeScene.GetRootGameObjects();
+            // Snapshot a prefab asset
+            if (!string.IsNullOrEmpty(prefabPath))
+            {
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                if (prefab == null)
+                    throw new ArgumentException($"Prefab not found: {prefabPath}");
 
-            var filteredRoots = string.IsNullOrEmpty(filter)
-                ? roots
-                : roots.Where(go => MatchesFilter(go, filter)).ToArray();
+                return new Protocol.SnapshotResult
+                {
+                    Stage = null,
+                    PrefabAssetPath = prefabPath,
+                    IsPlaying = EditorApplication.isPlaying,
+                    RootObjectCount = 1,
+                    Objects = new[] { SerializeGameObject(prefab, depth, includeComponents, interactive, layout) }
+                };
+            }
+
+            // Snapshot a specific scene
+            if (!string.IsNullOrEmpty(scenePath))
+            {
+                if (EditorApplication.isPlaying)
+                    throw new InvalidOperationException("Cannot snapshot other scenes during play mode. Use snapshot without --scene for the active scene.");
+
+                var scene = SceneManager.GetSceneByPath(scenePath);
+                if (!scene.isLoaded)
+                    scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+
+                var roots = scene.GetRootGameObjects();
+                var filteredRoots = string.IsNullOrEmpty(filter)
+                    ? roots
+                    : roots.Where(go => MatchesFilter(go, filter)).ToArray();
+
+                return new Protocol.SnapshotResult
+                {
+                    Stage = "scene (editing)",
+                    SceneName = scene.name,
+                    ScenePath = scene.path,
+                    IsPlaying = false,
+                    RootObjectCount = roots.Length,
+                    Objects = filteredRoots
+                        .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
+                        .ToArray()
+                };
+            }
+
+            // Default: snapshot current stage (active scene or prefab stage)
+            var currentStage = GetStageInfo();
+
+            if (currentStage.PrefabAssetPath != null)
+            {
+                // In prefab editing mode — snapshot the prefab contents
+                var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+                var root = prefabStage.prefabContentsRoot;
+
+                return new Protocol.SnapshotResult
+                {
+                    Stage = currentStage.Stage,
+                    PrefabAssetPath = currentStage.PrefabAssetPath,
+                    HasUnsavedChanges = currentStage.HasUnsavedChanges,
+                    OpenedFromInstanceId = currentStage.OpenedFromInstanceId,
+                    IsPlaying = false,
+                    RootObjectCount = 1,
+                    Objects = new[] { SerializeGameObject(root, depth, includeComponents, interactive, layout) }
+                };
+            }
+
+            // Normal scene mode
+            var activeScene = SceneManager.GetActiveScene();
+            var sceneRoots = activeScene.GetRootGameObjects();
+
+            var filtered = string.IsNullOrEmpty(filter)
+                ? sceneRoots
+                : sceneRoots.Where(go => MatchesFilter(go, filter)).ToArray();
 
             return new Protocol.SnapshotResult
             {
+                Stage = currentStage.Stage,
                 SceneName = activeScene.name,
                 ScenePath = activeScene.path,
                 IsPlaying = EditorApplication.isPlaying,
-                RootObjectCount = roots.Length,
-                Objects = filteredRoots
+                RootObjectCount = sceneRoots.Length,
+                Objects = filtered
                     .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
                     .ToArray()
             };
+        }
+
+        private struct StageInfo
+        {
+            public string Stage;
+            public string PrefabAssetPath;
+            public bool? HasUnsavedChanges;
+            public int? OpenedFromInstanceId;
+        }
+
+        private StageInfo GetStageInfo()
+        {
+            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (prefabStage != null)
+            {
+                var isInContext = prefabStage.mode == PrefabStage.Mode.InContext;
+                int? openedFrom = null;
+                if (isInContext)
+                {
+                    var instanceRoot = prefabStage.openedFromInstanceRoot;
+                    if (instanceRoot != null)
+                        openedFrom = instanceRoot.GetInstanceID();
+                }
+
+                return new StageInfo
+                {
+                    Stage = isInContext ? "prefab (in-context)" : "prefab (isolated)",
+                    PrefabAssetPath = prefabStage.assetPath,
+                    HasUnsavedChanges = prefabStage.scene.isDirty,
+                    OpenedFromInstanceId = openedFrom
+                };
+            }
+
+            return new StageInfo
+            {
+                Stage = EditorApplication.isPlaying ? "scene (playing)" : "scene (editing)",
+                PrefabAssetPath = null,
+                HasUnsavedChanges = null,
+                OpenedFromInstanceId = null
+            };
+        }
+
+        private object HandlePrefabOpen(RequestMessage request)
+        {
+            if (EditorApplication.isPlaying)
+                throw new InvalidOperationException("Cannot open prefab stage during play mode");
+
+            var path = GetStringArgument(request, "path");
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentException("Prefab path is required");
+            if (!path.EndsWith(".prefab"))
+                throw new ArgumentException($"Not a prefab file: {path}");
+
+            var asset = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (asset == null)
+                throw new ArgumentException($"Prefab not found: {path}");
+
+            var contextInstanceId = GetIntArgument(request, "context");
+
+            if (contextInstanceId.HasValue)
+            {
+                var instance = EditorUtility.InstanceIDToObject(contextInstanceId.Value) as GameObject;
+                if (instance == null)
+                    throw new ArgumentException($"Context instance not found: {contextInstanceId.Value}");
+                if (!PrefabUtility.IsPartOfPrefabInstance(instance))
+                    throw new ArgumentException($"Object {contextInstanceId.Value} is not a prefab instance");
+
+                PrefabStageUtility.OpenPrefab(path, instance);
+            }
+            else
+            {
+                PrefabStageUtility.OpenPrefab(path);
+            }
+
+            var stage = PrefabStageUtility.GetCurrentPrefabStage();
+            var stageType = (stage != null && stage.mode == PrefabStage.Mode.InContext)
+                ? "prefab (in-context)" : "prefab (isolated)";
+
+            return new Protocol.PrefabOpenResult
+            {
+                PrefabAssetPath = path,
+                Stage = stageType
+            };
+        }
+
+        private object HandlePrefabClose(RequestMessage request)
+        {
+            if (EditorApplication.isPlaying)
+                throw new InvalidOperationException("Cannot close prefab stage during play mode");
+
+            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (prefabStage == null)
+                throw new InvalidOperationException("Not currently in prefab editing mode");
+
+            StageUtility.GoToMainStage();
+
+            var scene = SceneManager.GetActiveScene();
+            return new Protocol.PrefabCloseResult { ReturnedToScene = scene.name };
         }
 
         private static Protocol.SnapshotObject SerializeGameObject(
@@ -1204,6 +1390,20 @@ namespace UnityCtl
                     .ToArray(),
                 ChildCount = t.childCount,
             };
+
+            // Prefab instance annotations
+            if (PrefabUtility.IsPartOfPrefabInstance(go))
+            {
+                obj.PrefabAssetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(go);
+                obj.IsPrefabInstanceRoot = PrefabUtility.IsAnyPrefabInstanceRoot(go);
+                var prefabType = PrefabUtility.GetPrefabAssetType(go);
+                if (prefabType == PrefabAssetType.Regular)
+                    obj.PrefabAssetType = "Regular";
+                else if (prefabType == PrefabAssetType.Variant)
+                    obj.PrefabAssetType = "Variant";
+                else if (prefabType == PrefabAssetType.Model)
+                    obj.PrefabAssetType = "Model";
+            }
 
             if (layout && t is RectTransform rt)
             {
@@ -1261,7 +1461,7 @@ namespace UnityCtl
                     // Skip the script reference itself
                     if (prop.name == "m_Script") continue;
 
-                    var value = GetSerializedPropertyValue(prop);
+                    var value = ReadSerializedProperty(prop);
                     if (value != null)
                         comp.Properties[prop.displayName] = value;
                 }
@@ -1276,28 +1476,80 @@ namespace UnityCtl
             return comp;
         }
 
-        private static object GetSerializedPropertyValue(SerializedProperty prop)
+        private static object ReadSerializedProperty(SerializedProperty prop, int maxDepth = 4)
         {
+            // Leaf types
             switch (prop.propertyType)
             {
                 case SerializedPropertyType.Integer: return prop.intValue;
                 case SerializedPropertyType.Boolean: return prop.boolValue;
                 case SerializedPropertyType.Float: return prop.floatValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 case SerializedPropertyType.String: return prop.stringValue;
-                case SerializedPropertyType.Enum: return prop.enumDisplayNames != null && prop.enumValueIndex >= 0 && prop.enumValueIndex < prop.enumDisplayNames.Length
-                    ? prop.enumDisplayNames[prop.enumValueIndex] : prop.enumValueIndex.ToString();
+                case SerializedPropertyType.Enum:
+                    return prop.enumDisplayNames != null && prop.enumValueIndex >= 0 && prop.enumValueIndex < prop.enumDisplayNames.Length
+                        ? prop.enumDisplayNames[prop.enumValueIndex] : prop.enumValueIndex.ToString();
                 case SerializedPropertyType.Vector2: return FormatVector2(prop.vector2Value);
                 case SerializedPropertyType.Vector3: return FormatVector3(prop.vector3Value);
                 case SerializedPropertyType.Vector4: return FormatVector4(prop.vector4Value);
-                case SerializedPropertyType.Color: var c = prop.colorValue; return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F2}, {1:F2}, {2:F2}, {3:F2})", c.r, c.g, c.b, c.a);
+                case SerializedPropertyType.Color:
+                    var c = prop.colorValue;
+                    return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F2}, {1:F2}, {2:F2}, {3:F2})", c.r, c.g, c.b, c.a);
                 case SerializedPropertyType.ObjectReference:
                     return prop.objectReferenceValue != null ? $"\"{prop.objectReferenceValue.name}\"" : "null";
                 case SerializedPropertyType.Quaternion: return FormatQuaternion(prop.quaternionValue);
-                case SerializedPropertyType.Rect: var r = prop.rectValue; return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1}, {3:F1})", r.x, r.y, r.width, r.height);
+                case SerializedPropertyType.Rect:
+                    var r = prop.rectValue;
+                    return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1}, {3:F1})", r.x, r.y, r.width, r.height);
                 case SerializedPropertyType.Bounds: return prop.boundsValue.ToString();
                 case SerializedPropertyType.LayerMask: return prop.intValue;
-                default: return null;
+                case SerializedPropertyType.Hash128: return prop.hash128Value.ToString();
+                case SerializedPropertyType.AnimationCurve:
+                    var curve = prop.animationCurveValue;
+                    return curve != null ? $"AnimationCurve({curve.length} keys)" : "null";
             }
+
+            // Arrays / Lists
+            if (prop.isArray && prop.propertyType != SerializedPropertyType.String)
+            {
+                var count = prop.arraySize;
+                if (count == 0) return "[]";
+                // Cap to avoid huge output
+                var cap = System.Math.Min(count, 20);
+                var items = new List<object>(cap);
+                for (int i = 0; i < cap; i++)
+                {
+                    var elem = prop.GetArrayElementAtIndex(i);
+                    var val = ReadSerializedProperty(elem, maxDepth - 1);
+                    items.Add(val ?? "?");
+                }
+                if (count > cap) items.Add($"... +{count - cap} more");
+                return items;
+            }
+
+            // Compound types (nested serializable structs/classes, ManagedReference)
+            if (maxDepth > 0 && prop.hasVisibleChildren)
+            {
+                var dict = new Dictionary<string, object>();
+                var child = prop.Copy();
+                var end = prop.Copy();
+                end.Next(false); // move end past this property's subtree
+
+                if (child.Next(true)) // enter children
+                {
+                    do
+                    {
+                        if (SerializedProperty.EqualContents(child, end)) break;
+                        var val = ReadSerializedProperty(child, maxDepth - 1);
+                        if (val != null)
+                            dict[child.displayName] = val;
+                    }
+                    while (child.Next(false)); // siblings only
+                }
+
+                return dict.Count > 0 ? dict : null;
+            }
+
+            return null;
         }
 
         private static bool MatchesFilter(GameObject go, string filter)
