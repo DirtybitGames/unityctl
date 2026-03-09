@@ -60,9 +60,17 @@ unityctl record stop                   # Stop recording, returns file path + dur
 unityctl snapshot                          # Scene hierarchy tree (default depth 2)
 unityctl snapshot --depth 4                # Deeper traversal
 unityctl snapshot --id 14200 --components  # Drill into one object with all properties
+unityctl snapshot --id 14200 --filter "type:Rigidbody"  # Filter drill-down result
 unityctl snapshot --interactive            # UI focus: text content, button states
 unityctl snapshot --layout                 # RectTransform anchors/sizes
 unityctl snapshot --filter "type:Rigidbody"  # Filter by type:T, name:N*, tag:T
+unityctl snapshot --scene Assets/Scenes/Other.unity      # Snapshot another scene (read-only)
+unityctl snapshot --prefab Assets/Prefabs/Player.prefab  # Snapshot a prefab asset
+
+# Prefab Editing
+unityctl prefab open Assets/Prefabs/Player.prefab  # Open prefab in isolation mode
+unityctl prefab open Assets/Prefabs/Player.prefab --context 14200  # In-context editing
+unityctl prefab close                              # Close prefab stage, return to scene
 ```
 
 ## Scene Observation & Manipulation Workflow

@@ -280,26 +280,7 @@ public static class SnapshotCommand
             }
         }
 
-        // Show children summary in drill-down
-        if (obj.ChildCount > 0)
-        {
-            sb.AppendLine($"{prefix}  Children ({obj.ChildCount}):");
-            if (obj.Children != null)
-            {
-                foreach (var child in obj.Children)
-                {
-                    sb.Append($"{prefix}    {child.Name} [i:{child.InstanceId}]");
-                    if (child.Components != null && child.Components.Length > 0)
-                    {
-                        sb.Append(' ');
-                        sb.Append(string.Join(", ", Array.ConvertAll(child.Components, c => c.TypeName)));
-                    }
-                    if (child.IsPrefabInstanceRoot == true && !string.IsNullOrEmpty(child.PrefabAssetPath))
-                        sb.Append($"  prefab:{child.PrefabAssetPath}");
-                    sb.AppendLine();
-                }
-            }
-        }
+        // Children are rendered by FormatObject's recursive loop after this method returns
     }
 
     private static void FormatPropertyValue(StringBuilder sb, string key, object value, string indent)

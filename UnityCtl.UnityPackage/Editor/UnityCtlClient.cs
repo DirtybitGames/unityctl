@@ -1166,6 +1166,9 @@ namespace UnityCtl
             // Snapshot a prefab asset (with optional --id drill-down)
             if (!string.IsNullOrEmpty(prefabPath))
             {
+                if (!prefabPath.EndsWith(".prefab"))
+                    throw new ArgumentException($"Not a prefab asset: {prefabPath} (must end with .prefab)");
+
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
                 if (prefab == null)
                     throw new ArgumentException($"Prefab not found: {prefabPath}");
@@ -1178,13 +1181,17 @@ namespace UnityCtl
                     prefab = go;
                 }
 
+                var prefabRoots = new[] { prefab };
+                if (!string.IsNullOrEmpty(filter))
+                    prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+
                 return new Protocol.SnapshotResult
                 {
                     Stage = null,
                     PrefabAssetPath = prefabPath,
                     IsPlaying = EditorApplication.isPlaying,
                     RootObjectCount = 1,
-                    Objects = new[] { SerializeGameObject(prefab, depth, includeComponents, interactive, layout) }
+                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout)).ToArray()
                 };
             }
 
@@ -1211,6 +1218,10 @@ namespace UnityCtl
                         if (go == null || go.scene != scene)
                             throw new ArgumentException($"No GameObject with instance ID {targetId} in scene {scenePath}");
 
+                        var sceneIdRoots = new[] { go };
+                        if (!string.IsNullOrEmpty(filter))
+                            sceneIdRoots = sceneIdRoots.Where(g => MatchesFilter(g, filter)).ToArray();
+
                         return new Protocol.SnapshotResult
                         {
                             Stage = "scene (editing)",
@@ -1218,7 +1229,7 @@ namespace UnityCtl
                             ScenePath = scene.path,
                             IsPlaying = false,
                             RootObjectCount = 1,
-                            Objects = new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
+                            Objects = sceneIdRoots.Select(g => SerializeGameObject(g, depth, includeComponents, interactive, layout)).ToArray()
                         };
                     }
 
@@ -1253,6 +1264,7 @@ namespace UnityCtl
                 if (go == null)
                     throw new ArgumentException($"No GameObject with instance ID {targetId}");
 
+                var matches = string.IsNullOrEmpty(filter) || MatchesFilter(go, filter);
                 var stageInfo = GetStageInfo();
                 var goScene = go.scene;
                 return new Protocol.SnapshotResult
@@ -1265,7 +1277,9 @@ namespace UnityCtl
                     OpenedFromInstanceId = stageInfo.OpenedFromInstanceId,
                     IsPlaying = EditorApplication.isPlaying,
                     RootObjectCount = 1,
-                    Objects = new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
+                    Objects = matches
+                        ? new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
+                        : Array.Empty<Protocol.SnapshotObject>()
                 };
             }
 
@@ -1618,8 +1632,13 @@ namespace UnityCtl
                         || CheckChildrenForType(go.transform, filterValue);
                 case "name":
                     if (filterValue.EndsWith("*"))
-                        return go.name.StartsWith(filterValue.TrimEnd('*'), StringComparison.OrdinalIgnoreCase);
-                    return string.Equals(go.name, filterValue, StringComparison.OrdinalIgnoreCase);
+                    {
+                        var prefix = filterValue.TrimEnd('*');
+                        return go.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                            || CheckChildrenForName(go.transform, prefix, wildcard: true);
+                    }
+                    return string.Equals(go.name, filterValue, StringComparison.OrdinalIgnoreCase)
+                        || CheckChildrenForName(go.transform, filterValue, wildcard: false);
                 case "tag":
                     return go.CompareTag(filterValue)
                         || CheckChildrenForTag(go.transform, filterValue);
@@ -1649,6 +1668,20 @@ namespace UnityCtl
                 if (child.CompareTag(tag))
                     return true;
                 if (CheckChildrenForTag(child, tag))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool CheckChildrenForName(Transform parent, string name, bool wildcard)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (wildcard ? child.name.StartsWith(name, StringComparison.OrdinalIgnoreCase)
+                             : string.Equals(child.name, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (CheckChildrenForName(child, name, wildcard))
                     return true;
             }
             return false;

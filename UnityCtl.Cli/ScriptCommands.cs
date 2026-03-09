@@ -247,7 +247,7 @@ public static class ScriptCommands
         var body = isBodyMode ? expression : $"return {expression};";
 
         var preamble = "";
-        if (!string.IsNullOrEmpty(instanceIds))
+        if (!string.IsNullOrWhiteSpace(instanceIds))
         {
             var ids = ParseInstanceIds(instanceIds);
             preamble = BuildInstanceIdPreamble(ids);
@@ -259,13 +259,18 @@ public static class ScriptCommands
     internal static int[] ParseInstanceIds(string idArg)
     {
         var parts = idArg.Split(',');
-        var ids = new int[parts.Length];
-        for (int i = 0; i < parts.Length; i++)
+        var ids = new List<int>();
+        foreach (var part in parts)
         {
-            if (!int.TryParse(parts[i].Trim(), out ids[i]))
-                throw new ArgumentException($"Invalid instance ID: '{parts[i].Trim()}' — must be an integer");
+            var trimmed = part.Trim();
+            if (trimmed.Length == 0) continue;
+            if (!int.TryParse(trimmed, out var id))
+                throw new ArgumentException($"Invalid instance ID: '{trimmed}' — must be an integer");
+            ids.Add(id);
         }
-        return ids;
+        if (ids.Count == 0)
+            throw new ArgumentException("No valid instance IDs provided");
+        return ids.ToArray();
     }
 
     internal static string BuildInstanceIdPreamble(int[] ids)
