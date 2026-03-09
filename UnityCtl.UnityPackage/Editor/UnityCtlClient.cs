@@ -1163,35 +1163,20 @@ namespace UnityCtl
             if (!string.IsNullOrEmpty(scenePath) && !string.IsNullOrEmpty(prefabPath))
                 throw new ArgumentException("Cannot use both --scene and --prefab");
 
-            // Drill-down by instance ID
-            if (targetId.HasValue)
-            {
-                var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
-                if (go == null)
-                    throw new ArgumentException($"No GameObject with instance ID {targetId}");
-
-                var stageInfo = GetStageInfo();
-                var scene = go.scene;
-                return new Protocol.SnapshotResult
-                {
-                    Stage = stageInfo.Stage,
-                    SceneName = scene.IsValid() ? scene.name : null,
-                    ScenePath = scene.IsValid() ? scene.path : null,
-                    PrefabAssetPath = stageInfo.PrefabAssetPath,
-                    HasUnsavedChanges = stageInfo.HasUnsavedChanges,
-                    OpenedFromInstanceId = stageInfo.OpenedFromInstanceId,
-                    IsPlaying = EditorApplication.isPlaying,
-                    RootObjectCount = 1,
-                    Objects = new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
-                };
-            }
-
-            // Snapshot a prefab asset
+            // Snapshot a prefab asset (with optional --id drill-down)
             if (!string.IsNullOrEmpty(prefabPath))
             {
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
                 if (prefab == null)
                     throw new ArgumentException($"Prefab not found: {prefabPath}");
+
+                if (targetId.HasValue)
+                {
+                    var go = FindInHierarchy(prefab, targetId.Value);
+                    if (go == null)
+                        throw new ArgumentException($"No GameObject with instance ID {targetId} in prefab {prefabPath}");
+                    prefab = go;
+                }
 
                 return new Protocol.SnapshotResult
                 {
@@ -1217,27 +1202,71 @@ namespace UnityCtl
                     weLoaded = true;
                 }
 
-                var roots = scene.GetRootGameObjects();
-                var filteredRoots = string.IsNullOrEmpty(filter)
-                    ? roots
-                    : roots.Where(go => MatchesFilter(go, filter)).ToArray();
-
-                var snapshotResult = new Protocol.SnapshotResult
+                try
                 {
-                    Stage = "scene (editing)",
-                    SceneName = scene.name,
-                    ScenePath = scene.path,
-                    IsPlaying = false,
-                    RootObjectCount = roots.Length,
-                    Objects = filteredRoots
-                        .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
-                        .ToArray()
+                    // Drill-down by instance ID within this scene
+                    if (targetId.HasValue)
+                    {
+                        var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                        if (go == null || go.scene != scene)
+                            throw new ArgumentException($"No GameObject with instance ID {targetId} in scene {scenePath}");
+
+                        return new Protocol.SnapshotResult
+                        {
+                            Stage = "scene (editing)",
+                            SceneName = scene.name,
+                            ScenePath = scene.path,
+                            IsPlaying = false,
+                            RootObjectCount = 1,
+                            Objects = new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
+                        };
+                    }
+
+                    var roots = scene.GetRootGameObjects();
+                    var filteredRoots = string.IsNullOrEmpty(filter)
+                        ? roots
+                        : roots.Where(go => MatchesFilter(go, filter)).ToArray();
+
+                    return new Protocol.SnapshotResult
+                    {
+                        Stage = "scene (editing)",
+                        SceneName = scene.name,
+                        ScenePath = scene.path,
+                        IsPlaying = false,
+                        RootObjectCount = roots.Length,
+                        Objects = filteredRoots
+                            .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
+                            .ToArray()
+                    };
+                }
+                finally
+                {
+                    if (weLoaded)
+                        EditorSceneManager.CloseScene(scene, true);
+                }
+            }
+
+            // Drill-down by instance ID (current stage)
+            if (targetId.HasValue)
+            {
+                var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                if (go == null)
+                    throw new ArgumentException($"No GameObject with instance ID {targetId}");
+
+                var stageInfo = GetStageInfo();
+                var goScene = go.scene;
+                return new Protocol.SnapshotResult
+                {
+                    Stage = stageInfo.Stage,
+                    SceneName = goScene.IsValid() ? goScene.name : null,
+                    ScenePath = goScene.IsValid() ? goScene.path : null,
+                    PrefabAssetPath = stageInfo.PrefabAssetPath,
+                    HasUnsavedChanges = stageInfo.HasUnsavedChanges,
+                    OpenedFromInstanceId = stageInfo.OpenedFromInstanceId,
+                    IsPlaying = EditorApplication.isPlaying,
+                    RootObjectCount = 1,
+                    Objects = new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
                 };
-
-                if (weLoaded)
-                    EditorSceneManager.CloseScene(scene, true);
-
-                return snapshotResult;
             }
 
             // Default: snapshot current stage (active scene or prefab stage)
@@ -1280,6 +1309,17 @@ namespace UnityCtl
                     .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
                     .ToArray()
             };
+        }
+
+        private static GameObject FindInHierarchy(GameObject root, int instanceId)
+        {
+            if (root.GetInstanceID() == instanceId) return root;
+            foreach (Transform child in root.transform)
+            {
+                var found = FindInHierarchy(child.gameObject, instanceId);
+                if (found != null) return found;
+            }
+            return null;
         }
 
         private struct StageInfo
@@ -1541,13 +1581,13 @@ namespace UnityCtl
                 var dict = new Dictionary<string, object>();
                 var child = prop.Copy();
                 var end = prop.Copy();
-                end.Next(false); // move end past this property's subtree
+                bool endIsValid = end.Next(false); // move end past this property's subtree
 
                 if (child.Next(true)) // enter children
                 {
                     do
                     {
-                        if (SerializedProperty.EqualContents(child, end)) break;
+                        if (endIsValid && SerializedProperty.EqualContents(child, end)) break;
                         var val = ReadSerializedProperty(child, maxDepth - 1);
                         if (val != null)
                             dict[child.displayName] = val;
