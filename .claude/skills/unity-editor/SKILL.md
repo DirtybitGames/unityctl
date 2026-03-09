@@ -55,6 +55,29 @@ unityctl screenshot capture
 unityctl record start                  # Start recording (manual stop)
 unityctl record start --duration 10    # Record 10 seconds, blocks until done
 unityctl record stop                   # Stop recording, returns file path + duration
+
+# Scene Snapshot (structured observation with instance IDs)
+unityctl snapshot                          # Scene hierarchy tree (default depth 2)
+unityctl snapshot --depth 4                # Deeper traversal
+unityctl snapshot --id 14200 --components  # Drill into one object with all properties
+unityctl snapshot --interactive            # UI focus: text content, button states
+unityctl snapshot --layout                 # RectTransform anchors/sizes
+unityctl snapshot --filter "type:Rigidbody"  # Filter by type:T, name:N*, tag:T
+```
+
+## Scene Observation & Manipulation Workflow
+
+Use `snapshot` to observe, `eval --id` to act, then `snapshot` to verify:
+
+```bash
+unityctl snapshot                          # See the scene, get instance IDs [i:N]
+unityctl script eval --id 14200 'target.transform.position = new Vector3(0, 10, 0); return "moved";'
+unityctl snapshot                          # Verify changes
+```
+
+Multiple targets with `--id` (uses `targets[]` array):
+```bash
+unityctl script eval --id 14200,14210 'targets[0].transform.SetParent(targets[1].transform); return "done";'
 ```
 
 ## Script Execution
@@ -64,7 +87,7 @@ Evaluate C# expressions directly (common usings like UnityEngine, UnityEditor, S
 ```bash
 unityctl script eval "Application.version"
 unityctl script eval "GameObject.FindObjectsOfType<Camera>().Length"
-unityctl script eval "var p = GameObject.Find(\"Player\"); return p.transform.position;"
+unityctl script eval --id -1290 "target.transform.position"
 unityctl script eval -u UnityEngine.SceneManagement "SceneManager.GetActiveScene().name"
 ```
 
@@ -110,7 +133,9 @@ unityctl script eval -t 600 -u UnityEditor 'return BuildPipeline.BuildPlayer(opt
 ```bash
 # After editing C# files...
 unityctl asset refresh       # Compile (fix errors if any)
+unityctl snapshot            # Observe scene state
 unityctl play enter
+unityctl snapshot            # Check runtime state with instance IDs
 unityctl logs                # Check runtime logs
 unityctl play exit
 ```

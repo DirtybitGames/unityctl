@@ -34,6 +34,9 @@ public static class UnityCtlCommands
     public const string RecordStop = "record.stop";
     public const string RecordStatus = "record.status";
 
+    // Snapshot
+    public const string Snapshot = "snapshot";
+
     // Editor readiness
     public const string EditorPing = "editor.ping";
 }
