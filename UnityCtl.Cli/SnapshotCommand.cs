@@ -183,13 +183,10 @@ public static class SnapshotCommand
         if (!obj.Active) sb.Append(" [inactive]");
         sb.Append($" [i:{obj.InstanceId}]");
 
-        if (obj.Components != null && obj.Components.Length > 0)
+        if (obj.Components != null && obj.Components.Length > 0 && !components)
         {
-            if (!isDrillDown || !components)
-            {
-                sb.Append(' ');
-                sb.Append(string.Join(", ", Array.ConvertAll(obj.Components, c => c.TypeName)));
-            }
+            sb.Append(' ');
+            sb.Append(string.Join(", ", Array.ConvertAll(obj.Components, c => c.TypeName)));
         }
 
         if (!string.IsNullOrEmpty(obj.Tag)) sb.Append($"  tag:{obj.Tag}");
@@ -199,9 +196,9 @@ public static class SnapshotCommand
         sb.AppendLine();
 
         // Position/layout info
-        if (isDrillDown && components)
+        if (components)
         {
-            // Drill-down with components: show full component detail
+            // Full component detail
             FormatDrillDown(sb, obj, prefix, layout);
         }
         else
