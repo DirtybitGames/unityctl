@@ -37,6 +37,10 @@ public static class UnityCtlCommands
     // Snapshot
     public const string Snapshot = "snapshot";
 
+    // Prefab stage navigation
+    public const string PrefabOpen = "prefab.open";
+    public const string PrefabClose = "prefab.close";
+
     // Editor readiness
     public const string EditorPing = "editor.ping";
 }
