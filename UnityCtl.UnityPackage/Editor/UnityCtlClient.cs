@@ -1203,22 +1203,26 @@ namespace UnityCtl
                 };
             }
 
-            // Snapshot a specific scene
+            // Snapshot a specific scene (read-only: unloads if we loaded it)
             if (!string.IsNullOrEmpty(scenePath))
             {
                 if (EditorApplication.isPlaying)
                     throw new InvalidOperationException("Cannot snapshot other scenes during play mode. Use snapshot without --scene for the active scene.");
 
                 var scene = SceneManager.GetSceneByPath(scenePath);
+                bool weLoaded = false;
                 if (!scene.isLoaded)
+                {
                     scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+                    weLoaded = true;
+                }
 
                 var roots = scene.GetRootGameObjects();
                 var filteredRoots = string.IsNullOrEmpty(filter)
                     ? roots
                     : roots.Where(go => MatchesFilter(go, filter)).ToArray();
 
-                return new Protocol.SnapshotResult
+                var snapshotResult = new Protocol.SnapshotResult
                 {
                     Stage = "scene (editing)",
                     SceneName = scene.name,
@@ -1229,6 +1233,11 @@ namespace UnityCtl
                         .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
                         .ToArray()
                 };
+
+                if (weLoaded)
+                    EditorSceneManager.CloseScene(scene, true);
+
+                return snapshotResult;
             }
 
             // Default: snapshot current stage (active scene or prefab stage)
