@@ -34,6 +34,13 @@ public static class UnityCtlCommands
     public const string RecordStop = "record.stop";
     public const string RecordStatus = "record.status";
 
+    // Snapshot
+    public const string Snapshot = "snapshot";
+
+    // Prefab stage navigation
+    public const string PrefabOpen = "prefab.open";
+    public const string PrefabClose = "prefab.close";
+
     // Editor readiness
     public const string EditorPing = "editor.ping";
 }
