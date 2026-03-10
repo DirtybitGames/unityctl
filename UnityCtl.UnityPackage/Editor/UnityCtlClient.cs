@@ -582,6 +582,15 @@ namespace UnityCtl
                 throw new ArgumentException("Scene path is required");
             }
 
+            if (EditorApplication.isPlaying)
+            {
+                var loadMode = mode == "additive" ? ", LoadSceneMode.Additive" : "";
+                throw new InvalidOperationException(
+                    $"scene load cannot be used during play mode. Use this instead: " +
+                    $"unityctl script eval -u UnityEngine.SceneManagement " +
+                    $"'SceneManager.LoadScene(\"{path}\"{loadMode}); return \"loaded\";'");
+            }
+
             var openMode = mode == "additive" ? OpenSceneMode.Additive : OpenSceneMode.Single;
             EditorSceneManager.OpenScene(path, openMode);
 

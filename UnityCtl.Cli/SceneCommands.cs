@@ -67,8 +67,11 @@ public static class SceneCommands
         var loadCommand = new Command("load", "Load a scene");
         var pathArg = new Argument<string>("path", "Scene path (e.g., Assets/Scenes/Main.unity)");
         var modeOption = new Option<string>("--mode", getDefaultValue: () => "single", "Mode: single or additive");
+        var additiveOption = new Option<bool>("--additive", "Load scene additively (shorthand for --mode additive)");
+        additiveOption.AddAlias("-a");
         loadCommand.AddArgument(pathArg);
         loadCommand.AddOption(modeOption);
+        loadCommand.AddOption(additiveOption);
 
         loadCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -77,6 +80,8 @@ public static class SceneCommands
             var json = ContextHelper.GetJson(context);
             var path = context.ParseResult.GetValueForArgument(pathArg);
             var mode = context.ParseResult.GetValueForOption(modeOption);
+            var additive = context.ParseResult.GetValueForOption(additiveOption);
+            if (additive) mode = "additive";
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
