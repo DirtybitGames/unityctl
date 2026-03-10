@@ -10,16 +10,15 @@ Communication flow: `CLI → Bridge (HTTP) → Unity (WebSocket)`
 
 ## Development
 
+Use `./uc` to run CLI commands during development (no global install needed, avoids conflicts between checkouts):
+
 ```bash
-# Build
-dotnet build
-
-# Install locally
-./dev-install.sh
-
-# Test project
-unity-project/
+./uc bridge start
+./uc script eval "Debug.Log(42)"
+./uc play enter
 ```
+
+Build all projects: `dotnet build`
 
 ## Testing
 
