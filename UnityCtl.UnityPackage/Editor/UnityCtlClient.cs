@@ -506,6 +506,18 @@ namespace UnityCtl
                         result = Editor.RecordingManager.Instance.GetStatus();
                         break;
 
+                    case UnityCtlCommands.Snapshot:
+                        result = HandleSnapshot(request);
+                        break;
+
+                    case UnityCtlCommands.PrefabOpen:
+                        result = HandlePrefabOpen(request);
+                        break;
+
+                    case UnityCtlCommands.PrefabClose:
+                        result = HandlePrefabClose(request);
+                        break;
+
                     case UnityCtlCommands.EditorPing:
                         result = new { status = "pong" };
                         break;
@@ -732,6 +744,34 @@ namespace UnityCtl
             }
 
             return null;
+        }
+
+        private static bool GetBoolArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return false;
+
+            try
+            {
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return false;
+
+                    if (value is bool b) return b;
+
+                    if (value is JToken jtoken && jtoken.Type == JTokenType.Boolean)
+                        return jtoken.Value<bool>();
+
+                    if (bool.TryParse(value.ToString(), out var parsed))
+                        return parsed;
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get bool argument '{key}': {ex.Message}");
+            }
+
+            return false;
         }
 
         private static string[] GetStringArrayArgument(RequestMessage request, string key)
@@ -1106,6 +1146,595 @@ namespace UnityCtl
                 Error = result.Error,
                 Diagnostics = result.Diagnostics
             };
+        }
+
+        private object HandleSnapshot(RequestMessage request)
+        {
+            var depth = GetIntArgument(request, "depth") ?? 2;
+            var targetId = GetIntArgument(request, "id");
+            var includeComponents = GetBoolArgument(request, "components");
+            var interactive = GetBoolArgument(request, "interactive");
+            var layout = GetBoolArgument(request, "layout");
+            var filter = GetStringArgument(request, "filter");
+            var scenePath = GetStringArgument(request, "scenePath");
+            var prefabPath = GetStringArgument(request, "prefabPath");
+
+            // Validate mutual exclusivity
+            if (!string.IsNullOrEmpty(scenePath) && !string.IsNullOrEmpty(prefabPath))
+                throw new ArgumentException("Cannot use both --scene and --prefab");
+
+            // Snapshot a prefab asset (with optional --id drill-down)
+            if (!string.IsNullOrEmpty(prefabPath))
+            {
+                if (!prefabPath.EndsWith(".prefab"))
+                    throw new ArgumentException($"Not a prefab asset: {prefabPath} (must end with .prefab)");
+
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                if (prefab == null)
+                    throw new ArgumentException($"Prefab not found: {prefabPath}");
+
+                if (targetId.HasValue)
+                {
+                    var go = FindInHierarchy(prefab, targetId.Value);
+                    if (go == null)
+                        throw new ArgumentException($"No GameObject with instance ID {targetId} in prefab {prefabPath}");
+                    prefab = go;
+                }
+
+                var prefabRoots = new[] { prefab };
+                if (!string.IsNullOrEmpty(filter))
+                    prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+
+                return new Protocol.SnapshotResult
+                {
+                    Stage = null,
+                    PrefabAssetPath = prefabPath,
+                    IsPlaying = EditorApplication.isPlaying,
+                    RootObjectCount = 1,
+                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout)).ToArray()
+                };
+            }
+
+            // Snapshot a specific scene (read-only: unloads if we loaded it)
+            if (!string.IsNullOrEmpty(scenePath))
+            {
+                if (EditorApplication.isPlaying)
+                    throw new InvalidOperationException("Cannot snapshot other scenes during play mode. Use snapshot without --scene for the active scene.");
+
+                var scene = SceneManager.GetSceneByPath(scenePath);
+                bool weLoaded = false;
+                if (!scene.isLoaded)
+                {
+                    scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+                    weLoaded = true;
+                }
+
+                try
+                {
+                    // Drill-down by instance ID within this scene
+                    if (targetId.HasValue)
+                    {
+                        var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                        if (go == null || go.scene != scene)
+                            throw new ArgumentException($"No GameObject with instance ID {targetId} in scene {scenePath}");
+
+                        var sceneIdRoots = new[] { go };
+                        if (!string.IsNullOrEmpty(filter))
+                            sceneIdRoots = sceneIdRoots.Where(g => MatchesFilter(g, filter)).ToArray();
+
+                        return new Protocol.SnapshotResult
+                        {
+                            Stage = "scene (editing)",
+                            SceneName = scene.name,
+                            ScenePath = scene.path,
+                            IsPlaying = false,
+                            RootObjectCount = 1,
+                            Objects = sceneIdRoots.Select(g => SerializeGameObject(g, depth, includeComponents, interactive, layout)).ToArray()
+                        };
+                    }
+
+                    var roots = scene.GetRootGameObjects();
+                    var filteredRoots = string.IsNullOrEmpty(filter)
+                        ? roots
+                        : roots.Where(go => MatchesFilter(go, filter)).ToArray();
+
+                    return new Protocol.SnapshotResult
+                    {
+                        Stage = "scene (editing)",
+                        SceneName = scene.name,
+                        ScenePath = scene.path,
+                        IsPlaying = false,
+                        RootObjectCount = roots.Length,
+                        Objects = filteredRoots
+                            .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
+                            .ToArray()
+                    };
+                }
+                finally
+                {
+                    if (weLoaded)
+                        EditorSceneManager.CloseScene(scene, true);
+                }
+            }
+
+            // Drill-down by instance ID (current stage)
+            if (targetId.HasValue)
+            {
+                var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                if (go == null)
+                    throw new ArgumentException($"No GameObject with instance ID {targetId}");
+
+                var matches = string.IsNullOrEmpty(filter) || MatchesFilter(go, filter);
+                var stageInfo = GetStageInfo();
+                var goScene = go.scene;
+                return new Protocol.SnapshotResult
+                {
+                    Stage = stageInfo.Stage,
+                    SceneName = goScene.IsValid() ? goScene.name : null,
+                    ScenePath = goScene.IsValid() ? goScene.path : null,
+                    PrefabAssetPath = stageInfo.PrefabAssetPath,
+                    HasUnsavedChanges = stageInfo.HasUnsavedChanges,
+                    OpenedFromInstanceId = stageInfo.OpenedFromInstanceId,
+                    IsPlaying = EditorApplication.isPlaying,
+                    RootObjectCount = 1,
+                    Objects = matches
+                        ? new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
+                        : Array.Empty<Protocol.SnapshotObject>()
+                };
+            }
+
+            // Default: snapshot current stage (active scene or prefab stage)
+            var currentStage = GetStageInfo();
+
+            if (currentStage.PrefabAssetPath != null)
+            {
+                // In prefab editing mode — snapshot the prefab contents
+                var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+                var root = prefabStage.prefabContentsRoot;
+
+                var prefabRoots = new[] { root };
+                if (!string.IsNullOrEmpty(filter))
+                    prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+
+                return new Protocol.SnapshotResult
+                {
+                    Stage = currentStage.Stage,
+                    PrefabAssetPath = currentStage.PrefabAssetPath,
+                    HasUnsavedChanges = currentStage.HasUnsavedChanges,
+                    OpenedFromInstanceId = currentStage.OpenedFromInstanceId,
+                    IsPlaying = false,
+                    RootObjectCount = 1,
+                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout)).ToArray()
+                };
+            }
+
+            // Normal scene mode
+            var activeScene = SceneManager.GetActiveScene();
+            var sceneRoots = activeScene.GetRootGameObjects();
+
+            var filtered = string.IsNullOrEmpty(filter)
+                ? sceneRoots
+                : sceneRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+
+            return new Protocol.SnapshotResult
+            {
+                Stage = currentStage.Stage,
+                SceneName = activeScene.name,
+                ScenePath = activeScene.path,
+                IsPlaying = EditorApplication.isPlaying,
+                RootObjectCount = sceneRoots.Length,
+                Objects = filtered
+                    .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
+                    .ToArray()
+            };
+        }
+
+        private static GameObject FindInHierarchy(GameObject root, int instanceId)
+        {
+            if (root.GetInstanceID() == instanceId) return root;
+            foreach (Transform child in root.transform)
+            {
+                var found = FindInHierarchy(child.gameObject, instanceId);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        private struct StageInfo
+        {
+            public string Stage;
+            public string PrefabAssetPath;
+            public bool? HasUnsavedChanges;
+            public int? OpenedFromInstanceId;
+        }
+
+        private StageInfo GetStageInfo()
+        {
+            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (prefabStage != null)
+            {
+                var isInContext = prefabStage.mode == PrefabStage.Mode.InContext;
+                int? openedFrom = null;
+                if (isInContext)
+                {
+                    var instanceRoot = prefabStage.openedFromInstanceRoot;
+                    if (instanceRoot != null)
+                        openedFrom = instanceRoot.GetInstanceID();
+                }
+
+                return new StageInfo
+                {
+                    Stage = isInContext ? "prefab (in-context)" : "prefab (isolated)",
+                    PrefabAssetPath = prefabStage.assetPath,
+                    HasUnsavedChanges = prefabStage.scene.isDirty,
+                    OpenedFromInstanceId = openedFrom
+                };
+            }
+
+            return new StageInfo
+            {
+                Stage = EditorApplication.isPlaying ? "scene (playing)" : "scene (editing)",
+                PrefabAssetPath = null,
+                HasUnsavedChanges = null,
+                OpenedFromInstanceId = null
+            };
+        }
+
+        private object HandlePrefabOpen(RequestMessage request)
+        {
+            if (EditorApplication.isPlaying)
+                throw new InvalidOperationException("Cannot open prefab stage during play mode");
+
+            var path = GetStringArgument(request, "path");
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentException("Prefab path is required");
+            if (!path.EndsWith(".prefab"))
+                throw new ArgumentException($"Not a prefab file: {path}");
+
+            var asset = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (asset == null)
+                throw new ArgumentException($"Prefab not found: {path}");
+
+            var contextInstanceId = GetIntArgument(request, "context");
+
+            if (contextInstanceId.HasValue)
+            {
+                var instance = EditorUtility.InstanceIDToObject(contextInstanceId.Value) as GameObject;
+                if (instance == null)
+                    throw new ArgumentException($"Context instance not found: {contextInstanceId.Value}");
+                if (!PrefabUtility.IsPartOfPrefabInstance(instance))
+                    throw new ArgumentException($"Object {contextInstanceId.Value} is not a prefab instance");
+
+                PrefabStageUtility.OpenPrefab(path, instance);
+            }
+            else
+            {
+                PrefabStageUtility.OpenPrefab(path);
+            }
+
+            var stage = PrefabStageUtility.GetCurrentPrefabStage();
+            var stageType = (stage != null && stage.mode == PrefabStage.Mode.InContext)
+                ? "prefab (in-context)" : "prefab (isolated)";
+
+            return new Protocol.PrefabOpenResult
+            {
+                PrefabAssetPath = path,
+                Stage = stageType
+            };
+        }
+
+        private object HandlePrefabClose(RequestMessage request)
+        {
+            if (EditorApplication.isPlaying)
+                throw new InvalidOperationException("Cannot close prefab stage during play mode");
+
+            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (prefabStage == null)
+                throw new InvalidOperationException("Not currently in prefab editing mode");
+
+            StageUtility.GoToMainStage();
+
+            var scene = SceneManager.GetActiveScene();
+            return new Protocol.PrefabCloseResult { ReturnedToScene = scene.name };
+        }
+
+        private static Protocol.SnapshotObject SerializeGameObject(
+            GameObject go, int depth, bool includeComponents, bool interactive, bool layout)
+        {
+            var t = go.transform;
+            var obj = new Protocol.SnapshotObject
+            {
+                InstanceId = go.GetInstanceID(),
+                Name = go.name,
+                Active = go.activeSelf,
+                Tag = go.tag != "Untagged" ? go.tag : null,
+                Layer = go.layer != 0 ? LayerMask.LayerToName(go.layer) : null,
+                Components = go.GetComponents<Component>()
+                    .Where(c => c != null && !(c is Transform))
+                    .Select(c => includeComponents
+                        ? SerializeComponentFull(c)
+                        : new Protocol.SnapshotComponent { TypeName = c.GetType().Name })
+                    .ToArray(),
+                ChildCount = t.childCount,
+            };
+
+            // Prefab instance annotations
+            if (PrefabUtility.IsPartOfPrefabInstance(go))
+            {
+                obj.PrefabAssetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(go);
+                obj.IsPrefabInstanceRoot = PrefabUtility.IsAnyPrefabInstanceRoot(go);
+                var prefabType = PrefabUtility.GetPrefabAssetType(go);
+                if (prefabType == PrefabAssetType.Regular)
+                    obj.PrefabAssetType = "Regular";
+                else if (prefabType == PrefabAssetType.Variant)
+                    obj.PrefabAssetType = "Variant";
+                else if (prefabType == PrefabAssetType.Model)
+                    obj.PrefabAssetType = "Model";
+            }
+
+            if (layout && t is RectTransform rt)
+            {
+                obj.Rect = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "rect({0:F0}, {1:F0}, {2:F0}, {3:F0})", rt.rect.x, rt.rect.y, rt.rect.width, rt.rect.height);
+                obj.Anchors = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "anchor({0:F1}-{1:F1}, {2:F1}-{3:F1})", rt.anchorMin.x, rt.anchorMax.x, rt.anchorMin.y, rt.anchorMax.y);
+                obj.Pivot = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "({0:F1}, {1:F1})", rt.pivot.x, rt.pivot.y);
+            }
+            else
+            {
+                obj.Position = FormatVector3(t.localPosition);
+                if (t.localScale != Vector3.one)
+                    obj.Scale = FormatVector3(t.localScale);
+                if (t.localRotation != Quaternion.identity)
+                    obj.Rotation = FormatQuaternion(t.localRotation);
+            }
+
+            if (interactive)
+            {
+                obj.Text = GetUIText(go);
+                obj.Interactable = GetInteractable(go);
+            }
+
+            if (depth > 0 && t.childCount > 0)
+            {
+                obj.Children = new Protocol.SnapshotObject[t.childCount];
+                for (int i = 0; i < t.childCount; i++)
+                    obj.Children[i] = SerializeGameObject(
+                        t.GetChild(i).gameObject, depth - 1, includeComponents, interactive, layout);
+            }
+
+            return obj;
+        }
+
+        private static Protocol.SnapshotComponent SerializeComponentFull(Component c)
+        {
+            var comp = new Protocol.SnapshotComponent
+            {
+                TypeName = c.GetType().Name,
+                Properties = new Dictionary<string, object>()
+            };
+
+            try
+            {
+                var so = new SerializedObject(c);
+                var prop = so.GetIterator();
+                bool enterChildren = true;
+
+                while (prop.NextVisible(enterChildren))
+                {
+                    enterChildren = false;
+
+                    // Skip the script reference itself
+                    if (prop.name == "m_Script") continue;
+
+                    var value = ReadSerializedProperty(prop);
+                    if (value != null)
+                        comp.Properties[prop.displayName] = value;
+                }
+
+                so.Dispose();
+            }
+            catch (Exception)
+            {
+                // Some components may not be serializable
+            }
+
+            return comp;
+        }
+
+        private static object ReadSerializedProperty(SerializedProperty prop, int maxDepth = 4)
+        {
+            // Leaf types
+            switch (prop.propertyType)
+            {
+                case SerializedPropertyType.Integer: return prop.intValue;
+                case SerializedPropertyType.Boolean: return prop.boolValue;
+                case SerializedPropertyType.Float: return prop.floatValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                case SerializedPropertyType.String: return prop.stringValue;
+                case SerializedPropertyType.Enum:
+                    return prop.enumDisplayNames != null && prop.enumValueIndex >= 0 && prop.enumValueIndex < prop.enumDisplayNames.Length
+                        ? prop.enumDisplayNames[prop.enumValueIndex] : prop.enumValueIndex.ToString();
+                case SerializedPropertyType.Vector2: return FormatVector2(prop.vector2Value);
+                case SerializedPropertyType.Vector3: return FormatVector3(prop.vector3Value);
+                case SerializedPropertyType.Vector4: return FormatVector4(prop.vector4Value);
+                case SerializedPropertyType.Color:
+                    var c = prop.colorValue;
+                    return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F2}, {1:F2}, {2:F2}, {3:F2})", c.r, c.g, c.b, c.a);
+                case SerializedPropertyType.ObjectReference:
+                    return prop.objectReferenceValue != null ? $"\"{prop.objectReferenceValue.name}\"" : "null";
+                case SerializedPropertyType.Quaternion: return FormatQuaternion(prop.quaternionValue);
+                case SerializedPropertyType.Rect:
+                    var r = prop.rectValue;
+                    return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1}, {3:F1})", r.x, r.y, r.width, r.height);
+                case SerializedPropertyType.Bounds: return prop.boundsValue.ToString();
+                case SerializedPropertyType.LayerMask: return prop.intValue;
+                case SerializedPropertyType.Hash128: return prop.hash128Value.ToString();
+                case SerializedPropertyType.AnimationCurve:
+                    var curve = prop.animationCurveValue;
+                    return curve != null ? $"AnimationCurve({curve.length} keys)" : "null";
+            }
+
+            // Arrays / Lists
+            if (prop.isArray && prop.propertyType != SerializedPropertyType.String)
+            {
+                var count = prop.arraySize;
+                if (count == 0) return "[]";
+                // Cap to avoid huge output
+                var cap = System.Math.Min(count, 20);
+                var items = new List<object>(cap);
+                for (int i = 0; i < cap; i++)
+                {
+                    var elem = prop.GetArrayElementAtIndex(i);
+                    var val = ReadSerializedProperty(elem, maxDepth - 1);
+                    items.Add(val ?? "?");
+                }
+                if (count > cap) items.Add($"... +{count - cap} more");
+                return items;
+            }
+
+            // Compound types (nested serializable structs/classes, ManagedReference)
+            if (maxDepth > 0 && prop.hasVisibleChildren)
+            {
+                var dict = new Dictionary<string, object>();
+                var child = prop.Copy();
+                var end = prop.Copy();
+                bool endIsValid = end.Next(false); // move end past this property's subtree
+
+                if (child.Next(true)) // enter children
+                {
+                    do
+                    {
+                        if (endIsValid && SerializedProperty.EqualContents(child, end)) break;
+                        var val = ReadSerializedProperty(child, maxDepth - 1);
+                        if (val != null)
+                            dict[child.displayName] = val;
+                    }
+                    while (child.Next(false)); // siblings only
+                }
+
+                return dict.Count > 0 ? dict : null;
+            }
+
+            return null;
+        }
+
+        private static bool MatchesFilter(GameObject go, string filter)
+        {
+            if (string.IsNullOrEmpty(filter)) return true;
+
+            var parts = filter.Split(':');
+            if (parts.Length != 2) return true;
+
+            var filterType = parts[0].Trim().ToLowerInvariant();
+            var filterValue = parts[1].Trim();
+
+            switch (filterType)
+            {
+                case "type":
+                    return go.GetComponents<Component>().Any(c => c != null && c.GetType().Name == filterValue)
+                        || CheckChildrenForType(go.transform, filterValue);
+                case "name":
+                    if (filterValue.EndsWith("*"))
+                    {
+                        var prefix = filterValue.TrimEnd('*');
+                        return go.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                            || CheckChildrenForName(go.transform, prefix, wildcard: true);
+                    }
+                    return string.Equals(go.name, filterValue, StringComparison.OrdinalIgnoreCase)
+                        || CheckChildrenForName(go.transform, filterValue, wildcard: false);
+                case "tag":
+                    return go.CompareTag(filterValue)
+                        || CheckChildrenForTag(go.transform, filterValue);
+                default:
+                    return true;
+            }
+        }
+
+        private static bool CheckChildrenForType(Transform parent, string typeName)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (child.GetComponents<Component>().Any(c => c != null && c.GetType().Name == typeName))
+                    return true;
+                if (CheckChildrenForType(child, typeName))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool CheckChildrenForTag(Transform parent, string tag)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (child.CompareTag(tag))
+                    return true;
+                if (CheckChildrenForTag(child, tag))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool CheckChildrenForName(Transform parent, string name, bool wildcard)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (wildcard ? child.name.StartsWith(name, StringComparison.OrdinalIgnoreCase)
+                             : string.Equals(child.name, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (CheckChildrenForName(child, name, wildcard))
+                    return true;
+            }
+            return false;
+        }
+
+        private static string GetUIText(GameObject go)
+        {
+            // Try UnityEngine.UI.Text
+            var textComponent = go.GetComponent("Text");
+            if (textComponent != null)
+            {
+                var textProp = textComponent.GetType().GetProperty("text");
+                if (textProp != null)
+                    return textProp.GetValue(textComponent) as string;
+            }
+
+            // Try TextMeshPro
+            var tmpComponent = go.GetComponent("TextMeshProUGUI") ?? go.GetComponent("TextMeshPro");
+            if (tmpComponent != null)
+            {
+                var textProp = tmpComponent.GetType().GetProperty("text");
+                if (textProp != null)
+                    return textProp.GetValue(tmpComponent) as string;
+            }
+
+            return null;
+        }
+
+        private static bool? GetInteractable(GameObject go)
+        {
+            // Check for Selectable (Button, Toggle, Slider, etc.)
+            var selectable = go.GetComponent("Selectable");
+            if (selectable != null)
+            {
+                var interactableProp = selectable.GetType().GetProperty("interactable");
+                if (interactableProp != null)
+                    return (bool)interactableProp.GetValue(selectable);
+            }
+
+            return null;
+        }
+
+        private static string FormatVector2(Vector2 v) => string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1})", v.x, v.y);
+        private static string FormatVector3(Vector3 v) => string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1})", v.x, v.y, v.z);
+        private static string FormatVector4(Vector4 v) => string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1}, {3:F1})", v.x, v.y, v.z, v.w);
+        private static string FormatQuaternion(Quaternion q)
+        {
+            var euler = q.eulerAngles;
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1})", euler.x, euler.y, euler.z);
         }
 
         private object HandleRecordStart(RequestMessage request)

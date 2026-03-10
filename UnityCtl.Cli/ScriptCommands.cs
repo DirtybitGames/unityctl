@@ -162,6 +162,11 @@ public static class ScriptCommands
             getDefaultValue: () => Array.Empty<string>()
         );
 
+        var idOption = new Option<string?>(
+            "--id",
+            "Target object by instance ID (from snapshot). Injects 'target'. Comma-separated IDs inject 'targets[]' array."
+        );
+
         var evalScriptArgsArgument = new Argument<string[]>(
             name: "script-args",
             description: "Arguments to pass to Main (after --)",
@@ -171,6 +176,7 @@ public static class ScriptCommands
         evalCommand.AddArgument(expressionArgument);
         evalCommand.AddOption(usingOption);
         evalCommand.AddOption(timeoutOption);
+        evalCommand.AddOption(idOption);
         evalCommand.AddArgument(evalScriptArgsArgument);
 
         evalCommand.SetHandler(async (InvocationContext context) =>
@@ -190,8 +196,10 @@ public static class ScriptCommands
                 return;
             }
 
+            var instanceIds = context.ParseResult.GetValueForOption(idOption);
+
             var hasArgs = scriptArgs.Length > 0;
-            var csharpCode = BuildEvalCode(expression, extraUsings, hasArgs);
+            var csharpCode = BuildEvalCode(expression, extraUsings, hasArgs, instanceIds);
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
@@ -224,7 +232,7 @@ public static class ScriptCommands
         return scriptCommand;
     }
 
-    internal static string BuildEvalCode(string expression, string[] extraUsings, bool hasArgs)
+    internal static string BuildEvalCode(string expression, string[] extraUsings, bool hasArgs, string? instanceIds = null)
     {
         var usings = new List<string>(DefaultUsings);
         foreach (var u in extraUsings)
@@ -238,7 +246,55 @@ public static class ScriptCommands
         var isBodyMode = expression.TrimEnd().EndsWith(';');
         var body = isBodyMode ? expression : $"return {expression};";
 
-        return usingBlock + "\n\npublic class Script\n{\n    " + signature + "\n    {\n        " + body + "\n    }\n}\n";
+        var preamble = "";
+        if (!string.IsNullOrWhiteSpace(instanceIds))
+        {
+            var ids = ParseInstanceIds(instanceIds);
+            preamble = BuildInstanceIdPreamble(ids);
+        }
+
+        return usingBlock + "\n\npublic class Script\n{\n    " + signature + "\n    {\n        " + preamble + body + "\n    }\n}\n";
+    }
+
+    internal static int[] ParseInstanceIds(string idArg)
+    {
+        var parts = idArg.Split(',');
+        var ids = new List<int>();
+        foreach (var part in parts)
+        {
+            var trimmed = part.Trim();
+            if (trimmed.Length == 0) continue;
+            if (!int.TryParse(trimmed, out var id))
+                throw new ArgumentException($"Invalid instance ID: '{trimmed}' — must be an integer");
+            ids.Add(id);
+        }
+        if (ids.Count == 0)
+            throw new ArgumentException("No valid instance IDs provided");
+        return ids.ToArray();
+    }
+
+    internal static string BuildInstanceIdPreamble(int[] ids)
+    {
+        const string pad = "\n        ";
+        var sb = new System.Text.StringBuilder();
+
+        if (ids.Length == 1)
+        {
+            sb.Append($"var target = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[0]});");
+            sb.Append($"{pad}if (target == null) throw new System.Exception(\"Object {ids[0]} not found (destroyed?)\");");
+        }
+        else
+        {
+            sb.Append($"var targets = new GameObject[{ids.Length}];");
+            for (int i = 0; i < ids.Length; i++)
+            {
+                sb.Append($"{pad}targets[{i}] = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[i]});");
+                sb.Append($"{pad}if (targets[{i}] == null) throw new System.Exception(\"Object {ids[i]} not found (destroyed?)\");");
+            }
+        }
+
+        sb.Append(pad);
+        return sb.ToString();
     }
 
     private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json, bool isEval)

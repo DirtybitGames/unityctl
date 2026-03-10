@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Newtonsoft.Json;
 
 namespace UnityCtl.Protocol;
@@ -328,6 +329,120 @@ public class DialogInfo
 
     [JsonProperty("progress")]
     public float? Progress { get; init; }
+}
+
+public class SnapshotResult
+{
+    [JsonProperty("stage")]
+    public string? Stage { get; init; }  // "scene (editing)", "scene (playing)", "prefab (isolated)", "prefab (in-context)"
+
+    [JsonProperty("sceneName", NullValueHandling = NullValueHandling.Ignore)]
+    public string? SceneName { get; init; }
+
+    [JsonProperty("scenePath", NullValueHandling = NullValueHandling.Ignore)]
+    public string? ScenePath { get; init; }
+
+    [JsonProperty("prefabAssetPath", NullValueHandling = NullValueHandling.Ignore)]
+    public string? PrefabAssetPath { get; init; }
+
+    [JsonProperty("hasUnsavedChanges", NullValueHandling = NullValueHandling.Ignore)]
+    public bool? HasUnsavedChanges { get; init; }
+
+    [JsonProperty("openedFromInstanceId", NullValueHandling = NullValueHandling.Ignore)]
+    public int? OpenedFromInstanceId { get; init; }
+
+    [JsonProperty("isPlaying")]
+    public required bool IsPlaying { get; init; }
+
+    [JsonProperty("rootObjectCount")]
+    public required int RootObjectCount { get; init; }
+
+    [JsonProperty("objects")]
+    public required SnapshotObject[] Objects { get; init; }
+}
+
+public class SnapshotObject
+{
+    [JsonProperty("instanceId")]
+    public int InstanceId { get; set; }
+
+    [JsonProperty("name")]
+    public string Name { get; set; } = "";
+
+    [JsonProperty("active")]
+    public bool Active { get; set; } = true;
+
+    [JsonProperty("tag")]
+    public string? Tag { get; set; }
+
+    [JsonProperty("layer")]
+    public string? Layer { get; set; }
+
+    [JsonProperty("components")]
+    public SnapshotComponent[]? Components { get; set; }
+
+    [JsonProperty("position")]
+    public string? Position { get; set; }
+
+    [JsonProperty("scale")]
+    public string? Scale { get; set; }
+
+    [JsonProperty("rotation")]
+    public string? Rotation { get; set; }
+
+    [JsonProperty("rect")]
+    public string? Rect { get; set; }
+
+    [JsonProperty("anchors")]
+    public string? Anchors { get; set; }
+
+    [JsonProperty("pivot")]
+    public string? Pivot { get; set; }
+
+    [JsonProperty("text")]
+    public string? Text { get; set; }
+
+    [JsonProperty("interactable")]
+    public bool? Interactable { get; set; }
+
+    [JsonProperty("prefabAssetPath", NullValueHandling = NullValueHandling.Ignore)]
+    public string? PrefabAssetPath { get; set; }
+
+    [JsonProperty("prefabAssetType", NullValueHandling = NullValueHandling.Ignore)]
+    public string? PrefabAssetType { get; set; }  // "Regular", "Variant", "Model"
+
+    [JsonProperty("isPrefabInstanceRoot", NullValueHandling = NullValueHandling.Ignore)]
+    public bool? IsPrefabInstanceRoot { get; set; }
+
+    [JsonProperty("childCount")]
+    public int ChildCount { get; set; }
+
+    [JsonProperty("children")]
+    public SnapshotObject[]? Children { get; set; }
+}
+
+public class PrefabOpenResult
+{
+    [JsonProperty("prefabAssetPath")]
+    public required string PrefabAssetPath { get; init; }
+
+    [JsonProperty("stage")]
+    public required string Stage { get; init; }
+}
+
+public class PrefabCloseResult
+{
+    [JsonProperty("returnedToScene")]
+    public required string ReturnedToScene { get; init; }
+}
+
+public class SnapshotComponent
+{
+    [JsonProperty("typeName")]
+    public string TypeName { get; set; } = "";
+
+    [JsonProperty("properties")]
+    public Dictionary<string, object>? Properties { get; set; }
 }
 
 /// <summary>

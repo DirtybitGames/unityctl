@@ -1,3 +1,4 @@
+using System;
 using UnityCtl.Cli;
 using Xunit;
 
@@ -94,5 +95,48 @@ public class EvalCodeGeneratorTests
 
         Assert.Contains("Debug.Log(\"test\");", code);
         Assert.DoesNotContain("return Debug.Log", code);
+    }
+
+    [Fact]
+    public void InstanceId_SingleId_InjectsTarget()
+    {
+        var code = ScriptCommands.BuildEvalCode("target.name", [], hasArgs: false, instanceIds: "14200");
+
+        Assert.Contains("InstanceIDToObject(14200)", code);
+        Assert.Contains("var target =", code);
+    }
+
+    [Fact]
+    public void InstanceId_MultipleIds_InjectsTargetsArray()
+    {
+        var code = ScriptCommands.BuildEvalCode("targets[0].name", [], hasArgs: false, instanceIds: "14200,14210");
+
+        Assert.Contains("var targets = new GameObject[2]", code);
+        Assert.Contains("InstanceIDToObject(14200)", code);
+        Assert.Contains("InstanceIDToObject(14210)", code);
+    }
+
+    [Fact]
+    public void InstanceId_NegativeId_Accepted()
+    {
+        var code = ScriptCommands.BuildEvalCode("target.name", [], hasArgs: false, instanceIds: "-1290");
+
+        Assert.Contains("InstanceIDToObject(-1290)", code);
+    }
+
+    [Fact]
+    public void ParseInstanceIds_InvalidInput_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => ScriptCommands.ParseInstanceIds("abc"));
+        Assert.Throws<ArgumentException>(() => ScriptCommands.ParseInstanceIds("123,abc"));
+        Assert.Throws<ArgumentException>(() => ScriptCommands.ParseInstanceIds("1; malicious code"));
+    }
+
+    [Fact]
+    public void ParseInstanceIds_ValidInput_ReturnsInts()
+    {
+        var ids = ScriptCommands.ParseInstanceIds("14200,-1290,0");
+
+        Assert.Equal([14200, -1290, 0], ids);
     }
 }

@@ -252,4 +252,142 @@ public class DtoSerializationTests
         Assert.Equal("42", deserialized.Result);
         Assert.Single(deserialized.Diagnostics!);
     }
+
+    [Fact]
+    public void SnapshotResult_WithStageContext_Roundtrips()
+    {
+        var result = new SnapshotResult
+        {
+            Stage = "scene (editing)",
+            SceneName = "MainScene",
+            ScenePath = "Assets/Scenes/MainScene.unity",
+            IsPlaying = false,
+            RootObjectCount = 1,
+            Objects = new[] { new SnapshotObject { InstanceId = 100, Name = "Camera" } }
+        };
+
+        var json = JsonHelper.Serialize(result);
+        var deserialized = JsonHelper.Deserialize<SnapshotResult>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal("scene (editing)", deserialized.Stage);
+        Assert.Equal("MainScene", deserialized.SceneName);
+        Assert.Null(deserialized.PrefabAssetPath);
+    }
+
+    [Fact]
+    public void SnapshotResult_PrefabMode_OmitsSceneFields()
+    {
+        var result = new SnapshotResult
+        {
+            Stage = "prefab (isolated)",
+            PrefabAssetPath = "Assets/Prefabs/Player.prefab",
+            HasUnsavedChanges = true,
+            IsPlaying = false,
+            RootObjectCount = 1,
+            Objects = new[] { new SnapshotObject { InstanceId = 99001, Name = "Player" } }
+        };
+
+        var json = JsonHelper.Serialize(result);
+        var jObj = JObject.Parse(json);
+
+        Assert.Equal("prefab (isolated)", jObj["stage"]?.ToString());
+        Assert.Equal("Assets/Prefabs/Player.prefab", jObj["prefabAssetPath"]?.ToString());
+        Assert.True(jObj["hasUnsavedChanges"]?.Value<bool>());
+        // sceneName/scenePath should be absent (NullValueHandling.Ignore)
+        Assert.Null(jObj["sceneName"]);
+        Assert.Null(jObj["scenePath"]);
+    }
+
+    [Fact]
+    public void SnapshotResult_PrefabAssetInspection_NoStage()
+    {
+        var result = new SnapshotResult
+        {
+            Stage = null,
+            PrefabAssetPath = "Assets/Prefabs/TestCube.prefab",
+            IsPlaying = false,
+            RootObjectCount = 1,
+            Objects = new[] { new SnapshotObject { InstanceId = 50000, Name = "TestCube" } }
+        };
+
+        var json = JsonHelper.Serialize(result);
+        var deserialized = JsonHelper.Deserialize<SnapshotResult>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Null(deserialized.Stage);
+        Assert.Equal("Assets/Prefabs/TestCube.prefab", deserialized.PrefabAssetPath);
+    }
+
+    [Fact]
+    public void SnapshotObject_PrefabAnnotations_Roundtrip()
+    {
+        var obj = new SnapshotObject
+        {
+            InstanceId = 14200,
+            Name = "Player",
+            PrefabAssetPath = "Assets/Prefabs/Player.prefab",
+            PrefabAssetType = "Regular",
+            IsPrefabInstanceRoot = true,
+            ChildCount = 2
+        };
+
+        var json = JsonHelper.Serialize(obj);
+        var deserialized = JsonHelper.Deserialize<SnapshotObject>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal("Assets/Prefabs/Player.prefab", deserialized.PrefabAssetPath);
+        Assert.Equal("Regular", deserialized.PrefabAssetType);
+        Assert.True(deserialized.IsPrefabInstanceRoot);
+    }
+
+    [Fact]
+    public void SnapshotObject_NoPrefab_OmitsPrefabFields()
+    {
+        var obj = new SnapshotObject
+        {
+            InstanceId = 14300,
+            Name = "Ground"
+        };
+
+        var json = JsonHelper.Serialize(obj);
+        var jObj = JObject.Parse(json);
+
+        // Prefab fields should be omitted (NullValueHandling.Ignore)
+        Assert.Null(jObj["prefabAssetPath"]);
+        Assert.Null(jObj["prefabAssetType"]);
+        Assert.Null(jObj["isPrefabInstanceRoot"]);
+    }
+
+    [Fact]
+    public void PrefabOpenResult_Roundtrips()
+    {
+        var result = new PrefabOpenResult
+        {
+            PrefabAssetPath = "Assets/Prefabs/Player.prefab",
+            Stage = "prefab (isolated)"
+        };
+
+        var json = JsonHelper.Serialize(result);
+        var deserialized = JsonHelper.Deserialize<PrefabOpenResult>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal("Assets/Prefabs/Player.prefab", deserialized.PrefabAssetPath);
+        Assert.Equal("prefab (isolated)", deserialized.Stage);
+    }
+
+    [Fact]
+    public void PrefabCloseResult_Roundtrips()
+    {
+        var result = new PrefabCloseResult
+        {
+            ReturnedToScene = "MainScene"
+        };
+
+        var json = JsonHelper.Serialize(result);
+        var deserialized = JsonHelper.Deserialize<PrefabCloseResult>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal("MainScene", deserialized.ReturnedToScene);
+    }
 }
