@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
@@ -133,7 +134,7 @@ internal static class DialogDetector
                 {
                     // Read progress position and range
                     var pos = (int)Win32.SendMessage(childHwnd, Win32.PBM_GETPOS, IntPtr.Zero, IntPtr.Zero);
-                    var rangeHigh = (int)Win32.SendMessage(childHwnd, Win32.PBM_GETRANGE, IntPtr.Zero, IntPtr.Zero);
+                    var rangeHigh = (int)Win32.SendMessage(childHwnd, Win32.PBM_GETRANGE, (IntPtr)1, IntPtr.Zero);
                     if (rangeHigh <= 0)
                         rangeHigh = 100; // default range
                     progress = Math.Clamp((float)pos / rangeHigh, 0f, 1f);
@@ -281,56 +282,24 @@ end tell";
             if (!line.StartsWith("DIALOG:"))
                 continue;
 
-            var payload = line.Substring(7);
-            // Format: title|buttons|progress|description
-            var parts = payload.Split('|');
-            if (parts.Length < 1) continue;
+            var parsed = ParseDialogLine(line.Substring(7), normalizeProgress: true);
+            if (parsed == null) continue;
 
-            var title = parts[0];
-
-            var buttons = new List<DetectedButton>();
-            if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+            // macOS uses button/window name as native handle for clicking
+            var buttons = parsed.Value.ButtonNames.Select(b => new DetectedButton
             {
-                foreach (var name in parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var trimmed = name.Trim();
-                    if (trimmed.Length > 0)
-                    {
-                        buttons.Add(new DetectedButton
-                        {
-                            Text = trimmed,
-                            NativeHandle = trimmed // macOS uses button name for clicking
-                        });
-                    }
-                }
-            }
-
-            float? progress = null;
-            if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
-            {
-                if (float.TryParse(parts[2], System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out var progVal))
-                {
-                    // AppleScript progress indicator value is typically 0-100
-                    if (progVal > 1f) progVal /= 100f;
-                    progress = Math.Clamp(progVal, 0f, 1f);
-                }
-            }
-
-            string? description = null;
-            if (parts.Length > 3 && !string.IsNullOrWhiteSpace(parts[3]))
-            {
-                description = parts[3].Trim();
-            }
+                Text = b,
+                NativeHandle = b
+            }).ToList();
 
             dialogs.Add(new DetectedDialog
             {
-                Title = title,
+                Title = parsed.Value.Title,
                 Buttons = buttons,
-                NativeHandle = title, // window name for clicking
+                NativeHandle = parsed.Value.Title,
                 ProcessContext = processName,
-                Description = description,
-                Progress = progress
+                Description = parsed.Value.Description,
+                Progress = parsed.Value.Progress
             });
         }
 
@@ -493,53 +462,22 @@ for app in pyatspi.Registry.getDesktop(0):
         {
             if (!line.StartsWith("DIALOG:")) continue;
 
-            var payload = line.Substring(7);
-            // Format: title|buttons|progress|description
-            var parts = payload.Split('|');
-            if (parts.Length < 1) continue;
+            var parsed = ParseDialogLine(line.Substring(7));
+            if (parsed == null) continue;
 
-            var title = parts[0];
-
-            var buttons = new List<DetectedButton>();
-            if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+            var buttons = parsed.Value.ButtonNames.Select(b => new DetectedButton
             {
-                foreach (var name in parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var trimmed = name.Trim();
-                    if (trimmed.Length > 0)
-                    {
-                        buttons.Add(new DetectedButton
-                        {
-                            Text = trimmed,
-                            NativeHandle = trimmed
-                        });
-                    }
-                }
-            }
-
-            float? progress = null;
-            if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
-            {
-                if (float.TryParse(parts[2], System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out var progVal))
-                {
-                    progress = Math.Clamp(progVal, 0f, 1f);
-                }
-            }
-
-            string? description = null;
-            if (parts.Length > 3 && !string.IsNullOrWhiteSpace(parts[3]))
-            {
-                description = parts[3].Trim();
-            }
+                Text = b,
+                NativeHandle = b
+            }).ToList();
 
             dialogs.Add(new DetectedDialog
             {
-                Title = title,
+                Title = parsed.Value.Title,
                 Buttons = buttons,
-                NativeHandle = title,
-                Description = description,
-                Progress = progress
+                NativeHandle = parsed.Value.Title,
+                Description = parsed.Value.Description,
+                Progress = parsed.Value.Progress
             });
         }
 
@@ -730,6 +668,54 @@ print('NOTFOUND')
         }
     }
 
+    // ─── Shared parsing ────────────────────────────────────────────────
+
+    private readonly record struct ParsedDialogLine(
+        string Title, List<string> ButtonNames, float? Progress, string? Description);
+
+    /// <summary>
+    /// Parse a "title|buttons|progress|description" line. Split is limited to 4 parts
+    /// so that pipe characters in the description field are preserved.
+    /// When normalizeProgress is true, values > 1 are divided by 100 (AppleScript returns 0-100).
+    /// </summary>
+    private static ParsedDialogLine? ParseDialogLine(string payload, bool normalizeProgress = false)
+    {
+        var parts = payload.Split('|', 4);
+        if (parts.Length < 1) return null;
+
+        var title = parts[0];
+
+        var buttonNames = new List<string>();
+        if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+        {
+            foreach (var name in parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = name.Trim();
+                if (trimmed.Length > 0)
+                    buttonNames.Add(trimmed);
+            }
+        }
+
+        float? progress = null;
+        if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
+        {
+            if (float.TryParse(parts[2], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var progVal))
+            {
+                if (normalizeProgress && progVal > 1f) progVal /= 100f;
+                progress = Math.Clamp(progVal, 0f, 1f);
+            }
+        }
+
+        string? description = null;
+        if (parts.Length > 3 && !string.IsNullOrWhiteSpace(parts[3]))
+        {
+            description = parts[3].Trim();
+        }
+
+        return new ParsedDialogLine(title, buttonNames, progress, description);
+    }
+
     // ─── Win32 P/Invoke ─────────────────────────────────────────────────
 
     [SupportedOSPlatform("windows")]
@@ -762,10 +748,6 @@ print('NOTFOUND')
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsWindowVisible(IntPtr hWnd);
-
-        [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
