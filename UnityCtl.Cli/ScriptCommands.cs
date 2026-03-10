@@ -148,7 +148,8 @@ public static class ScriptCommands
 
         var expressionArgument = new Argument<string>(
             name: "expression",
-            description: "C# expression or method body to evaluate"
+            description: "C# expression or method body to evaluate",
+            getDefaultValue: () => string.Empty
         );
 
         var usingOption = new Option<string[]>(
@@ -183,9 +184,14 @@ public static class ScriptCommands
             var extraUsings = context.ParseResult.GetValueForOption(usingOption) ?? Array.Empty<string>();
             var scriptArgs = context.ParseResult.GetValueForArgument(evalScriptArgsArgument);
 
+            if (string.IsNullOrWhiteSpace(expression) && Console.IsInputRedirected)
+            {
+                expression = await Console.In.ReadToEndAsync();
+            }
+
             if (string.IsNullOrWhiteSpace(expression))
             {
-                Console.Error.WriteLine("Error: Expression cannot be empty.");
+                Console.Error.WriteLine("Error: Expression cannot be empty. Pass as argument or pipe via stdin.");
                 context.ExitCode = 1;
                 return;
             }
