@@ -18,8 +18,8 @@ public static class WaitCommand
         var waitCommand = new Command("wait", "Wait until Unity Editor is connected and ready to accept commands");
 
         var timeoutOption = new Option<int?>(
-            "--timeout",
-            description: "Maximum seconds to wait (default: 120, or wait-timeout from config)");
+            "--poll-timeout",
+            description: "Maximum seconds to wait for Unity to be ready (default: 120, or wait-timeout from config)");
 
         waitCommand.AddOption(timeoutOption);
 

@@ -41,11 +41,12 @@ public static class PlayCommands
         var projectPath = ContextHelper.GetProjectPath(context);
         var agentId = ContextHelper.GetAgentId(context);
         var json = ContextHelper.GetJson(context);
+        var timeout = ContextHelper.GetTimeout(context);
 
         var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
         if (client == null) { context.ExitCode = 1; return; }
 
-        var response = await client.SendCommandAsync(command);
+        var response = await client.SendCommandAsync(command, null, timeout);
         if (response == null) { context.ExitCode = 1; return; }
 
         if (response.Status == ResponseStatus.Error)

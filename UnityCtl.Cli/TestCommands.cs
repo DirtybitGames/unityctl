@@ -61,7 +61,8 @@ public static class TestCommands
                 Console.WriteLine("Running tests...");
             }
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.TestRun, args);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.TestRun, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)

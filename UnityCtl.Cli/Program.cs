@@ -21,9 +21,15 @@ var jsonOption = new Option<bool>(
     "Output JSON responses instead of human-readable text"
 );
 
+var timeoutOption = new Option<int?>(
+    aliases: ["--timeout", "-t"],
+    description: "Timeout in seconds for commands sent to Unity (overrides the per-command default)"
+);
+
 rootCommand.AddGlobalOption(projectOption);
 rootCommand.AddGlobalOption(agentIdOption);
 rootCommand.AddGlobalOption(jsonOption);
+rootCommand.AddGlobalOption(timeoutOption);
 
 // Add subcommands - Setup & Configuration
 rootCommand.AddCommand(SetupCommand.CreateCommand());

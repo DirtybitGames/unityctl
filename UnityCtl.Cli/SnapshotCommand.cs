@@ -101,7 +101,8 @@ public static class SnapshotCommand
                 { "prefabPath", prefab }
             };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.Snapshot, args);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.Snapshot, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)

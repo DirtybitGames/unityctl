@@ -51,7 +51,8 @@ public static class ScreenshotCommands
                 { "height", height }
             };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.ScreenshotCapture, args);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScreenshotCapture, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)

@@ -29,8 +29,9 @@ public static class AssetCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
+            var timeout = ContextHelper.GetTimeout(context);
             var args = new Dictionary<string, object?> { { "path", path } };
-            var response = await client.SendCommandAsync(UnityCtlCommands.AssetImport, args);
+            var response = await client.SendCommandAsync(UnityCtlCommands.AssetImport, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
@@ -63,7 +64,8 @@ public static class AssetCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.AssetRefresh, null);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.AssetRefresh, null, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             var hasCompilationErrors = ContextHelper.GetResultBool(response, "hasCompilationErrors") == true;

@@ -26,8 +26,9 @@ public static class MenuCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
+            var timeout = ContextHelper.GetTimeout(context);
             var args = new Dictionary<string, object?>();
-            var response = await client.SendCommandAsync(UnityCtlCommands.MenuList, args);
+            var response = await client.SendCommandAsync(UnityCtlCommands.MenuList, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
@@ -74,8 +75,9 @@ public static class MenuCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
+            var timeout = ContextHelper.GetTimeout(context);
             var args = new Dictionary<string, object?> { { "menuPath", menuPath } };
-            var response = await client.SendCommandAsync(UnityCtlCommands.MenuExecute, args);
+            var response = await client.SendCommandAsync(UnityCtlCommands.MenuExecute, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)

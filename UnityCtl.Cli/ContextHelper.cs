@@ -34,6 +34,14 @@ internal static class ContextHelper
         return option != null && parseResult.GetValueForOption(option);
     }
 
+    public static int? GetTimeout(InvocationContext context)
+    {
+        var parseResult = context.ParseResult;
+        var rootCommand = parseResult.RootCommandResult.Command;
+        var option = rootCommand.Options.FirstOrDefault(o => o.Name == "timeout") as Option<int?>;
+        return option != null ? parseResult.GetValueForOption(option) : null;
+    }
+
     public static bool? GetResultBool(ResponseMessage response, string key)
     {
         if (response.Result == null) return null;

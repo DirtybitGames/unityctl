@@ -54,7 +54,8 @@ public static class RecordCommands
                 { "fps", fps }
             };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.RecordStart, args);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.RecordStart, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
@@ -123,7 +124,8 @@ public static class RecordCommands
 
             var resolvedProjectPath = projectPath ?? ProjectLocator.FindProjectRoot()!;
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.RecordStop);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.RecordStop, null, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
@@ -172,7 +174,8 @@ public static class RecordCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.RecordStatus);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.RecordStatus, null, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)

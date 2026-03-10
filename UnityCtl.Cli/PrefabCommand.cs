@@ -38,7 +38,8 @@ public static class PrefabCommand
                 { "context", contextId }
             };
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.PrefabOpen, args);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.PrefabOpen, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
@@ -79,7 +80,8 @@ public static class PrefabCommand
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
-            var response = await client.SendCommandAsync(UnityCtlCommands.PrefabClose);
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.PrefabClose, null, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
