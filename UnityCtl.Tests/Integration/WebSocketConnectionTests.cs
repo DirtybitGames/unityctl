@@ -43,6 +43,8 @@ public class WebSocketConnectionTests : IAsyncLifetime
         await _fixture.FakeUnity.DisconnectAsync();
         await AssertExtensions.WaitUntilAsync(
             () => !_fixture.BridgeState.IsUnityConnected);
+        await AssertExtensions.WaitUntilAsync(
+            () => _fixture.BridgeState.UnityHelloMessage == null);
 
         Assert.Null(_fixture.BridgeState.UnityHelloMessage);
     }
