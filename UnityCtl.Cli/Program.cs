@@ -54,4 +54,7 @@ rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(SnapshotCommand.CreateCommand());
 rootCommand.AddCommand(PrefabCommand.CreateCommand());
 
+// "Did you mean?" hints for common misses
+CommandHints.Register(rootCommand);
+
 return await rootCommand.InvokeAsync(args);

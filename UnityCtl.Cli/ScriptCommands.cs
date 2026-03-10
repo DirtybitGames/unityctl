@@ -35,6 +35,7 @@ public static class ScriptCommands
 
         // script execute
         var executeCommand = new Command("execute", "Execute C# code in the Unity Editor");
+        executeCommand.AddAlias("run");
 
         var codeOption = new Option<string?>(
             aliases: ["--code", "-c"],

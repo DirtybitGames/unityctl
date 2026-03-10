@@ -14,6 +14,7 @@ public static class LogsCommand
     public static Command CreateCommand()
     {
         var logsCommand = new Command("logs", "View Unity console logs");
+        logsCommand.AddAlias("log");
 
         var followOption = new Option<bool>(
             new[] { "-f", "--follow" },

@@ -15,11 +15,13 @@ public static class PlayCommands
 
         // play enter
         var enterCommand = new Command("enter", "Enter play mode");
+        enterCommand.AddAlias("start");
         enterCommand.SetHandler(async (InvocationContext context) =>
             await HandlePlayCommand(context, UnityCtlCommands.PlayEnter));
 
         // play exit
         var exitCommand = new Command("exit", "Exit play mode");
+        exitCommand.AddAlias("stop");
         exitCommand.SetHandler(async (InvocationContext context) =>
             await HandlePlayCommand(context, UnityCtlCommands.PlayExit));
 

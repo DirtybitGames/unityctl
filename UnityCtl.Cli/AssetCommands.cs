@@ -12,6 +12,7 @@ public static class AssetCommands
     public static Command CreateCommand()
     {
         var assetCommand = new Command("asset", "Asset management operations");
+        assetCommand.AddAlias("assets");
 
         // asset import
         var importCommand = new Command("import", "Import a specific asset");
