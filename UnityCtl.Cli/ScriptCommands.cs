@@ -231,8 +231,13 @@ public static class ScriptCommands
         var usings = new List<string>(DefaultUsings);
         foreach (var u in extraUsings)
         {
-            if (!usings.Contains(u))
-                usings.Add(u);
+            // Support both multiple -u flags and comma-separated values
+            foreach (var part in u.Split(','))
+            {
+                var trimmed = part.Trim();
+                if (trimmed.Length > 0 && !usings.Contains(trimmed))
+                    usings.Add(trimmed);
+            }
         }
 
         var usingBlock = string.Join("\n", usings.Select(u => $"using {u};"));

@@ -139,4 +139,42 @@ public class EvalCodeGeneratorTests
 
         Assert.Equal([14200, -1290, 0], ids);
     }
+
+    [Fact]
+    public void ExtraUsings_CommaSeparated_SplitIntoMultiple()
+    {
+        var code = ScriptCommands.BuildEvalCode("1", ["UnityEngine.UI,UnityEngine.SceneManagement"], hasArgs: false);
+
+        Assert.Contains("using UnityEngine.UI;", code);
+        Assert.Contains("using UnityEngine.SceneManagement;", code);
+    }
+
+    [Fact]
+    public void ExtraUsings_CommaSeparatedWithSpaces_Trimmed()
+    {
+        var code = ScriptCommands.BuildEvalCode("1", ["UnityEngine.UI , UnityEngine.SceneManagement"], hasArgs: false);
+
+        Assert.Contains("using UnityEngine.UI;", code);
+        Assert.Contains("using UnityEngine.SceneManagement;", code);
+    }
+
+    [Fact]
+    public void ExtraUsings_MultipleFlags_AllAdded()
+    {
+        var code = ScriptCommands.BuildEvalCode("1", ["UnityEngine.UI", "UnityEngine.SceneManagement"], hasArgs: false);
+
+        Assert.Contains("using UnityEngine.UI;", code);
+        Assert.Contains("using UnityEngine.SceneManagement;", code);
+    }
+
+    [Fact]
+    public void ExtraUsings_CommaSeparatedWithDuplicate_Deduplicated()
+    {
+        var code = ScriptCommands.BuildEvalCode("1", ["System,UnityEngine.UI"], hasArgs: false);
+
+        Assert.Contains("using UnityEngine.UI;", code);
+        var lines = code.Split('\n');
+        var count = lines.Count(l => l.Trim() == "using System;");
+        Assert.Equal(1, count);
+    }
 }

@@ -105,6 +105,7 @@ unityctl script eval 'Application.version'
 unityctl script eval 'GameObject.FindObjectsOfType<Camera>().Length'
 unityctl script eval --id -1290 'target.transform.position'
 unityctl script eval -u UnityEngine.SceneManagement 'SceneManager.GetActiveScene().name'
+unityctl script eval -u UnityEngine.UI,UnityEngine.SceneManagement 'SceneManager.GetActiveScene().name'  # comma-separated
 ```
 
 Pass arguments to the script with `--`:
