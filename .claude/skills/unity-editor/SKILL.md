@@ -74,6 +74,8 @@ unityctl snapshot --prefab Assets/Prefabs/Player.prefab  # Snapshot a prefab ass
 unityctl prefab open Assets/Prefabs/Player.prefab  # Open prefab in isolation mode
 unityctl prefab open Assets/Prefabs/Player.prefab --context 14200  # In-context editing
 unityctl prefab close                              # Close prefab stage, return to scene
+unityctl prefab close --save                       # Save changes then close
+unityctl prefab close --discard                    # Discard changes then close
 
 # Dialog Detection (native OS popups blocking Unity)
 unityctl dialog list                   # List detected popup dialogs
