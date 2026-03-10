@@ -197,8 +197,8 @@ public static class ScriptCommands
             }
 
             // Fix shell mangling: MINGW bash escapes ! to \! even in single quotes.
-            // \! is never valid C#, so this is always safe to unescape.
-            expression = expression.Replace("\\!", "!");
+            if (OperatingSystem.IsWindows())
+                expression = expression.Replace("\\!", "!");
 
             var instanceIds = context.ParseResult.GetValueForOption(idOption);
 
