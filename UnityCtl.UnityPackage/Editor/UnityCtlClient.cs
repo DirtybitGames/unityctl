@@ -1292,6 +1292,10 @@ namespace UnityCtl
                 var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
                 var root = prefabStage.prefabContentsRoot;
 
+                var prefabRoots = new[] { root };
+                if (!string.IsNullOrEmpty(filter))
+                    prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+
                 return new Protocol.SnapshotResult
                 {
                     Stage = currentStage.Stage,
@@ -1300,7 +1304,7 @@ namespace UnityCtl
                     OpenedFromInstanceId = currentStage.OpenedFromInstanceId,
                     IsPlaying = false,
                     RootObjectCount = 1,
-                    Objects = new[] { SerializeGameObject(root, depth, includeComponents, interactive, layout) }
+                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout)).ToArray()
                 };
             }
 
