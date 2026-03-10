@@ -40,6 +40,7 @@ rootCommand.AddCommand(LogsCommand.CreateCommand());
 // Add subcommands - Bridge & Editor
 rootCommand.AddCommand(BridgeCommands.CreateCommand());
 rootCommand.AddCommand(EditorCommands.CreateCommand());
+rootCommand.AddCommand(DialogCommands.CreateCommand());
 
 // Add subcommands - Unity Operations
 rootCommand.AddCommand(SceneCommands.CreateCommand());

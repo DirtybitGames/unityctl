@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -159,6 +160,12 @@ public class BridgeClient
                 var error = await response.Content.ReadAsStringAsync();
                 Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
                 Console.Error.WriteLine(error);
+
+                if (response.StatusCode == System.Net.HttpStatusCode.GatewayTimeout && _projectRoot != null)
+                {
+                    DisplayDialogHint(_projectRoot);
+                }
+
                 return null;
             }
 
@@ -331,6 +338,7 @@ public class BridgeClient
             else
             {
                 Console.Error.WriteLine("Error: Unity Editor is running but not connected to the bridge.");
+                DisplayDialogHint(_projectRoot);
                 Console.Error.WriteLine("Ensure the UnityCtl package is installed and enabled in Unity.");
             }
         }
@@ -338,6 +346,42 @@ public class BridgeClient
         {
             Console.Error.WriteLine("Error: Unity Editor is not connected to the bridge.");
             Console.Error.WriteLine("Ensure Unity is running with the UnityCtl package installed.");
+        }
+    }
+
+    /// <summary>
+    /// Check for popup dialogs blocking the Unity Editor and print a hint if any are found.
+    /// Called on 504 (command timeout) and 503 (Unity not connected) to help diagnose the cause.
+    /// </summary>
+    internal static void DisplayDialogHint(string projectRoot)
+    {
+        try
+        {
+            var unityProcess = EditorCommands.FindUnityProcessForProject(
+                Path.GetFullPath(projectRoot));
+            if (unityProcess == null) return;
+
+            var dialogs = DialogDetector.DetectDialogs(unityProcess.Id);
+            if (dialogs.Count == 0) return;
+
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"  Popup dialog detected — this is likely blocking Unity:");
+            foreach (var d in dialogs)
+            {
+                Console.Error.Write($"    \"{d.Title}\"");
+                if (d.Buttons.Count > 0)
+                    Console.Error.Write($" [{string.Join("] [", d.Buttons.Select(b => b.Text))}]");
+                if (d.Progress.HasValue)
+                    Console.Error.Write($" ({(int)(d.Progress.Value * 100)}%)");
+                Console.Error.WriteLine();
+            }
+            if (dialogs.Exists(d => d.Buttons.Count > 0))
+                Console.Error.WriteLine("  Use 'unityctl dialog dismiss' to dismiss");
+            Console.Error.WriteLine();
+        }
+        catch
+        {
+            // Best-effort — never fail the parent error path
         }
     }
 

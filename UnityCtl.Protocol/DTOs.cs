@@ -316,6 +316,21 @@ public class ProjectStatusResult
     public required bool UnityConnectedToBridge { get; init; }
 }
 
+public class DialogInfo
+{
+    [JsonProperty("title")]
+    public required string Title { get; init; }
+
+    [JsonProperty("buttons")]
+    public required string[] Buttons { get; init; }
+
+    [JsonProperty("description")]
+    public string? Description { get; init; }
+
+    [JsonProperty("progress")]
+    public float? Progress { get; init; }
+}
+
 public class SnapshotResult
 {
     [JsonProperty("stage")]

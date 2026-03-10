@@ -156,10 +156,12 @@ public static class WaitCommand
                 else if (!unityConnected)
                 {
                     Console.Error.WriteLine($"Timed out after {timeout}s. Unity is not connected to the bridge.");
+                    BridgeClient.DisplayDialogHint(projectRoot);
                 }
                 else
                 {
                     Console.Error.WriteLine($"Timed out after {timeout}s. Unity is connected but the editor is not ready (may still be importing assets).");
+                    BridgeClient.DisplayDialogHint(projectRoot);
                 }
             }
             context.ExitCode = 1;

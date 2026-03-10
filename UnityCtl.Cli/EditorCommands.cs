@@ -128,10 +128,7 @@ public static class EditorCommands
             }
         }
 
-        // 5. Suppress the "Enter Safe Mode?" dialog so Unity doesn't block on compilation errors
-        SuppressSafeModeDialog();
-
-        // 6. Launch Unity
+        // 5. Launch Unity
         Console.WriteLine("Launching Unity Editor...");
 
         var startInfo = new ProcessStartInfo
@@ -235,7 +232,7 @@ public static class EditorCommands
     /// <summary>
     /// Find the Unity process running for a specific project by checking command line arguments.
     /// </summary>
-    private static Process? FindUnityProcessForProject(string projectRoot)
+    internal static Process? FindUnityProcessForProject(string projectRoot)
     {
         // Normalize the project path for comparison
         var normalizedProjectRoot = System.IO.Path.GetFullPath(projectRoot).TrimEnd('\\', '/');
@@ -280,7 +277,7 @@ public static class EditorCommands
     /// <summary>
     /// Extract the project path from Unity's command line arguments.
     /// </summary>
-    private static string? ExtractProjectPath(string commandLine)
+    internal static string? ExtractProjectPath(string commandLine)
     {
         // Look for -projectPath "path" or -projectPath path
         var marker = "-projectPath";
@@ -308,7 +305,7 @@ public static class EditorCommands
     /// <summary>
     /// Get the command line for a process. Platform-specific implementation.
     /// </summary>
-    private static string? GetProcessCommandLine(Process process)
+    internal static string? GetProcessCommandLine(Process process)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -386,90 +383,4 @@ public static class EditorCommands
         return null;
     }
 
-    /// <summary>
-    /// Suppress Unity's "Enter Safe Mode?" dialog so compilation errors don't block automated workflows.
-    /// Sets the EnterSafeModeDialog EditorPref to false in platform-specific storage.
-    /// </summary>
-    private static void SuppressSafeModeDialog()
-    {
-        try
-        {
-            if (OperatingSystem.IsWindows())
-                SuppressSafeModeDialogWindows();
-            else if (OperatingSystem.IsMacOS())
-                SuppressSafeModeDialogMacOS();
-            else if (OperatingSystem.IsLinux())
-                SuppressSafeModeDialogLinux();
-        }
-        catch
-        {
-            // Best-effort — don't fail the launch if we can't set the pref
-        }
-    }
-
-    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void SuppressSafeModeDialogWindows()
-    {
-        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
-            @"Software\Unity Technologies\Unity Editor 5.x", writable: true);
-        key?.SetValue("EnterSafeModeDialog", 0, Microsoft.Win32.RegistryValueKind.DWord);
-    }
-
-    private static void SuppressSafeModeDialogMacOS()
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "defaults",
-            Arguments = "write com.unity3d.UnityEditor5.x EnterSafeModeDialog -bool false",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = Process.Start(startInfo);
-        process?.WaitForExit(5000);
-    }
-
-    private static void SuppressSafeModeDialogLinux()
-    {
-        var prefsPath = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "unity3d", "prefs");
-
-        const string key = "EnterSafeModeDialog";
-        const string desiredLine = "EnterSafeModeDialog=False";
-
-        if (System.IO.File.Exists(prefsPath))
-        {
-            var lines = System.IO.File.ReadAllLines(prefsPath);
-            var found = false;
-            for (var i = 0; i < lines.Length; i++)
-            {
-                if (lines[i].StartsWith(key + "=", StringComparison.Ordinal) ||
-                    lines[i].StartsWith(key + " =", StringComparison.Ordinal))
-                {
-                    lines[i] = desiredLine;
-                    found = true;
-                    break;
-                }
-            }
-
-            if (found)
-            {
-                System.IO.File.WriteAllLines(prefsPath, lines);
-            }
-            else
-            {
-                System.IO.File.AppendAllText(prefsPath, Environment.NewLine + desiredLine + Environment.NewLine);
-            }
-        }
-        else
-        {
-            var dir = System.IO.Path.GetDirectoryName(prefsPath);
-            if (dir != null)
-                System.IO.Directory.CreateDirectory(dir);
-            System.IO.File.WriteAllText(prefsPath, desiredLine + Environment.NewLine);
-        }
-    }
 }
