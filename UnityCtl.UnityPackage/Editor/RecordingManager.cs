@@ -119,7 +119,7 @@ namespace UnityCtl.Editor
                 EditorApplication.update -= PollRecordingFinished;
 
                 var frameCount = _backend.GetRecordedFrameCount();
-                var duration = frameCount / (double)_fps;
+                var duration = _fps > 0 ? frameCount / (double)_fps : 0;
 
                 Debug.Log($"[UnityCtl] Recording finished: {_outputPath}.mp4 ({duration:F1}s, {frameCount} frames)");
 

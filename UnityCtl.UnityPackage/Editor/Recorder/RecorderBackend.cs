@@ -141,12 +141,19 @@ namespace UnityCtl.Editor.Recorder
             EnsureReflection();
             if (s_sessionsField == null) return 0;
 
-            if (s_sessionsField.GetValue(_controller) is System.Collections.IList sessions && sessions.Count > 0)
+            try
             {
-                var session = sessions[0];
-                var recorder = s_recorderField?.GetValue(session);
-                if (recorder != null && s_countProp != null)
-                    return (int)s_countProp.GetValue(recorder);
+                if (s_sessionsField.GetValue(_controller) is System.Collections.IList sessions && sessions.Count > 0)
+                {
+                    var session = sessions[0];
+                    var recorder = s_recorderField?.GetValue(session);
+                    if (recorder != null && s_countProp != null)
+                        return (int)s_countProp.GetValue(recorder);
+                }
+            }
+            catch
+            {
+                // Reflection into Recorder internals may break across versions; fall back to cached count
             }
             return 0;
         }
