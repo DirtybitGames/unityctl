@@ -43,6 +43,7 @@ unityctl logs --full         # Ignore clear boundary
 # Scenes
 unityctl scene list          # List scenes
 unityctl scene load <path>   # Load scene (e.g., Assets/Scenes/Main.unity)
+unityctl scene load <path> --additive  # Load additively (without unloading current)
 
 # Testing
 unityctl test run            # Run edit mode tests
@@ -71,6 +72,11 @@ unityctl snapshot --prefab Assets/Prefabs/Player.prefab  # Snapshot a prefab ass
 unityctl prefab open Assets/Prefabs/Player.prefab  # Open prefab in isolation mode
 unityctl prefab open Assets/Prefabs/Player.prefab --context 14200  # In-context editing
 unityctl prefab close                              # Close prefab stage, return to scene
+
+# Dialog Detection (native OS popups blocking Unity)
+unityctl dialog list                   # List detected popup dialogs
+unityctl dialog dismiss                # Dismiss first dialog (clicks first button)
+unityctl dialog dismiss --button "OK"  # Click specific button
 ```
 
 ## Scene Observation & Manipulation Workflow
@@ -159,4 +165,6 @@ Run `unityctl status` first to diagnose issues.
 | Connection lost after compile | Normal - domain reload, auto-reconnects |
 | "Project not found" | `unityctl setup` or `unityctl config set project-path <path>` |
 | Can't tell when Unity is ready | `unityctl wait --timeout 300` |
+| Command timed out | A native dialog may be blocking Unity: `unityctl dialog list` |
+| Progress bar stuck | Check with `unityctl dialog list`, wait or dismiss |
 | Editor not found | Use `--unity-path` to specify Unity executable |
