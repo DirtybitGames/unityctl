@@ -403,6 +403,46 @@ public class RecordFlowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RecordStart_WithFrames_BlocksUntilRecordFinished()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayStatus, _ =>
+            new PlayModeResult { State = PlayModeState.Playing });
+
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.RecordStart, _ =>
+            new RecordStartResult
+            {
+                RecordingId = "frames-test",
+                OutputPath = "Recordings/frames-test.mp4",
+                State = "recording"
+            },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(100),
+                UnityCtlEvents.RecordFinished,
+                new RecordFinishedPayload
+                {
+                    RecordingId = "frames-test",
+                    OutputPath = "Recordings/frames-test.mp4",
+                    Duration = 5.0,
+                    FrameCount = 150
+                }));
+
+        var args = new Dictionary<string, object?> { { "frames", 150 }, { "fps", 30 } };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.RecordStart, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+
+        // When frames is specified, should block and return finished payload
+        Assert.Equal("frames-test", result["recordingId"]?.ToString());
+        Assert.Equal(150, result["frameCount"]?.Value<int>());
+
+        // Verify frames arg was forwarded to Unity
+        var recordReq = _fixture.FakeUnity.ReceivedRequests
+            .FirstOrDefault(r => r.Command == UnityCtlCommands.RecordStart);
+        Assert.NotNull(recordReq);
+        Assert.Equal(150, Convert.ToInt32(recordReq.Args!["frames"]!.ToString()));
+    }
+
+    [Fact]
     public async Task RecordStart_DirectlyEntersPlayMode_WhenAlreadyInPlayMode()
     {
         // When play.status returns "playing", the second play.status check in

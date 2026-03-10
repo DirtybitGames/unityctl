@@ -20,12 +20,13 @@ namespace UnityCtl.Editor
         private string _outputPath;
         private DateTime _startTime;
         private bool _isRecording;
-        private bool _hasDuration;
+        private bool _hasFixedLength;
+        private int _fps;
         private Action<RecordFinishedPayload> _onFinished;
 
         public bool IsRecording => _isRecording;
 
-        public double Elapsed => _isRecording ? (DateTime.UtcNow - _startTime).TotalSeconds : 0;
+        public double Elapsed => _isRecording && _fps > 0 ? _backend.GetRecordedFrameCount() / (double)_fps : 0;
         public int FrameCount => _isRecording ? _backend.GetRecordedFrameCount() : 0;
 
         private void EnsureBackend()
@@ -40,7 +41,7 @@ namespace UnityCtl.Editor
             }
         }
 
-        public RecordStartResult Start(string outputName, double? duration, int? width, int? height, int fps, Action<RecordFinishedPayload> onFinished)
+        public RecordStartResult Start(string outputName, double? duration, int? frames, int? width, int? height, int fps, Action<RecordFinishedPayload> onFinished)
         {
             EnsureBackend();
 
@@ -57,19 +58,21 @@ namespace UnityCtl.Editor
             }
 
             _recordingId = Guid.NewGuid().ToString();
-            _hasDuration = duration.HasValue;
+            _hasFixedLength = duration.HasValue || frames.HasValue;
+            _fps = fps;
             _onFinished = onFinished;
-            _outputPath = _backend.StartRecording(outputName, duration, width, height, fps);
+            _outputPath = _backend.StartRecording(outputName, duration, frames, width, height, fps);
 
             _isRecording = true;
             _startTime = DateTime.UtcNow;
 
-            if (_hasDuration)
+            if (_hasFixedLength)
             {
                 EditorApplication.update += PollRecordingFinished;
             }
 
-            Debug.Log($"[UnityCtl] Recording started: {_outputPath}.mp4 (fps: {fps}, duration: {(duration.HasValue ? $"{duration}s" : "manual")})");
+            var mode = duration.HasValue ? $"{duration}s" : frames.HasValue ? $"{frames} frames" : "manual";
+            Debug.Log($"[UnityCtl] Recording started: {_outputPath}.mp4 (fps: {fps}, {mode})");
 
             return new RecordStartResult
             {
@@ -88,7 +91,7 @@ namespace UnityCtl.Editor
 
             var frameCount = _backend.GetRecordedFrameCount();
             _backend.StopRecording();
-            var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
+            var duration = _fps > 0 ? frameCount / (double)_fps : (DateTime.UtcNow - _startTime).TotalSeconds;
 
             var result = new RecordStopResult
             {
@@ -105,7 +108,7 @@ namespace UnityCtl.Editor
 
         private void PollRecordingFinished()
         {
-            if (!_isRecording || !_hasDuration || _backend == null)
+            if (!_isRecording || !_hasFixedLength || _backend == null)
             {
                 EditorApplication.update -= PollRecordingFinished;
                 return;
@@ -116,7 +119,7 @@ namespace UnityCtl.Editor
                 EditorApplication.update -= PollRecordingFinished;
 
                 var frameCount = _backend.GetRecordedFrameCount();
-                var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
+                var duration = frameCount / (double)_fps;
 
                 Debug.Log($"[UnityCtl] Recording finished: {_outputPath}.mp4 ({duration:F1}s, {frameCount} frames)");
 
@@ -149,7 +152,8 @@ namespace UnityCtl.Editor
         private void Cleanup()
         {
             _isRecording = false;
-            _hasDuration = false;
+            _hasFixedLength = false;
+            _fps = 0;
             _onFinished = null;
             EditorApplication.update -= PollRecordingFinished;
             _backend?.Cleanup();
@@ -175,7 +179,7 @@ namespace UnityCtl.Editor
                 Debug.LogWarning($"[UnityCtl] Error stopping recording: {ex.Message}");
             }
 
-            var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
+            var duration = _fps > 0 ? frameCount / (double)_fps : (DateTime.UtcNow - _startTime).TotalSeconds;
 
             Debug.Log($"[UnityCtl] Recording stopped (play mode exited): {_outputPath}.mp4 ({duration:F1}s, {frameCount} frames)");
 
@@ -201,7 +205,7 @@ namespace UnityCtl.Editor
         /// <summary>
         /// Start recording. Returns the output path (without extension).
         /// </summary>
-        string StartRecording(string outputName, double? duration, int? width, int? height, int fps);
+        string StartRecording(string outputName, double? duration, int? frames, int? width, int? height, int fps);
 
         /// <summary>
         /// Stop recording.

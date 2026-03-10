@@ -52,8 +52,10 @@ unityctl test run --mode playmode
 unityctl screenshot capture
 
 # Video Recording (requires com.unity.recorder package)
+# Note: record start auto-enters play mode if not already playing
 unityctl record start                  # Start recording (manual stop)
 unityctl record start --duration 10    # Record 10 seconds, blocks until done
+unityctl record start --frames 300     # Record exactly 300 frames, blocks until done
 unityctl record stop                   # Stop recording, returns file path + duration
 
 # Scene Snapshot (structured observation with instance IDs)

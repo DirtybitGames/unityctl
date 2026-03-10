@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using UnityEngine;
 using UnityEditor.Recorder;
 using UnityEditor.Recorder.Encoder;
@@ -17,9 +18,15 @@ namespace UnityCtl.Editor.Recorder
         private RecorderController _controller;
         private RecorderControllerSettings _controllerSettings;
         private MovieRecorderSettings _movieRecorder;
-        private int _startFrameCount;
+        private int _lastFrameCount;
 
-        public string StartRecording(string outputName, double? duration, int? width, int? height, int fps)
+        // Cached reflection info (resolved once)
+        private static FieldInfo s_sessionsField;
+        private static FieldInfo s_recorderField;
+        private static PropertyInfo s_countProp;
+        private static bool s_reflectionResolved;
+
+        public string StartRecording(string outputName, double? duration, int? frames, int? width, int? height, int fps)
         {
             if (string.IsNullOrEmpty(outputName))
             {
@@ -41,10 +48,16 @@ namespace UnityCtl.Editor.Recorder
             _controllerSettings.FrameRate = fps;
             _controllerSettings.CapFrameRate = true;
 
-            if (duration.HasValue)
+            if (frames.HasValue)
+            {
+                // SetRecordModeToFrameInterval end is exclusive (stops when count > end - start),
+                // so (0, N-1) records exactly N frames.
+                _controllerSettings.SetRecordModeToFrameInterval(0, frames.Value - 1);
+            }
+            else if (duration.HasValue)
             {
                 var totalFrames = (int)(fps * duration.Value);
-                _controllerSettings.SetRecordModeToFrameInterval(0, totalFrames);
+                _controllerSettings.SetRecordModeToFrameInterval(0, totalFrames - 1);
             }
             else
             {
@@ -83,7 +96,7 @@ namespace UnityCtl.Editor.Recorder
             // Create controller and start
             _controller = new RecorderController(_controllerSettings);
             _controller.PrepareRecording();
-            _startFrameCount = Time.frameCount;
+            _lastFrameCount = 0;
             _controller.StartRecording();
 
             return outputPath;
@@ -91,17 +104,68 @@ namespace UnityCtl.Editor.Recorder
 
         public void StopRecording()
         {
+            // Capture final count before stopping (StopRecording nulls out sessions)
+            _lastFrameCount = ReadRecordedFramesCount();
             _controller?.StopRecording();
         }
 
         public bool IsRecording()
         {
-            return _controller != null && _controller.IsRecording();
+            if (_controller == null || !_controller.IsRecording())
+            {
+                // Recording just stopped — capture the final count before sessions get cleaned up
+                if (_lastFrameCount == 0)
+                    _lastFrameCount = ReadRecordedFramesCount();
+                return false;
+            }
+            return true;
         }
 
         public int GetRecordedFrameCount()
         {
-            return Time.frameCount - _startFrameCount;
+            // Try live count first, fall back to cached value
+            var live = ReadRecordedFramesCount();
+            if (live > 0)
+                _lastFrameCount = live;
+            return _lastFrameCount;
+        }
+
+        /// <summary>
+        /// Read RecordedFramesCount from the recorder via reflection.
+        /// Returns 0 if sessions are not available.
+        /// </summary>
+        private int ReadRecordedFramesCount()
+        {
+            if (_controller == null) return 0;
+
+            EnsureReflection();
+            if (s_sessionsField == null) return 0;
+
+            if (s_sessionsField.GetValue(_controller) is System.Collections.IList sessions && sessions.Count > 0)
+            {
+                var session = sessions[0];
+                var recorder = s_recorderField?.GetValue(session);
+                if (recorder != null && s_countProp != null)
+                    return (int)s_countProp.GetValue(recorder);
+            }
+            return 0;
+        }
+
+        private static void EnsureReflection()
+        {
+            if (s_reflectionResolved) return;
+            s_reflectionResolved = true;
+
+            s_sessionsField = typeof(RecorderController).GetField(
+                "m_RecordingSessions", BindingFlags.NonPublic | BindingFlags.Instance);
+
+            var sessionType = typeof(RecordingSession);
+            s_recorderField = sessionType.GetField("recorder");
+
+            // RecordedFramesCount is protected internal on Recorder
+            var recorderType = typeof(UnityEditor.Recorder.Recorder);
+            s_countProp = recorderType.GetProperty(
+                "RecordedFramesCount", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         }
 
         private static int EnsureEven(int value)
@@ -122,6 +186,7 @@ namespace UnityCtl.Editor.Recorder
                 _controllerSettings = null;
             }
             _controller = null;
+            _lastFrameCount = 0;
         }
     }
 }

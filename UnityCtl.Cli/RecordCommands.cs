@@ -19,12 +19,14 @@ public static class RecordCommands
         var startCommand = new Command("start", "Start recording video of the game view");
         var outputOption = new Option<string?>("--output", "Output filename (without extension, defaults to timestamp-based name)");
         var durationOption = new Option<double?>("--duration", "Recording duration in seconds (blocks until done). Omit for manual stop.");
+        var framesOption = new Option<int?>("--frames", "Number of frames to record (blocks until done). Alternative to --duration.");
         var widthOption = new Option<int?>("--width", "Override width (default: game view width)");
         var heightOption = new Option<int?>("--height", "Override height (default: game view height)");
         var fpsOption = new Option<int>("--fps", () => 30, "Frames per second (default: 30)");
 
         startCommand.AddOption(outputOption);
         startCommand.AddOption(durationOption);
+        startCommand.AddOption(framesOption);
         startCommand.AddOption(widthOption);
         startCommand.AddOption(heightOption);
         startCommand.AddOption(fpsOption);
@@ -36,9 +38,17 @@ public static class RecordCommands
             var json = ContextHelper.GetJson(context);
             var output = context.ParseResult.GetValueForOption(outputOption);
             var duration = context.ParseResult.GetValueForOption(durationOption);
+            var frames = context.ParseResult.GetValueForOption(framesOption);
             var width = context.ParseResult.GetValueForOption(widthOption);
             var height = context.ParseResult.GetValueForOption(heightOption);
             var fps = context.ParseResult.GetValueForOption(fpsOption);
+
+            if (duration.HasValue && frames.HasValue)
+            {
+                Console.Error.WriteLine("Error: --duration and --frames are mutually exclusive");
+                context.ExitCode = 1;
+                return;
+            }
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
@@ -49,6 +59,7 @@ public static class RecordCommands
             {
                 { "outputName", output },
                 { "duration", duration },
+                { "frames", frames },
                 { "width", width },
                 { "height", height },
                 { "fps", fps }
@@ -73,13 +84,15 @@ public static class RecordCommands
                 return;
             }
 
+            var blocking = duration.HasValue || frames.HasValue;
+
             if (json)
             {
                 Console.WriteLine(JsonHelper.Serialize(response.Result));
             }
-            else if (duration.HasValue)
+            else if (blocking)
             {
-                // Duration-based: bridge waited for completion and returns finished payload
+                // Blocking: bridge waited for completion and returns finished payload
                 var result = JsonConvert.DeserializeObject<RecordFinishedPayload>(
                     JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
                     JsonHelper.Settings
@@ -89,8 +102,7 @@ public static class RecordCommands
                 {
                     var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.OutputPath));
                     var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-                    Console.WriteLine($"Recording saved: {relativePath}");
-                    Console.WriteLine($"Duration: {result.Duration:F1}s ({result.FrameCount} frames)");
+                    Console.WriteLine($"Saved {relativePath} ({result.Duration:F1}s, {result.FrameCount} frames)");
                 }
             }
             else
@@ -106,7 +118,6 @@ public static class RecordCommands
                     var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.OutputPath));
                     var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
                     Console.WriteLine($"Recording: {relativePath}");
-                    Console.WriteLine($"State: {result.State}");
                 }
             }
         });
@@ -157,8 +168,7 @@ public static class RecordCommands
                 {
                     var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.OutputPath));
                     var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-                    Console.WriteLine($"Recording saved: {relativePath}");
-                    Console.WriteLine($"Duration: {result.Duration:F1}s ({result.FrameCount} frames)");
+                    Console.WriteLine($"Saved {relativePath} ({result.Duration:F1}s, {result.FrameCount} frames)");
                 }
             }
         });
@@ -207,8 +217,7 @@ public static class RecordCommands
                 {
                     if (result.IsRecording)
                     {
-                        Console.WriteLine($"Recording: {result.OutputPath}");
-                        Console.WriteLine($"Elapsed: {result.Elapsed:F1}s ({result.FrameCount} frames)");
+                        Console.WriteLine($"Recording: {result.OutputPath} ({result.Elapsed:F1}s, {result.FrameCount} frames)");
                     }
                     else
                     {

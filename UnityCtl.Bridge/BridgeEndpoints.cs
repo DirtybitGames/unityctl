@@ -122,6 +122,17 @@ public static class BridgeEndpoints
         return null;
     }
 
+    private static int? GetIntArg(IDictionary<string, object?>? args, string key)
+    {
+        if (args == null || !args.TryGetValue(key, out var val) || val == null)
+            return null;
+
+        if (val is JToken jt) return jt.Value<int>();
+        if (val is int i) return i;
+        if (int.TryParse(val.ToString(), out var parsed)) return parsed;
+        return null;
+    }
+
     private static IResult JsonResponse(ResponseMessage response)
     {
         var json = JsonConvert.SerializeObject(response, JsonHelper.Settings);
@@ -712,8 +723,10 @@ public static class BridgeEndpoints
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        // Check if duration is specified (determines blocking vs fire-and-forget)
-        var duration = GetDoubleArg(requestMessage.Args as IDictionary<string, object?>, "duration");
+        // Check if duration or frames is specified (determines blocking vs fire-and-forget)
+        var args = requestMessage.Args as IDictionary<string, object?>;
+        var duration = GetDoubleArg(args, "duration");
+        var frames = GetIntArg(args, "frames");
 
         // Auto-enter play mode if not already playing (with asset refresh + compilation)
         var playModeTimeout = CommandConfigs[UnityCtlCommands.PlayEnter].Timeout;
@@ -753,11 +766,14 @@ public static class BridgeEndpoints
 
         Console.WriteLine($"[Bridge] Record start: in play mode, sending record.start to Unity");
 
-        // If duration is specified, pre-register the event waiter for record.finished
+        // If duration or frames is specified, pre-register the event waiter for record.finished
+        var blocking = duration.HasValue || frames.HasValue;
         Task<EventMessage>? recordFinishedTask = null;
-        if (duration.HasValue)
+        if (blocking)
         {
-            var recordTimeout = TimeSpan.FromSeconds(duration.Value + 30); // duration + buffer
+            var fps = GetIntArg(args, "fps") ?? 30;
+            var estimatedSeconds = duration ?? (frames!.Value / (double)fps);
+            var recordTimeout = TimeSpan.FromSeconds(estimatedSeconds + 30); // estimated + buffer
             recordFinishedTask = state.WaitForEventAsync(
                 requestMessage.RequestId,
                 config.CompletionEvent!,
@@ -776,7 +792,7 @@ public static class BridgeEndpoints
         // If duration is specified, wait for the record.finished event
         if (recordFinishedTask != null)
         {
-            Console.WriteLine($"[Bridge] Record start: waiting for recording to finish (duration: {duration}s)");
+            Console.WriteLine($"[Bridge] Record start: waiting for recording to finish");
             var finishedEvent = await recordFinishedTask;
 
             // Return the finished event payload as the result

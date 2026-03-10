@@ -1753,8 +1753,9 @@ namespace UnityCtl
             var width = GetIntArgument(request, "width");
             var height = GetIntArgument(request, "height");
             var duration = GetDoubleArgument(request, "duration");
+            var frames = GetIntArgument(request, "frames");
 
-            return Editor.RecordingManager.Instance.Start(outputName, duration, width, height, fps, payload =>
+            return Editor.RecordingManager.Instance.Start(outputName, duration, frames, width, height, fps, payload =>
             {
                 SendRecordFinishedEvent(payload);
             });
