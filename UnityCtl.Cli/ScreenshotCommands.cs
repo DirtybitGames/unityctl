@@ -18,10 +18,13 @@ public static class ScreenshotCommands
         // screenshot capture
         var captureCommand = new Command("capture", "Capture a screenshot of the game view");
         var pathArg = new Argument<string?>("path", () => null, "Output path (optional, defaults to Screenshots/screenshot_YYYY-MM-DD_HH-mm-ss.png)");
+        // --output/-o alias for the positional path, for agent discoverability (see #25)
+        var outputOption = new Option<string?>(["-o", "--output"], "Output path (same as positional argument)");
         var widthOption = new Option<int?>("--width", "Override width (default: game view width)");
         var heightOption = new Option<int?>("--height", "Override height (default: game view height)");
 
         captureCommand.AddArgument(pathArg);
+        captureCommand.AddOption(outputOption);
         captureCommand.AddOption(widthOption);
         captureCommand.AddOption(heightOption);
 
@@ -30,7 +33,8 @@ public static class ScreenshotCommands
             var projectPath = ContextHelper.GetProjectPath(context);
             var agentId = ContextHelper.GetAgentId(context);
             var json = ContextHelper.GetJson(context);
-            var path = context.ParseResult.GetValueForArgument(pathArg);
+            var path = context.ParseResult.GetValueForOption(outputOption)
+                       ?? context.ParseResult.GetValueForArgument(pathArg);
             var width = context.ParseResult.GetValueForOption(widthOption);
             var height = context.ParseResult.GetValueForOption(heightOption);
 

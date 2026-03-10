@@ -20,8 +20,9 @@ public static class LogsCommand
             new[] { "-f", "--follow" },
             "Follow log output (stream continuously)");
 
+        // --count and --last are aliases for agent discoverability (see #25)
         var linesOption = new Option<int>(
-            new[] { "-n", "--lines" },
+            ["-n", "--lines", "--count", "--last"],
             "Limit to N most recent lines (default: all since last clear)");
 
         var noColorOption = new Option<bool>(
