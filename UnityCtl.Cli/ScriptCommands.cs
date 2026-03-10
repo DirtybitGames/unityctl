@@ -218,7 +218,7 @@ public static class ScriptCommands
                 return;
             }
 
-            DisplayScriptResult(context, response, json, isEval: true);
+            DisplayScriptResult(context, response, json, isEval: true, generatedCode: csharpCode);
         });
 
         scriptCommand.AddCommand(evalCommand);
@@ -291,7 +291,7 @@ public static class ScriptCommands
         return sb.ToString();
     }
 
-    private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json, bool isEval)
+    private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json, bool isEval, string? generatedCode = null)
     {
         var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(
             JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
@@ -325,6 +325,17 @@ public static class ScriptCommands
                         foreach (var diagnostic in result.Diagnostics)
                         {
                             Console.Error.WriteLine($"  {diagnostic}");
+                        }
+
+                        if (generatedCode != null)
+                        {
+                            Console.Error.WriteLine();
+                            Console.Error.WriteLine("Generated source:");
+                            var lines = generatedCode.Split('\n');
+                            for (var i = 0; i < lines.Length; i++)
+                            {
+                                Console.Error.WriteLine($"  {i + 1,3}| {lines[i].TrimEnd('\r')}");
+                            }
                         }
                     }
 
