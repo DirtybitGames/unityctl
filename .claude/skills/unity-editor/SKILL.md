@@ -93,15 +93,15 @@ unityctl script eval --id 14200,14210 'targets[0].transform.SetParent(targets[1]
 Evaluate C# expressions directly (common usings like UnityEngine, UnityEditor, System auto-included):
 
 ```bash
-unityctl script eval "Application.version"
-unityctl script eval "GameObject.FindObjectsOfType<Camera>().Length"
-unityctl script eval --id -1290 "target.transform.position"
-unityctl script eval -u UnityEngine.SceneManagement "SceneManager.GetActiveScene().name"
+unityctl script eval 'Application.version'
+unityctl script eval 'GameObject.FindObjectsOfType<Camera>().Length'
+unityctl script eval --id -1290 'target.transform.position'
+unityctl script eval -u UnityEngine.SceneManagement 'SceneManager.GetActiveScene().name'
 ```
 
 Pass arguments to the script with `--`:
 ```bash
-unityctl script eval "args[0]" -- hello
+unityctl script eval 'args[0]' -- hello
 ```
 
 ### Full Script Execution
@@ -124,8 +124,8 @@ public class Script
 
 ```bash
 unityctl script execute -f /tmp/MyScript.cs
-unityctl script execute -c "using UnityEngine; public class Script { public static object Main() => Application.version; }"
-unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 "My Object"
+unityctl script execute -c 'using UnityEngine; public class Script { public static object Main() => Application.version; }'
+unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 'My Object'
 ```
 
 Use `Main(string[] args)` to accept arguments passed after `--`.

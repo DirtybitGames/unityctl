@@ -344,7 +344,7 @@ public static class ScriptCommands
                         Console.Error.WriteLine();
                         Console.Error.WriteLine("Hint: Expressions are wrapped in 'return <expr>;' automatically.");
                         Console.Error.WriteLine("  For multi-statement code (ending with ;), use explicit 'return' to return a value.");
-                        Console.Error.WriteLine("  Example: unityctl script eval \"var x = 42; return x;\"");
+                        Console.Error.WriteLine("  Example: unityctl script eval 'var x = 42; return x;'");
                     }
                 }
             }
