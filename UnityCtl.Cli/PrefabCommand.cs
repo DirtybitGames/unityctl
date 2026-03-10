@@ -68,20 +68,39 @@ public static class PrefabCommand
             }
         });
 
-        // prefab close
+        // prefab close [--save | --discard]
         var closeCommand = new Command("close", "Return to main scene editing");
+        var saveOption = new Option<bool>("--save", "Save changes before closing");
+        var discardOption = new Option<bool>("--discard", "Discard changes before closing");
+        closeCommand.AddOption(saveOption);
+        closeCommand.AddOption(discardOption);
 
         closeCommand.SetHandler(async (InvocationContext context) =>
         {
             var projectPath = ContextHelper.GetProjectPath(context);
             var agentId = ContextHelper.GetAgentId(context);
             var json = ContextHelper.GetJson(context);
+            var save = context.ParseResult.GetValueForOption(saveOption);
+            var discard = context.ParseResult.GetValueForOption(discardOption);
+
+            if (save && discard)
+            {
+                Console.Error.WriteLine("Error: --save and --discard are mutually exclusive");
+                context.ExitCode = 1;
+                return;
+            }
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
+            var args = new Dictionary<string, object?>
+            {
+                { "save", save },
+                { "discard", discard }
+            };
+
             var timeout = ContextHelper.GetTimeout(context);
-            var response = await client.SendCommandAsync(UnityCtlCommands.PrefabClose, null, timeout);
+            var response = await client.SendCommandAsync(UnityCtlCommands.PrefabClose, args, timeout);
             if (response == null) { context.ExitCode = 1; return; }
 
             if (response.Status == ResponseStatus.Error)
@@ -104,6 +123,8 @@ public static class PrefabCommand
 
                 if (result != null)
                 {
+                    if (result.Saved)
+                        Console.WriteLine("Prefab saved");
                     Console.WriteLine($"Returned to scene: {result.ReturnedToScene}");
                 }
             }

@@ -1441,10 +1441,32 @@ namespace UnityCtl
             if (prefabStage == null)
                 throw new InvalidOperationException("Not currently in prefab editing mode");
 
+            var save = GetBoolArgument(request, "save");
+            var discard = GetBoolArgument(request, "discard");
+            var saved = false;
+
+            if (save)
+            {
+                // Save all prefab stage changes to the asset on disk.
+                // We use SaveAsPrefabAsset (not EditorSceneManager.SaveScene) because
+                // SaveScene can trigger rename dialogs if the root object was renamed.
+                // ClearDirtiness() prevents the "save changes?" dialog on close and also
+                // prevents auto-save from re-saving after GoToMainStage.
+                PrefabUtility.SaveAsPrefabAsset(prefabStage.prefabContentsRoot, prefabStage.assetPath);
+                prefabStage.ClearDirtiness();
+                saved = true;
+            }
+            else if (discard)
+            {
+                // Clear the dirty flag so Unity doesn't prompt to save.
+                // This also prevents auto-save from persisting changes on close.
+                prefabStage.ClearDirtiness();
+            }
+
             StageUtility.GoToMainStage();
 
             var scene = SceneManager.GetActiveScene();
-            return new Protocol.PrefabCloseResult { ReturnedToScene = scene.name };
+            return new Protocol.PrefabCloseResult { ReturnedToScene = scene.name, Saved = saved };
         }
 
         private static Protocol.SnapshotObject SerializeGameObject(

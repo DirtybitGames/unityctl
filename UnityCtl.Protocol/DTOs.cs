@@ -434,6 +434,9 @@ public class PrefabCloseResult
 {
     [JsonProperty("returnedToScene")]
     public required string ReturnedToScene { get; init; }
+
+    [JsonProperty("saved")]
+    public bool Saved { get; init; }
 }
 
 public class SnapshotComponent

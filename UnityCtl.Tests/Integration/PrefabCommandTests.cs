@@ -195,6 +195,64 @@ public class PrefabCommandTests : IAsyncLifetime
         Assert.Equal(UnityCtlCommands.PrefabClose, received.Command);
     }
 
+    [Fact]
+    public async Task PrefabClose_WithSave_SendsSaveArgToUnity()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PrefabClose, _ => new PrefabCloseResult
+        {
+            ReturnedToScene = "MainScene",
+            Saved = true
+        });
+
+        var args = new Dictionary<string, object?> { ["save"] = true, ["discard"] = false };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PrefabClose, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("MainScene", result["returnedToScene"]?.ToString());
+        Assert.True(result["saved"]?.Value<bool>());
+
+        var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.PrefabClose);
+        Assert.Equal("True", received.Args?["save"]?.ToString());
+    }
+
+    [Fact]
+    public async Task PrefabClose_WithDiscard_SendsDiscardArgToUnity()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PrefabClose, _ => new PrefabCloseResult
+        {
+            ReturnedToScene = "MainScene",
+            Saved = false
+        });
+
+        var args = new Dictionary<string, object?> { ["save"] = false, ["discard"] = true };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PrefabClose, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.False(result["saved"]?.Value<bool>());
+
+        var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.PrefabClose);
+        Assert.Equal("True", received.Args?["discard"]?.ToString());
+    }
+
+    [Fact]
+    public async Task PrefabClose_WithoutFlags_DefaultBehavior()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PrefabClose, _ => new PrefabCloseResult
+        {
+            ReturnedToScene = "MainScene",
+            Saved = false
+        });
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PrefabClose);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("MainScene", result["returnedToScene"]?.ToString());
+        Assert.False(result["saved"]?.Value<bool>());
+    }
+
     // --- Workflow: open → snapshot → close ---
 
     [Fact]
