@@ -676,6 +676,9 @@ public class BridgeStateTests
     [InlineData("Log", 1)]
     [InlineData("Info", 1)]
     [InlineData("Unknown", 0)]
+    [InlineData("exception", 4)]
+    [InlineData("error", 3)]
+    [InlineData("WARNING", 2)]
     public void GetSeverityRank_ReturnsCorrectValues(string level, int expected)
     {
         Assert.Equal(expected, BridgeState.GetSeverityRank(level));

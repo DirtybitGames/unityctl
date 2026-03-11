@@ -44,6 +44,7 @@ public static class LogsCommand
         var levelOption = new Option<string?>(
             ["--level", "-l"],
             "Minimum log level: log, warning, error (default: all)");
+        levelOption.FromAmong("log", "info", "warning", "warn", "error");
 
         logsCommand.AddOption(followOption);
         logsCommand.AddOption(linesOption);

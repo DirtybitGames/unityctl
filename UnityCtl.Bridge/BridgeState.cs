@@ -499,12 +499,12 @@ public class BridgeState
         _ => 0
     };
 
-    internal static int GetSeverityRank(string level) => level switch
+    internal static int GetSeverityRank(string level) => level.ToLowerInvariant() switch
     {
-        "Exception" => 4,
-        "Error" => 3,
-        "Warning" => 2,
-        "Log" or "Info" => 1,
+        "exception" => 4,
+        "error" => 3,
+        "warning" => 2,
+        "log" or "info" => 1,
         _ => 0
     };
 
