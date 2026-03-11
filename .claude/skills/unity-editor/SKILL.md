@@ -134,8 +134,8 @@ public class Script
 ```
 
 ```bash
-unityctl script execute -f /tmp/MyScript.cs
-unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 'My Object'
+unityctl script execute /tmp/MyScript.cs
+unityctl script execute /tmp/SpawnObjects.cs -- Cube 5 'My Object'
 ```
 
 Use `Main(string[] args)` to accept arguments passed after `--`.

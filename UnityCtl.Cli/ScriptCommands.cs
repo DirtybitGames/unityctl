@@ -69,8 +69,16 @@ public static class ScriptCommands
             var file = context.ParseResult.GetValueForOption(fileOption);
             var className = context.ParseResult.GetValueForOption(classOption) ?? "Script";
             var methodName = context.ParseResult.GetValueForOption(methodOption) ?? "Main";
+            var scriptArgs = context.ParseResult.GetValueForArgument(scriptArgsArgument);
 
-            // Determine code source: --file or stdin
+            // If no -f given, check if first positional arg is a .cs file
+            if (file == null && scriptArgs.Length > 0 && scriptArgs[0].EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            {
+                file = new FileInfo(scriptArgs[0]);
+                scriptArgs = scriptArgs.Skip(1).ToArray();
+            }
+
+            // Determine code source: file or stdin
             string? csharpCode = null;
 
             if (file != null)
@@ -91,11 +99,11 @@ public static class ScriptCommands
 
             if (string.IsNullOrWhiteSpace(csharpCode))
             {
-                Console.Error.WriteLine("Error: No C# code provided. Use --file or pipe code via stdin.");
+                Console.Error.WriteLine("Error: No C# code provided. Pass a .cs file or pipe code via stdin.");
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("Example:");
-                Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs");
-                Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs -- arg1 arg2 \"arg with spaces\"");
+                Console.Error.WriteLine("  unityctl script execute ./MyScript.cs");
+                Console.Error.WriteLine("  unityctl script execute ./MyScript.cs -- arg1 arg2 \"arg with spaces\"");
                 Console.Error.WriteLine("  cat MyScript.cs | unityctl script execute");
                 context.ExitCode = 1;
                 return;
@@ -103,8 +111,6 @@ public static class ScriptCommands
 
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
-
-            var scriptArgs = context.ParseResult.GetValueForArgument(scriptArgsArgument);
 
             var args = new Dictionary<string, object?>
             {

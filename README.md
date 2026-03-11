@@ -40,7 +40,7 @@ unityctl script eval 'GameObject.CreatePrimitive(PrimitiveType.Cube).name'
 unityctl script eval 'var p = GameObject.Find("Player"); p.transform.position = new Vector3(0, 10, 0); return "moved";'
 
 # Multi-line scripts: write a .cs file, then execute
-unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5
+unityctl script execute /tmp/SpawnObjects.cs -- Cube 5
 ```
 
 For full scripts, define a class with a static `Main()` method:
