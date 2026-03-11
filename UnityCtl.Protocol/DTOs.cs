@@ -204,6 +204,10 @@ public class TestFinishedPayload
 
 public class ScreenshotCaptureResult
 {
+    /// <summary>
+    /// Project-relative path where CaptureScreenshot writes the file (e.g. "Screenshots/shot.png").
+    /// CLI resolves this against the project root, waits for the file, and moves it if needed.
+    /// </summary>
     [JsonProperty("path")]
     public required string Path { get; init; }
 

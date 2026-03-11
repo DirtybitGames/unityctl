@@ -1,6 +1,7 @@
 using System;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -48,6 +49,17 @@ internal static class ContextHelper
         var resultJson = JsonConvert.SerializeObject(response.Result, JsonHelper.Settings);
         var result = JObject.Parse(resultJson);
         return result[key]?.Value<bool>();
+    }
+
+    /// <summary>
+    /// Format a path for display: use relative if under CWD, absolute otherwise.
+    /// Avoids confusing "../../../.." paths when CWD is deep in the tree.
+    /// </summary>
+    public static string FormatPath(string absolutePath)
+    {
+        var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
+        return relativePath.StartsWith(".." + Path.DirectorySeparatorChar) || relativePath == ".."
+            ? absolutePath : relativePath;
     }
 
     /// <summary>

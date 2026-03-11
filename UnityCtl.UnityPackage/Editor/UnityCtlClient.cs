@@ -1039,37 +1039,33 @@ namespace UnityCtl
 
         private object HandleScreenshotCapture(RequestMessage request)
         {
-            var path = GetStringArgument(request, "path");
+            var filename = GetStringArgument(request, "filename");
             var width = GetIntArgument(request, "width");
             var height = GetIntArgument(request, "height");
 
-            // Generate default path with timestamp if not provided
-            if (string.IsNullOrEmpty(path))
+            // Generate default filename with timestamp if not provided
+            if (string.IsNullOrEmpty(filename))
             {
                 var timestamp = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                path = $"Screenshots/screenshot_{timestamp}.png";
+                filename = $"screenshot_{timestamp}.png";
             }
 
-            // Ensure path uses forward slashes and has .png extension
-            path = path.Replace("\\", "/");
-            if (!path.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
-                !path.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
+            // Ensure .png extension
+            if (!filename.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
+                !filename.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
             {
-                path += ".png";
+                filename += ".png";
             }
 
-            // If path doesn't start with Screenshots/, prepend it (unless it's an absolute path)
-            if (!path.StartsWith("Screenshots/") && !System.IO.Path.IsPathRooted(path))
-            {
-                path = "Screenshots/" + path;
-            }
+            // Always capture to Screenshots/<filename> — CaptureScreenshot requires
+            // project-relative paths (silently fails with absolute paths).
+            var capturePath = $"Screenshots/{filename}";
 
-            // Ensure directory exists
-            var directory = System.IO.Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
+            // Ensure Screenshots directory exists
+            if (!System.IO.Directory.Exists("Screenshots"))
             {
-                System.IO.Directory.CreateDirectory(directory);
-                DebugLog($"[UnityCtl] Created directory: {directory}");
+                System.IO.Directory.CreateDirectory("Screenshots");
+                DebugLog("[UnityCtl] Created Screenshots directory");
             }
 
             // Get current game view resolution
@@ -1083,41 +1079,43 @@ namespace UnityCtl
                 ForceGameViewUpdate();
             }
 
-            // Capture screenshot
+            // Capture screenshot using project-relative path
             if (width.HasValue && height.HasValue)
             {
                 // Calculate supersize multiplier based on desired width
                 int superSize = System.Math.Max(1, width.Value / actualWidth);
-                UnityEngine.ScreenCapture.CaptureScreenshot(path, superSize);
+                UnityEngine.ScreenCapture.CaptureScreenshot(capturePath, superSize);
                 actualWidth = width.Value;
                 actualHeight = height.Value;
-                DebugLog($"[UnityCtl] Capturing screenshot with supersize {superSize} to: {path}");
+                DebugLog($"[UnityCtl] Capturing screenshot with supersize {superSize} to: {capturePath}");
             }
             else if (width.HasValue)
             {
                 int superSize = System.Math.Max(1, width.Value / actualWidth);
-                UnityEngine.ScreenCapture.CaptureScreenshot(path, superSize);
+                UnityEngine.ScreenCapture.CaptureScreenshot(capturePath, superSize);
                 actualWidth = width.Value;
                 actualHeight = actualHeight * superSize;
-                DebugLog($"[UnityCtl] Capturing screenshot with width {width.Value} to: {path}");
+                DebugLog($"[UnityCtl] Capturing screenshot with width {width.Value} to: {capturePath}");
             }
             else if (height.HasValue)
             {
                 int superSize = System.Math.Max(1, height.Value / actualHeight);
-                UnityEngine.ScreenCapture.CaptureScreenshot(path, superSize);
+                UnityEngine.ScreenCapture.CaptureScreenshot(capturePath, superSize);
                 actualWidth = actualWidth * superSize;
                 actualHeight = height.Value;
-                DebugLog($"[UnityCtl] Capturing screenshot with height {height.Value} to: {path}");
+                DebugLog($"[UnityCtl] Capturing screenshot with height {height.Value} to: {capturePath}");
             }
             else
             {
-                UnityEngine.ScreenCapture.CaptureScreenshot(path);
-                DebugLog($"[UnityCtl] Capturing screenshot at game view resolution to: {path}");
+                UnityEngine.ScreenCapture.CaptureScreenshot(capturePath);
+                DebugLog($"[UnityCtl] Capturing screenshot at game view resolution to: {capturePath}");
             }
 
+            // Return project-relative capture path. CLI resolves against project root,
+            // waits for the file, and moves it to the user's desired destination.
             return new ScreenshotCaptureResult
             {
-                Path = path,
+                Path = capturePath,
                 Width = actualWidth,
                 Height = actualHeight
             };

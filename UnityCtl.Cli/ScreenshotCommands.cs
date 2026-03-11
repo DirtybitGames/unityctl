@@ -41,12 +41,14 @@ public static class ScreenshotCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
-            // Resolve project path (same logic as BridgeClient.TryCreateFromProject)
-            var resolvedProjectPath = projectPath ?? ProjectLocator.FindProjectRoot()!;
+            // Resolve user path to absolute (relative to CWD) — we'll move the file here after capture.
+            // Send only the filename to Unity; it always captures to Screenshots/<filename>.
+            string? desiredPath = path != null ? Path.GetFullPath(path) : null;
+            var filename = desiredPath != null ? Path.GetFileName(desiredPath) : null;
 
             var args = new Dictionary<string, object?>
             {
-                { "path", path },
+                { "filename", filename },
                 { "width", width },
                 { "height", height }
             };
@@ -75,9 +77,37 @@ public static class ScreenshotCommands
 
                 if (result != null)
                 {
-                    var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.Path));
-                    var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-                    Console.WriteLine($"Screenshot captured: {relativePath}");
+                    // Unity captures to a project-relative path (e.g. Screenshots/shot.png).
+                    // Resolve it against the project root to get the absolute capture path.
+                    var resolvedProjectPath = projectPath ?? ProjectLocator.FindProjectRoot()!;
+                    var capturePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.Path));
+
+                    // CaptureScreenshot writes asynchronously at end-of-frame — wait for the file.
+                    for (int i = 0; i < 50; i++)
+                    {
+                        if (File.Exists(capturePath)) break;
+                        await Task.Delay(100);
+                    }
+
+                    // Determine the final path: user's desired location, or the capture path itself.
+                    var finalPath = desiredPath ?? capturePath;
+
+                    if (!File.Exists(capturePath))
+                    {
+                        Console.Error.WriteLine($"Warning: screenshot file not written after 5s: {capturePath}");
+                    }
+                    else if (finalPath != capturePath)
+                    {
+                        // Move from Screenshots/ to user's desired destination
+                        var directory = Path.GetDirectoryName(finalPath);
+                        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                            Directory.CreateDirectory(directory);
+
+                        File.Move(capturePath, finalPath, overwrite: true);
+                    }
+
+                    var displayPath = ContextHelper.FormatPath(finalPath);
+                    Console.WriteLine($"Screenshot captured: {displayPath}");
                     Console.WriteLine($"Resolution: {result.Width}x{result.Height}");
                 }
             }

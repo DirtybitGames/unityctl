@@ -231,14 +231,33 @@ public class BridgeClient
         try
         {
             // Start bridge as fully detached process (survives terminal close, Ctrl+C doesn't affect it)
-            var startInfo = new ProcessStartInfo
+            // When running via ./uc (dev mode), UNITYCTL_REPO_ROOT is set — use dotnet run
+            // to launch the bridge from source, same as the CLI itself.
+            var repoRoot = Environment.GetEnvironmentVariable("UNITYCTL_REPO_ROOT");
+            ProcessStartInfo startInfo;
+            if (repoRoot != null)
             {
-                FileName = "unityctl-bridge",
-                Arguments = $"--project \"{projectRoot}\"",
-                UseShellExecute = true,  // Required for full detachment
-                CreateNoWindow = true,   // Run without visible window
-                WindowStyle = ProcessWindowStyle.Hidden
-            };
+                var bridgeProject = Path.GetFullPath(Path.Combine(repoRoot, "UnityCtl.Bridge"));
+                startInfo = new ProcessStartInfo
+                {
+                    FileName = "dotnet",
+                    Arguments = $"run --project \"{bridgeProject}\" -- --project \"{projectRoot}\"",
+                    UseShellExecute = true,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+            }
+            else
+            {
+                startInfo = new ProcessStartInfo
+                {
+                    FileName = "unityctl-bridge",
+                    Arguments = $"--project \"{projectRoot}\"",
+                    UseShellExecute = true,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+            }
 
             var process = Process.Start(startInfo);
             if (process == null)

@@ -101,8 +101,8 @@ public static class RecordCommands
                 if (result != null)
                 {
                     var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.OutputPath));
-                    var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-                    Console.WriteLine($"Saved {relativePath} ({result.Duration:F1}s, {result.FrameCount} frames)");
+                    var displayPath = ContextHelper.FormatPath(absolutePath);
+                    Console.WriteLine($"Saved {displayPath} ({result.Duration:F1}s, {result.FrameCount} frames)");
                 }
             }
             else
@@ -116,8 +116,8 @@ public static class RecordCommands
                 if (result != null)
                 {
                     var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.OutputPath));
-                    var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-                    Console.WriteLine($"Recording: {relativePath}");
+                    var displayPath = ContextHelper.FormatPath(absolutePath);
+                    Console.WriteLine($"Recording: {displayPath}");
                 }
             }
         });
@@ -167,8 +167,8 @@ public static class RecordCommands
                 if (result != null)
                 {
                     var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.OutputPath));
-                    var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-                    Console.WriteLine($"Saved {relativePath} ({result.Duration:F1}s, {result.FrameCount} frames)");
+                    var displayPath = ContextHelper.FormatPath(absolutePath);
+                    Console.WriteLine($"Saved {displayPath} ({result.Duration:F1}s, {result.FrameCount} frames)");
                 }
             }
         });
