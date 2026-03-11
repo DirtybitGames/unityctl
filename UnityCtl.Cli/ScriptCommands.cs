@@ -32,11 +32,6 @@ public static class ScriptCommands
         var executeCommand = new Command("execute", "Execute C# code in the Unity Editor");
         executeCommand.AddAlias("run");
 
-        var codeOption = new Option<string?>(
-            aliases: ["--code", "-c"],
-            description: "C# code to execute (must define a class with a static method)"
-        );
-
         var fileOption = new Option<FileInfo?>(
             aliases: ["--file", "-f"],
             description: "Read C# code from a file"
@@ -60,7 +55,6 @@ public static class ScriptCommands
             getDefaultValue: () => Array.Empty<string>()
         );
 
-        executeCommand.AddOption(codeOption);
         executeCommand.AddOption(fileOption);
         executeCommand.AddOption(classOption);
         executeCommand.AddOption(methodOption);
@@ -72,19 +66,14 @@ public static class ScriptCommands
             var agentId = ContextHelper.GetAgentId(context);
             var json = ContextHelper.GetJson(context);
 
-            var code = context.ParseResult.GetValueForOption(codeOption);
             var file = context.ParseResult.GetValueForOption(fileOption);
             var className = context.ParseResult.GetValueForOption(classOption) ?? "Script";
             var methodName = context.ParseResult.GetValueForOption(methodOption) ?? "Main";
 
-            // Determine code source: --code, --file, or stdin
+            // Determine code source: --file or stdin
             string? csharpCode = null;
 
-            if (!string.IsNullOrEmpty(code))
-            {
-                csharpCode = code;
-            }
-            else if (file != null)
+            if (file != null)
             {
                 if (!file.Exists)
                 {
@@ -102,10 +91,9 @@ public static class ScriptCommands
 
             if (string.IsNullOrWhiteSpace(csharpCode))
             {
-                Console.Error.WriteLine("Error: No C# code provided. Use --code, --file, or pipe code via stdin.");
+                Console.Error.WriteLine("Error: No C# code provided. Use --file or pipe code via stdin.");
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("Example:");
-                Console.Error.WriteLine("  unityctl script execute -c \"public class Script { public static object Main() { return 42; } }\"");
                 Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs");
                 Console.Error.WriteLine("  unityctl script execute -f ./MyScript.cs -- arg1 arg2 \"arg with spaces\"");
                 Console.Error.WriteLine("  cat MyScript.cs | unityctl script execute");

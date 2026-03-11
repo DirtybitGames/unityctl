@@ -117,7 +117,7 @@ unityctl script eval 'args[0]' -- hello
 
 ### Full Script Execution
 
-For complex scripts with custom classes, multiple methods, or file-based execution. Write a script file with a class containing a static `Main()` method returning `object` (JSON-serialized):
+For complex scripts with custom classes, multiple methods, or logic beyond a single expression. Use the Write tool to create a `.cs` file, then execute it. The script must define a class with a static `Main()` method returning `object` (JSON-serialized):
 
 ```cs
 // /tmp/MyScript.cs
@@ -135,11 +135,12 @@ public class Script
 
 ```bash
 unityctl script execute -f /tmp/MyScript.cs
-unityctl script execute -c 'using UnityEngine; public class Script { public static object Main() => Application.version; }'
 unityctl script execute -f /tmp/SpawnObjects.cs -- Cube 5 'My Object'
 ```
 
 Use `Main(string[] args)` to accept arguments passed after `--`.
+
+**Important:** Always use the Write tool to create the `.cs` file rather than shell heredocs (`cat << 'EOF'`), which break on single quotes in C# code.
 
 Use `-t <seconds>` on `script eval`/`script execute` for long-running operations (default 30s):
 
