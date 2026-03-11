@@ -459,7 +459,7 @@ public class BridgeState
     /// Set ignoreWatermark=true to get full history.
     /// Set count=0 to get all matching logs (no limit).
     /// </summary>
-    public UnifiedLogEntry[] GetRecentUnifiedLogs(int count, string? source = null, bool ignoreWatermark = false)
+    public UnifiedLogEntry[] GetRecentUnifiedLogs(int count, string? source = null, bool ignoreWatermark = false, string? level = null)
     {
         lock (_lock)
         {
@@ -476,6 +476,12 @@ public class BridgeState
                 filtered = filtered.Where(e => e.Source == source);
             }
 
+            if (!string.IsNullOrEmpty(level))
+            {
+                var minSeverity = GetMinSeverity(level);
+                filtered = filtered.Where(e => GetSeverityRank(e.Level) >= minSeverity);
+            }
+
             // count=0 means return all matching logs
             if (count > 0)
             {
@@ -484,6 +490,23 @@ public class BridgeState
             return filtered.ToArray();
         }
     }
+
+    internal static int GetMinSeverity(string level) => level.ToLowerInvariant() switch
+    {
+        "error" => 3,
+        "warning" or "warn" => 2,
+        "log" or "info" => 1,
+        _ => 0
+    };
+
+    internal static int GetSeverityRank(string level) => level switch
+    {
+        "Exception" => 4,
+        "Error" => 3,
+        "Warning" => 2,
+        "Log" or "Info" => 1,
+        _ => 0
+    };
 
     #region Log Clearing
 

@@ -588,4 +588,110 @@ public class BridgeStateTests
     }
 
     #endregion
+
+    #region Log Level Filtering
+
+    private BridgeState CreateStateWithMixedLogs()
+    {
+        var state = new BridgeState("proj-test");
+        state.AddConsoleLogEntry(new LogEntry { Timestamp = "2024-01-01T12:00:00Z", Level = LogLevel.Log, Message = "Debug info" });
+        state.AddConsoleLogEntry(new LogEntry { Timestamp = "2024-01-01T12:00:01Z", Level = LogLevel.Warning, Message = "Something iffy" });
+        state.AddConsoleLogEntry(new LogEntry { Timestamp = "2024-01-01T12:00:02Z", Level = LogLevel.Error, Message = "Broken" });
+        state.AddConsoleLogEntry(new LogEntry { Timestamp = "2024-01-01T12:00:03Z", Level = LogLevel.Exception, Message = "Crashed" });
+        state.AddConsoleLogEntry(new LogEntry { Timestamp = "2024-01-01T12:00:04Z", Level = LogLevel.Log, Message = "More info" });
+        return state;
+    }
+
+    [Fact]
+    public void GetRecentUnifiedLogs_LevelError_ReturnsErrorsAndExceptions()
+    {
+        var state = CreateStateWithMixedLogs();
+        var logs = state.GetRecentUnifiedLogs(0, level: "error");
+        Assert.Equal(2, logs.Length);
+        Assert.Equal("Broken", logs[0].Message);
+        Assert.Equal("Crashed", logs[1].Message);
+    }
+
+    [Fact]
+    public void GetRecentUnifiedLogs_LevelWarning_ReturnsWarningAndAbove()
+    {
+        var state = CreateStateWithMixedLogs();
+        var logs = state.GetRecentUnifiedLogs(0, level: "warning");
+        Assert.Equal(3, logs.Length);
+        Assert.Equal("Something iffy", logs[0].Message);
+        Assert.Equal("Broken", logs[1].Message);
+        Assert.Equal("Crashed", logs[2].Message);
+    }
+
+    [Fact]
+    public void GetRecentUnifiedLogs_LevelLog_ReturnsAll()
+    {
+        var state = CreateStateWithMixedLogs();
+        var logs = state.GetRecentUnifiedLogs(0, level: "log");
+        Assert.Equal(5, logs.Length);
+    }
+
+    [Fact]
+    public void GetRecentUnifiedLogs_NoLevel_ReturnsAll()
+    {
+        var state = CreateStateWithMixedLogs();
+        var logs = state.GetRecentUnifiedLogs(0);
+        Assert.Equal(5, logs.Length);
+    }
+
+    [Fact]
+    public void GetRecentUnifiedLogs_LevelWithCount_AppliesAfterFilter()
+    {
+        var state = CreateStateWithMixedLogs();
+        // Only 2 entries match "error" level, requesting last 1
+        var logs = state.GetRecentUnifiedLogs(1, level: "error");
+        Assert.Single(logs);
+        Assert.Equal("Crashed", logs[0].Message);
+    }
+
+    [Fact]
+    public void GetRecentUnifiedLogs_LevelAliases_Work()
+    {
+        var state = CreateStateWithMixedLogs();
+
+        var warnLogs = state.GetRecentUnifiedLogs(0, level: "warn");
+        Assert.Equal(3, warnLogs.Length);
+
+        var infoLogs = state.GetRecentUnifiedLogs(0, level: "info");
+        Assert.Equal(5, infoLogs.Length);
+    }
+
+    [Fact]
+    public void GetRecentUnifiedLogs_LevelCaseInsensitive()
+    {
+        var state = CreateStateWithMixedLogs();
+        var logs = state.GetRecentUnifiedLogs(0, level: "ERROR");
+        Assert.Equal(2, logs.Length);
+    }
+
+    [Theory]
+    [InlineData("Exception", 4)]
+    [InlineData("Error", 3)]
+    [InlineData("Warning", 2)]
+    [InlineData("Log", 1)]
+    [InlineData("Info", 1)]
+    [InlineData("Unknown", 0)]
+    public void GetSeverityRank_ReturnsCorrectValues(string level, int expected)
+    {
+        Assert.Equal(expected, BridgeState.GetSeverityRank(level));
+    }
+
+    [Theory]
+    [InlineData("error", 3)]
+    [InlineData("warning", 2)]
+    [InlineData("warn", 2)]
+    [InlineData("log", 1)]
+    [InlineData("info", 1)]
+    [InlineData("garbage", 0)]
+    public void GetMinSeverity_ReturnsCorrectValues(string level, int expected)
+    {
+        Assert.Equal(expected, BridgeState.GetMinSeverity(level));
+    }
+
+    #endregion
 }
