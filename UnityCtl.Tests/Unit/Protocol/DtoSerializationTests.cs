@@ -157,6 +157,7 @@ public class DtoSerializationTests
         var result = new ScreenshotCaptureResult
         {
             Path = "/tmp/screenshot.png",
+            TempPath = "Temp/screenshot_abc123.png",
             Width = 1920,
             Height = 1080
         };

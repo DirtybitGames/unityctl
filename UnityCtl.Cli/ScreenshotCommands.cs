@@ -79,21 +79,34 @@ public static class ScreenshotCommands
 
                 if (result != null)
                 {
-                    // Unity returns an absolute path; wait for the file to exist
-                    // since ScreenCapture.CaptureScreenshot writes asynchronously at end-of-frame
-                    var absolutePath = result.Path;
+                    // CaptureScreenshot writes asynchronously at end-of-frame to a temp
+                    // project-relative path. Wait for that file, then move to final destination.
+                    var tempPath = result.TempPath;
+                    var finalPath = result.Path;
+
                     for (int i = 0; i < 50; i++)
                     {
-                        if (File.Exists(absolutePath)) break;
+                        if (File.Exists(tempPath)) break;
                         await Task.Delay(100);
                     }
 
-                    if (!File.Exists(absolutePath))
+                    if (!File.Exists(tempPath))
                     {
-                        Console.Error.WriteLine($"Warning: screenshot file not written after 5s: {absolutePath}");
+                        Console.Error.WriteLine($"Warning: screenshot file not written after 5s: {tempPath}");
+                    }
+                    else if (tempPath != finalPath)
+                    {
+                        // Ensure destination directory exists
+                        var directory = Path.GetDirectoryName(finalPath);
+                        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                            Directory.CreateDirectory(directory);
+
+                        if (File.Exists(finalPath))
+                            File.Delete(finalPath);
+                        File.Move(tempPath, finalPath);
                     }
 
-                    var displayPath = ContextHelper.FormatPath(absolutePath);
+                    var displayPath = ContextHelper.FormatPath(finalPath);
                     Console.WriteLine($"Screenshot captured: {displayPath}");
                     Console.WriteLine($"Resolution: {result.Width}x{result.Height}");
                 }

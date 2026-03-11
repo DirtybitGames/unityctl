@@ -28,7 +28,7 @@ public class ConcurrencyTests : IAsyncLifetime
                 new PlayModeResult { State = PlayModeState.Stopped })
             .OnCommandWithDelay(UnityCtlCommands.ScreenshotCapture,
                 TimeSpan.FromMilliseconds(100),
-                _ => new ScreenshotCaptureResult { Path = "/tmp/shot.png", Width = 1920, Height = 1080 });
+                _ => new ScreenshotCaptureResult { Path = "/tmp/shot.png", TempPath = "Temp/shot.png", Width = 1920, Height = 1080 });
     }
 
     public Task DisposeAsync() => _fixture.DisposeAsync();
