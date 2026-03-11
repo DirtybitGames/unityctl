@@ -1043,26 +1043,30 @@ namespace UnityCtl
             var width = GetIntArgument(request, "width");
             var height = GetIntArgument(request, "height");
 
+            var projectRoot = System.IO.Path.GetDirectoryName(UnityEngine.Application.dataPath)!;
+
             // Generate default path with timestamp if not provided
             if (string.IsNullOrEmpty(path))
             {
                 var timestamp = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                path = $"Screenshots/screenshot_{timestamp}.png";
+                path = System.IO.Path.Combine(projectRoot, "Screenshots", $"screenshot_{timestamp}.png");
             }
 
-            // Ensure path uses forward slashes and has .png extension
-            path = path.Replace("\\", "/");
+            // Ensure .png extension
             if (!path.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
                 !path.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
             {
                 path += ".png";
             }
 
-            // If path doesn't start with Screenshots/, prepend it (unless it's an absolute path)
-            if (!path.StartsWith("Screenshots/") && !System.IO.Path.IsPathRooted(path))
+            // Resolve to absolute if relative (shouldn't happen since CLI resolves, but defensive)
+            if (!System.IO.Path.IsPathRooted(path))
             {
-                path = "Screenshots/" + path;
+                path = System.IO.Path.GetFullPath(System.IO.Path.Combine(projectRoot, path));
             }
+
+            // Normalize to forward slashes for Unity
+            path = path.Replace("\\", "/");
 
             // Ensure directory exists
             var directory = System.IO.Path.GetDirectoryName(path);

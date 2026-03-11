@@ -41,8 +41,12 @@ public static class ScreenshotCommands
             var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
             if (client == null) { context.ExitCode = 1; return; }
 
-            // Resolve project path (same logic as BridgeClient.TryCreateFromProject)
-            var resolvedProjectPath = projectPath ?? ProjectLocator.FindProjectRoot()!;
+            // Resolve user-provided path to absolute (relative to CWD) before sending to Unity.
+            // This eliminates ambiguity about which directory "relative" means.
+            if (path != null)
+            {
+                path = Path.GetFullPath(path);
+            }
 
             var args = new Dictionary<string, object?>
             {
@@ -75,9 +79,17 @@ public static class ScreenshotCommands
 
                 if (result != null)
                 {
-                    var absolutePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.Path));
-                    var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-                    Console.WriteLine($"Screenshot captured: {relativePath}");
+                    // Unity returns an absolute path; wait for the file to exist
+                    // since ScreenCapture.CaptureScreenshot writes asynchronously at end-of-frame
+                    var absolutePath = result.Path;
+                    for (int i = 0; i < 50; i++)
+                    {
+                        if (File.Exists(absolutePath)) break;
+                        await Task.Delay(100);
+                    }
+
+                    var displayPath = ContextHelper.FormatPath(absolutePath);
+                    Console.WriteLine($"Screenshot captured: {displayPath}");
                     Console.WriteLine($"Resolution: {result.Width}x{result.Height}");
                 }
             }
