@@ -1069,17 +1069,25 @@ namespace UnityCtl
             path = path.Replace("\\", "/");
 
             // ScreenCapture.CaptureScreenshot requires project-relative paths — absolute paths
-            // silently fail. Convert to relative for the capture call, keep absolute for the response.
-            var capturePath = path;
+            // silently fail. For paths under the project root, convert to relative. For paths
+            // outside the project, capture to a temp project-relative file and move it afterwards.
+            string capturePath;
+            bool needsMove = false;
             var projectRootNormalized = projectRoot.Replace("\\", "/");
             if (!projectRootNormalized.EndsWith("/"))
                 projectRootNormalized += "/";
-            if (path.StartsWith(projectRootNormalized, System.StringComparison.OrdinalIgnoreCase))
+            if (path.StartsWith(projectRootNormalized, System.StringComparison.Ordinal))
             {
                 capturePath = path.Substring(projectRootNormalized.Length);
             }
+            else
+            {
+                // Out-of-project path: capture to temp file, move after write
+                capturePath = $"Temp/screenshot_{System.Guid.NewGuid():N}.png";
+                needsMove = true;
+            }
 
-            // Ensure directory exists
+            // Ensure destination directory exists
             var directory = System.IO.Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
             {
@@ -1128,6 +1136,31 @@ namespace UnityCtl
             {
                 UnityEngine.ScreenCapture.CaptureScreenshot(capturePath);
                 DebugLog($"[UnityCtl] Capturing screenshot at game view resolution to: {capturePath}");
+            }
+
+            // If captured to a temp file, schedule a move to the real destination.
+            // CaptureScreenshot writes asynchronously at end-of-frame, so we poll via update.
+            if (needsMove)
+            {
+                var tempAbsolute = System.IO.Path.Combine(projectRoot, capturePath).Replace("\\", "/");
+                var finalPath = path;
+                void MoveWhenReady()
+                {
+                    if (!System.IO.File.Exists(tempAbsolute)) return;
+                    EditorApplication.update -= MoveWhenReady;
+                    try
+                    {
+                        if (System.IO.File.Exists(finalPath))
+                            System.IO.File.Delete(finalPath);
+                        System.IO.File.Move(tempAbsolute, finalPath);
+                        DebugLog($"[UnityCtl] Moved screenshot to: {finalPath}");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        UnityEngine.Debug.LogError($"[UnityCtl] Failed to move screenshot: {ex.Message}");
+                    }
+                }
+                EditorApplication.update += MoveWhenReady;
             }
 
             // Return absolute path so CLI can display it without project-root guessing

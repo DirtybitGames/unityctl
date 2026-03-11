@@ -58,7 +58,8 @@ internal static class ContextHelper
     public static string FormatPath(string absolutePath)
     {
         var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, absolutePath);
-        return relativePath.StartsWith("..") ? absolutePath : relativePath;
+        return relativePath.StartsWith(".." + Path.DirectorySeparatorChar) || relativePath == ".."
+            ? absolutePath : relativePath;
     }
 
     /// <summary>

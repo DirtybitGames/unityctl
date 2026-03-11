@@ -88,6 +88,11 @@ public static class ScreenshotCommands
                         await Task.Delay(100);
                     }
 
+                    if (!File.Exists(absolutePath))
+                    {
+                        Console.Error.WriteLine($"Warning: screenshot file not written after 5s: {absolutePath}");
+                    }
+
                     var displayPath = ContextHelper.FormatPath(absolutePath);
                     Console.WriteLine($"Screenshot captured: {displayPath}");
                     Console.WriteLine($"Resolution: {result.Width}x{result.Height}");
