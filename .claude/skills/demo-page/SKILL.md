@@ -66,7 +66,7 @@ This prints all the `showboat init/note/exec/image` commands needed to recreate 
 - Normalize backslash path separators in output to forward slashes for readability
 - The `--project` flag is not needed — unityctl auto-detects the project
 - Prefer `script eval` over `script execute` for simple expressions
-- Use `script execute -f` only for multi-class scripts
+- Use `script execute file.cs` only for multi-class scripts
 
 ## Generating HTML
 

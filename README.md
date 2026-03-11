@@ -35,14 +35,31 @@ The agent can see the game running and read any Debug.Log output.
 Run any C# code in the editor—create objects, set properties, click buttons, open windows, whatever:
 
 ```bash
-# Spawn a cube at the origin
-unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { return GameObject.CreatePrimitive(PrimitiveType.Cube).name; } }"
+# Quick one-liners with eval (common usings auto-included)
+unityctl script eval 'GameObject.CreatePrimitive(PrimitiveType.Cube).name'
+unityctl script eval 'var p = GameObject.Find("Player"); p.transform.position = new Vector3(0, 10, 0); return "moved";'
 
-# Find the player and move them
-unityctl script execute -c "using UnityEngine; public class Script { public static object Main() { var p = GameObject.Find(\"Player\"); p.transform.position = new Vector3(0, 10, 0); return \"moved\"; } }"
+# Multi-line scripts: write a .cs file, then execute
+unityctl script execute /tmp/SpawnObjects.cs -- Cube 5
+```
 
-# Pass arguments to scripts (use -- separator)
-unityctl script execute -f SpawnObjects.cs -- Cube 5
+For full scripts, define a class with a static `Main()` method:
+
+```cs
+// /tmp/SpawnObjects.cs
+using UnityEngine;
+
+public class Script
+{
+    public static object Main(string[] args)
+    {
+        var type = (PrimitiveType)System.Enum.Parse(typeof(PrimitiveType), args[0]);
+        var count = int.Parse(args[1]);
+        for (int i = 0; i < count; i++)
+            GameObject.CreatePrimitive(type).transform.position = new Vector3(i * 2, 0, 0);
+        return $"Spawned {count} {args[0]}(s)";
+    }
+}
 ```
 
 ## Installation
