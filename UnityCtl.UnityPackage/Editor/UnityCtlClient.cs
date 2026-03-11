@@ -1666,14 +1666,9 @@ namespace UnityCtl
                     return go.GetComponents<Component>().Any(c => c != null && c.GetType().Name == filterValue)
                         || CheckChildrenForType(go.transform, filterValue);
                 case "name":
-                    if (filterValue.EndsWith("*"))
-                    {
-                        var prefix = filterValue.TrimEnd('*');
-                        return go.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                            || CheckChildrenForName(go.transform, prefix, wildcard: true);
-                    }
-                    return string.Equals(go.name, filterValue, StringComparison.OrdinalIgnoreCase)
-                        || CheckChildrenForName(go.transform, filterValue, wildcard: false);
+                    var nameMode = GetNameMatchMode(filterValue, out var namePattern);
+                    return MatchesName(go.name, namePattern, nameMode)
+                        || CheckChildrenForName(go.transform, namePattern, nameMode);
                 case "tag":
                     return go.CompareTag(filterValue)
                         || CheckChildrenForTag(go.transform, filterValue);
@@ -1708,15 +1703,54 @@ namespace UnityCtl
             return false;
         }
 
-        private static bool CheckChildrenForName(Transform parent, string name, bool wildcard)
+        private enum NameMatchMode { Exact, Prefix, Suffix, Contains }
+
+        private static NameMatchMode GetNameMatchMode(string filterValue, out string pattern)
+        {
+            bool startWild = filterValue.StartsWith("*");
+            bool endWild = filterValue.EndsWith("*");
+            if (startWild && endWild)
+            {
+                pattern = filterValue.Trim('*');
+                return NameMatchMode.Contains;
+            }
+            if (endWild)
+            {
+                pattern = filterValue.TrimEnd('*');
+                return NameMatchMode.Prefix;
+            }
+            if (startWild)
+            {
+                pattern = filterValue.TrimStart('*');
+                return NameMatchMode.Suffix;
+            }
+            pattern = filterValue;
+            return NameMatchMode.Exact;
+        }
+
+        private static bool MatchesName(string name, string pattern, NameMatchMode mode)
+        {
+            switch (mode)
+            {
+                case NameMatchMode.Contains:
+                    return name.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0;
+                case NameMatchMode.Prefix:
+                    return name.StartsWith(pattern, StringComparison.OrdinalIgnoreCase);
+                case NameMatchMode.Suffix:
+                    return name.EndsWith(pattern, StringComparison.OrdinalIgnoreCase);
+                default:
+                    return string.Equals(name, pattern, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private static bool CheckChildrenForName(Transform parent, string pattern, NameMatchMode mode)
         {
             for (int i = 0; i < parent.childCount; i++)
             {
                 var child = parent.GetChild(i);
-                if (wildcard ? child.name.StartsWith(name, StringComparison.OrdinalIgnoreCase)
-                             : string.Equals(child.name, name, StringComparison.OrdinalIgnoreCase))
+                if (MatchesName(child.name, pattern, mode))
                     return true;
-                if (CheckChildrenForName(child, name, wildcard))
+                if (CheckChildrenForName(child, pattern, mode))
                     return true;
             }
             return false;
