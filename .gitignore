@@ -10,17 +10,13 @@ obj/
 packages/
 artifacts/
 
-# Unity
-unity-project/Library/
-unity-project/Temp/
-unity-project/Logs/
-unity-project/UserSettings/
-unity-project/*.csproj
-unity-project/*.sln
-
 # UnityCtl runtime
 **/.unityctl/bridge.json
 **/.unityctl/editor.log
 **/.unityctl/editor-prev.log
 
 **/.claude/settings.local.json
+
+# Demo page (built via /demo-page skill, published on gh-pages branch)
+demo.md
+demo.html

@@ -20,6 +20,9 @@
 # Recordings can get excessive in size
 /[Rr]ecordings/
 
+# Screenshots from unityctl
+/[Ss]creenshots/
+
 # Uncomment this line if you wish to ignore the asset store tools plugin
 # /[Aa]ssets/AssetStoreTools*
 

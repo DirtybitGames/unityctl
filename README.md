@@ -2,6 +2,8 @@
 
 Let AI agents drive the Unity Editor. Edit scripts, compile, play, screenshot, debug—all from the command line.
 
+**[See it in action](https://dirtybitgames.github.io/unityctl/)**
+
 ## What Can AI Do With This?
 
 ### Edit and Compile
