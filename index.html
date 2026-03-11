@@ -10,6 +10,7 @@
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; max-width: 880px; margin: 0 auto; padding: 40px 24px; }
   h1 { font-size: 2em; margin: 0 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
   h2 { font-size: 1.4em; margin: 32px 0 12px; color: var(--accent); }
+  h3 { font-size: 1.1em; margin: 24px 0 8px; }
   p { margin: 8px 0; }
   p.meta { color: var(--muted); font-size: 0.85em; margin-bottom: 20px; }
   code { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 0.9em; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
@@ -19,12 +20,15 @@
   pre.output { background: var(--output-bg); border-left: 3px solid var(--green); color: var(--muted); }
   img { display: block; }
   video { display: block; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
   strong { color: #fff; }
 </style>
 </head>
 <body>
 <h1>UnityCtl — AI-Driven Unity Editor Control</h1>
 <p class="meta">2026-03-11T07:45:55Z by Showboat 0.6.1</p>
+<p><a href="https://github.com/DirtybitGames/unityctl">github.com/DirtybitGames/unityctl</a></p>
 <p>unityctl lets AI agents remote-control a live Unity Editor through a lightweight bridge daemon. No batch mode required — the Editor stays open, interactive, and fully observable.</p>
 <h2>Checking Status</h2>
 <p>First, check that the bridge and Unity Editor are connected.</p>
