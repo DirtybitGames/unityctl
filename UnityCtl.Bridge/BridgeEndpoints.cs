@@ -996,9 +996,9 @@ public static class BridgeEndpoints
         });
 
         // Unified logs tail endpoint (lines=0 means all logs since clear)
-        app.MapGet("/logs/tail", ([FromQuery] int lines = 0, [FromQuery] string source = "console", [FromQuery] bool full = false) =>
+        app.MapGet("/logs/tail", ([FromQuery] int lines = 0, [FromQuery] string source = "console", [FromQuery] bool full = false, [FromQuery] string? level = null) =>
         {
-            var entries = state.GetRecentUnifiedLogs(lines, source, ignoreWatermark: full);
+            var entries = state.GetRecentUnifiedLogs(lines, source, ignoreWatermark: full, level: level);
             var clearInfo = full ? null : state.GetClearInfo();
             return new
             {
@@ -1017,7 +1017,7 @@ public static class BridgeEndpoints
         });
 
         // Unified logs stream endpoint (SSE)
-        app.MapGet("/logs/stream", async (HttpContext context, [FromQuery] string source = "console") =>
+        app.MapGet("/logs/stream", async (HttpContext context, [FromQuery] string source = "console", [FromQuery] string? level = null) =>
         {
             context.Response.Headers["Content-Type"] = "text/event-stream";
             context.Response.Headers["Cache-Control"] = "no-cache";
@@ -1025,6 +1025,7 @@ public static class BridgeEndpoints
             await context.Response.Body.FlushAsync(context.RequestAborted);
 
             var reader = state.SubscribeToLogs();
+            var minSeverity = !string.IsNullOrEmpty(level) ? BridgeState.GetMinSeverity(level) : 0;
 
             try
             {
@@ -1032,6 +1033,10 @@ public static class BridgeEndpoints
                 {
                     // Filter by source if specified
                     if (source != "all" && entry.Source != source)
+                        continue;
+
+                    // Filter by level if specified
+                    if (minSeverity > 0 && BridgeState.GetSeverityRank(entry.Level) < minSeverity)
                         continue;
 
                     var json = JsonConvert.SerializeObject(entry, JsonHelper.Settings);

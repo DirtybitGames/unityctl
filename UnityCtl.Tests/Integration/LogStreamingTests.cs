@@ -162,6 +162,119 @@ public class LogStreamingTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LogsTail_LevelError_FiltersToErrorsAndExceptions()
+    {
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:00Z",
+            Level = LogLevel.Log,
+            Message = "Info message"
+        });
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:01Z",
+            Level = LogLevel.Warning,
+            Message = "Warning message"
+        });
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:02Z",
+            Level = LogLevel.Error,
+            Message = "Error message"
+        });
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:03Z",
+            Level = LogLevel.Exception,
+            Message = "Exception message"
+        });
+        await Task.Delay(200);
+
+        var response = await _fixture.HttpClient.GetAsync("/logs/tail?lines=0&source=console&level=error");
+        var json = await response.Content.ReadAsStringAsync();
+        var result = JObject.Parse(json);
+        var entries = result["entries"] as JArray;
+
+        Assert.NotNull(entries);
+        Assert.Equal(2, entries.Count);
+        Assert.Equal("Error message", entries[0]["message"]?.ToString());
+        Assert.Equal("Exception message", entries[1]["message"]?.ToString());
+    }
+
+    [Fact]
+    public async Task LogsTail_LevelWarning_FiltersToWarningAndAbove()
+    {
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:00Z",
+            Level = LogLevel.Log,
+            Message = "Info message"
+        });
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:01Z",
+            Level = LogLevel.Warning,
+            Message = "Warning message"
+        });
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:02Z",
+            Level = LogLevel.Error,
+            Message = "Error message"
+        });
+        await Task.Delay(200);
+
+        var response = await _fixture.HttpClient.GetAsync("/logs/tail?lines=0&source=console&level=warning");
+        var json = await response.Content.ReadAsStringAsync();
+        var result = JObject.Parse(json);
+        var entries = result["entries"] as JArray;
+
+        Assert.NotNull(entries);
+        Assert.Equal(2, entries.Count);
+        Assert.Equal("Warning message", entries[0]["message"]?.ToString());
+        Assert.Equal("Error message", entries[1]["message"]?.ToString());
+    }
+
+    [Fact]
+    public async Task LogsStream_LevelFilter_OnlyStreamsMatchingEntries()
+    {
+        // Start SSE stream with level=error filter
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var request = new HttpRequestMessage(HttpMethod.Get, "/logs/stream?source=console&level=error");
+        var response = await _fixture.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+
+        Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        await Task.Delay(100);
+
+        // Send a Log-level entry (should be filtered out)
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:00Z",
+            Level = LogLevel.Log,
+            Message = "Should be filtered"
+        });
+
+        // Send an Error-level entry (should come through)
+        await _fixture.FakeUnity.SendEventAsync(UnityCtlEvents.Log, new LogEntry
+        {
+            Timestamp = "2024-01-01T12:00:01Z",
+            Level = LogLevel.Error,
+            Message = "Should arrive"
+        });
+
+        var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        var line = await reader.ReadLineAsync(cts.Token);
+        Assert.NotNull(line);
+        Assert.StartsWith("data: ", line);
+
+        var eventJson = line["data: ".Length..];
+        var logEntry = JObject.Parse(eventJson);
+        Assert.Equal("Should arrive", logEntry["message"]?.ToString());
+    }
+
+    [Fact]
     public async Task LogsStream_ReceivesSSEEvents()
     {
         // Start SSE stream

@@ -41,12 +41,18 @@ public static class LogsCommand
             "--stack",
             "Show stack traces for log entries");
 
+        var levelOption = new Option<string?>(
+            ["--level", "-l"],
+            "Minimum log level: log, warning, error (default: all)");
+        levelOption.FromAmong("log", "info", "warning", "warn", "error");
+
         logsCommand.AddOption(followOption);
         logsCommand.AddOption(linesOption);
         logsCommand.AddOption(noColorOption);
         logsCommand.AddOption(verboseOption);
         logsCommand.AddOption(fullOption);
         logsCommand.AddOption(stackOption);
+        logsCommand.AddOption(levelOption);
 
         logsCommand.SetHandler(async (InvocationContext context) =>
         {
@@ -57,8 +63,9 @@ public static class LogsCommand
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var full = context.ParseResult.GetValueForOption(fullOption);
             var stack = context.ParseResult.GetValueForOption(stackOption);
+            var level = context.ParseResult.GetValueForOption(levelOption);
 
-            await ShowLogsAsync(context, projectPath, follow, lines, noColor, verbose, full, stack);
+            await ShowLogsAsync(context, projectPath, follow, lines, noColor, verbose, full, stack, level);
         });
 
         // Add 'logs clear' subcommand
@@ -129,7 +136,8 @@ public static class LogsCommand
         bool noColor,
         bool verbose,
         bool full,
-        bool stack)
+        bool stack,
+        string? level)
     {
         // Find project and bridge config
         var projectRoot = projectPath != null
@@ -161,7 +169,10 @@ public static class LogsCommand
         // lines=0 means all logs since clear, lines>0 limits to N lines
         try
         {
-            var response = await httpClient.GetAsync($"/logs/tail?lines={lines}&source=console&full={full.ToString().ToLower()}");
+            var url = $"/logs/tail?lines={lines}&source=console&full={full.ToString().ToLower()}";
+            if (!string.IsNullOrEmpty(level))
+                url += $"&level={Uri.EscapeDataString(level)}";
+            var response = await httpClient.GetAsync(url);
             if (!response.IsSuccessStatusCode)
             {
                 Console.Error.WriteLine($"Error: Bridge returned {response.StatusCode}");
@@ -209,7 +220,7 @@ public static class LogsCommand
 
             try
             {
-                await StreamLogsAsync(httpClient, noColor, verbose, stack, cts.Token);
+                await StreamLogsAsync(httpClient, noColor, verbose, stack, level, cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -228,10 +239,14 @@ public static class LogsCommand
         bool noColor,
         bool verbose,
         bool stack,
+        string? level,
         CancellationToken ct)
     {
+        var streamUrl = "/logs/stream?source=console";
+        if (!string.IsNullOrEmpty(level))
+            streamUrl += $"&level={Uri.EscapeDataString(level)}";
         using var response = await httpClient.GetAsync(
-            "/logs/stream?source=console",
+            streamUrl,
             HttpCompletionOption.ResponseHeadersRead,
             ct);
 
