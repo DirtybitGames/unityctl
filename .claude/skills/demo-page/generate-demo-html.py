@@ -1,55 +1,74 @@
 #!/usr/bin/env python3
-"""Convert demo.md (showboat document) into a self-contained HTML file.
+"""Convert a showboat document into an HTML file for GitHub Pages.
 
-Embeds all referenced PNG images and the demo video as base64 data URIs.
-Produces demo.html with a dark theme suitable for GitHub Pages.
+Images and video are referenced as relative paths (not embedded).
+The script copies media files into an output directory for deployment.
+
+Media discovery:
+- Images: found via ![alt](path) markdown references
+- Videos: found via file paths ending in video extensions (.mp4, .webm, .mov)
+  mentioned in output blocks. A <video> element is inserted after the output
+  block that references each video.
 
 Usage:
-    python3 scripts/generate-demo-html.py [demo.md] [demo.html]
+    python3 generate-demo-html.py [input.md] [out-dir]
+
+Output directory structure:
+    out-dir/
+      index.html
+      demo.md
+      images/screenshot-1.png
+      video/recording.mp4
 """
 
-import base64
 import html as html_mod
 import re
+import shutil
 import sys
 from pathlib import Path
 
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
 
-def embed_b64(path: str) -> str:
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
+GITHUB_ICON = (
+    '<svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" '
+    'style="vertical-align:text-bottom;margin-right:6px;">'
+    '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17'
+    ".55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94"
+    "-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87"
+    " 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59"
+    ".82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27"
+    ".68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51"
+    '.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 '
+    '1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"'
+    "/></svg>"
+)
+
+MIME_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/mp4"}
 
 
-def process_inline(text: str, images: dict[str, str]) -> str:
+def find_video_paths(text: str) -> list[str]:
+    """Find file paths with video extensions in text (handles both / and \\ separators)."""
+    paths = []
+    for m in re.finditer(r"[\w./\\:-]+\.(?:mp4|webm|mov)\b", text):
+        paths.append(m.group(0))
+    return paths
+
+
+def process_inline(text: str, image_map: dict[str, str]) -> str:
+    """Convert inline markdown to HTML. image_map maps original paths to output hrefs."""
     text = html_mod.escape(text)
     text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
 
     def img_replace(m):
         alt, path = m.group(1), m.group(2)
-        if path in images:
-            return (
-                f'<img src="data:image/png;base64,{images[path]}" '
-                f'alt="{alt}" style="max-width:100%;border-radius:8px;margin:8px 0;">'
-            )
-        return m.group(0)
+        href = image_map.get(path, path)
+        return (
+            f'<img src="{href}" alt="{alt}" '
+            f'style="max-width:100%;border-radius:8px;margin:8px 0;">'
+        )
 
-    text = re.sub(r"!\[([^\]]*)\]\(([^)]+\.png)\)", img_replace, text)
-
-    # GitHub links get a button with octocat icon
-    GITHUB_ICON = (
-        '<svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" '
-        'style="vertical-align:text-bottom;margin-right:6px;">'
-        '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17'
-        ".55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94"
-        "-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87"
-        " 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59"
-        ".82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27"
-        ".68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51"
-        '.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 '
-        '1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"'
-        "/></svg>"
-    )
+    text = re.sub(r"!\[([^\]]*)\]\(([^)]+\.(?:png|jpg|jpeg|gif|webp|svg))\)", img_replace, text)
 
     def link_replace(m):
         label, url = m.group(1), m.group(2)
@@ -60,31 +79,57 @@ def process_inline(text: str, images: dict[str, str]) -> str:
             )
         return f'<a href="{url}">{label}</a>'
 
-    # Markdown links (after images so ![...](...) isn't matched twice)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link_replace, text)
     return text
 
 
-def convert(md_path: str, html_path: str):
+def convert(md_path: str, out_dir: str):
     md = Path(md_path).read_text(encoding="utf-8")
+    out_path = Path(out_dir)
+    img_dir = out_path / "images"
+    vid_dir = out_path / "video"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    vid_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect images
-    images = {}
-    for m in re.finditer(r"!\[([^\]]*)\]\(([^)]+\.png)\)", md):
+    # Discover and copy images — map original paths to output hrefs
+    image_map: dict[str, str] = {}
+    img_idx = 0
+    for m in re.finditer(r"!\[([^\]]*)\]\(([^)]+\.(?:png|jpg|jpeg|gif|webp|svg))\)", md):
         path = m.group(2)
-        if path not in images:
-            try:
-                images[path] = embed_b64(path)
-            except FileNotFoundError:
-                print(f"Warning: image not found: {path}", file=sys.stderr)
+        if path in image_map:
+            continue
+        src = Path(path)
+        if src.exists():
+            img_idx += 1
+            dest_name = f"screenshot-{img_idx}{src.suffix}"
+            shutil.copy2(src, img_dir / dest_name)
+            image_map[path] = f"images/{dest_name}"
+            print(f"  Copied {path} -> images/{dest_name}")
+        else:
+            print(f"  Warning: image not found: {path}", file=sys.stderr)
+            image_map[path] = path
 
-    # Embed video
-    video_b64 = None
-    video_path = "unity-project/Recordings/demo-spin.mp4"
-    try:
-        video_b64 = embed_b64(video_path)
-    except FileNotFoundError:
-        print(f"Warning: video not found: {video_path}", file=sys.stderr)
+    # Discover and copy videos from output blocks
+    # video_map maps original filename to output href
+    video_map: dict[str, str] = {}
+    vid_idx = 0
+    for video_path_str in find_video_paths(md):
+        # Normalize backslashes
+        normalized = video_path_str.replace("\\", "/")
+        if normalized in video_map:
+            continue
+        src = Path(normalized)
+        if not src.exists():
+            # Try the original (unnormalized) path
+            src = Path(video_path_str)
+        if src.exists():
+            vid_idx += 1
+            dest_name = f"recording-{vid_idx}{src.suffix}" if vid_idx > 1 else f"recording{src.suffix}"
+            shutil.copy2(src, vid_dir / dest_name)
+            video_map[normalized] = f"video/{dest_name}"
+            print(f"  Copied {src} -> video/{dest_name}")
+        else:
+            print(f"  Warning: video not found: {video_path_str}", file=sys.stderr)
 
     # Parse markdown
     lines = md.split("\n")
@@ -100,7 +145,6 @@ def convert(md_path: str, html_path: str):
         if line.startswith("```") and not in_code:
             lang = line[3:].strip()
             if "{image}" in lang:
-                # Skip showboat image blocks (the actual ![...] line follows)
                 i += 1
                 while i < len(lines) and not lines[i].startswith("```"):
                     i += 1
@@ -116,6 +160,19 @@ def convert(md_path: str, html_path: str):
             code_content = html_mod.escape("\n".join(code_lines))
             if code_lang == "output":
                 out.append(f'<pre class="output"><code>{code_content}</code></pre>')
+                # Check if this output block referenced a video — insert player after it
+                raw_output = "\n".join(code_lines)
+                for video_path_str in find_video_paths(raw_output):
+                    normalized = video_path_str.replace("\\", "/")
+                    href = video_map.get(normalized)
+                    if href:
+                        suffix = Path(href).suffix
+                        mime = MIME_TYPES.get(suffix, "video/mp4")
+                        out.append(
+                            f'<video controls autoplay loop muted '
+                            f'style="max-width:100%;border-radius:8px;margin:8px 0;">'
+                            f'<source src="{href}" type="{mime}"></video>'
+                        )
             else:
                 cls = f' class="lang-{code_lang}"' if code_lang else ""
                 out.append(f"<pre{cls}><code>{code_content}</code></pre>")
@@ -139,30 +196,15 @@ def convert(md_path: str, html_path: str):
         elif line.startswith("<!--"):
             pass
         elif re.match(r"^!\[", line):
-            out.append(process_inline(line, images))
+            out.append(process_inline(line, image_map))
         elif line.strip() == "":
             pass
         else:
-            out.append(f"<p>{process_inline(line, images)}</p>")
+            out.append(f"<p>{process_inline(line, image_map)}</p>")
 
         i += 1
 
     body = "\n".join(out)
-
-    # Insert video after the record output block
-    if video_b64:
-        idx = body.find("demo-spin.mp4")
-        if idx != -1:
-            end_pre = body.find("</pre>", idx)
-            if end_pre != -1:
-                insert_at = end_pre + len("</pre>")
-                video_html = (
-                    '\n<video controls autoplay loop muted '
-                    'style="max-width:100%;border-radius:8px;margin:8px 0;">'
-                    f'<source src="data:video/mp4;base64,{video_b64}" '
-                    'type="video/mp4"></video>'
-                )
-                body = body[:insert_at] + video_html + body[insert_at:]
 
     html_out = f"""<!DOCTYPE html>
 <html lang="en">
@@ -201,11 +243,16 @@ def convert(md_path: str, html_path: str):
 </body>
 </html>"""
 
-    Path(html_path).write_text(html_out, encoding="utf-8")
+    html_path = out_path / "index.html"
+    html_path.write_text(html_out, encoding="utf-8")
+
+    # Also copy source document
+    shutil.copy2(md_path, out_path / "demo.md")
+
     print(f"Written {html_path} ({len(html_out) // 1024}KB)")
 
 
 if __name__ == "__main__":
     src = sys.argv[1] if len(sys.argv) > 1 else "demo.md"
-    dst = sys.argv[2] if len(sys.argv) > 2 else "demo.html"
+    dst = sys.argv[2] if len(sys.argv) > 2 else "dist"
     convert(src, dst)

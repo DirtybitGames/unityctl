@@ -12,8 +12,16 @@ The unityctl demo page is a self-contained HTML file hosted on GitHub Pages via 
 ## How It Works
 
 1. **`demo.md`** — showboat document (markdown with executable code blocks + captured output)
-2. **`demo.html`** — self-contained HTML with all images/video embedded as base64
-3. **`gh-pages` branch** — contains `index.html` (copy of `demo.html`) and `demo.md` (source)
+2. **`generate-demo-html.py`** — converts demo.md to HTML, copies images + video as separate files
+3. **`gh-pages` branch** — serves the output directory via GitHub Pages
+
+```
+gh-pages branch:
+  index.html       # generated HTML
+  demo.md          # showboat source (for extract)
+  images/          # screenshots (discovered from markdown)
+  video/           # recordings (discovered from output blocks)
+```
 
 Tools: [showboat](https://pypi.org/project/showboat/) for the demo document, Python for HTML generation.
 
@@ -62,30 +70,26 @@ This prints all the `showboat init/note/exec/image` commands needed to recreate 
 
 ## Generating HTML
 
-Run `.claude/skills/demo-page/generate-demo-html.py` to convert `demo.md` into a self-contained `demo.html`:
+Run the generator to produce a `dist/` directory with HTML, images, and video:
 
 ```bash
-python3 .claude/skills/demo-page/generate-demo-html.py
+python3 .claude/skills/demo-page/generate-demo-html.py demo.md dist
 ```
 
-This script:
-- Parses the showboat markdown format
-- Embeds all referenced PNG images as base64 data URIs
-- Embeds `unity-project/Recordings/demo-spin.mp4` as base64
-- Produces a dark-themed HTML file with syntax-highlighted code blocks
+This outputs `dist/index.html` + `dist/images/` + `dist/video/` + `dist/demo.md`.
 
 ## Publishing to GitHub Pages
 
 ```bash
 git stash
 git checkout gh-pages
-cp demo.html index.html
-cp demo.md demo.md
-git add index.html demo.md
+cp -r dist/* .
+git add index.html demo.md images/ video/
 git commit -m "Update demo page"
 git push origin gh-pages
 git checkout main
 git stash pop
+rm -rf dist
 ```
 
 ## Quick Update (no full rebuild)
@@ -93,8 +97,7 @@ git stash pop
 To update just a screenshot or the video without rebuilding the whole demo:
 
 1. Edit `demo.md` directly (or use `showboat pop` + `showboat exec` to redo a block)
-2. Re-run `python3 .claude/skills/demo-page/generate-demo-html.py`
-3. Publish to `gh-pages` (see above)
+2. Re-run the generator and publish (see above)
 
 ## Interaction Guidelines
 

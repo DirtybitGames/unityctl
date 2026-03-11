@@ -20,3 +20,4 @@ artifacts/
 # Demo page (built via /demo-page skill, published on gh-pages branch)
 demo.md
 demo.html
+dist/
