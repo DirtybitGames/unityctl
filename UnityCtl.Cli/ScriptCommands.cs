@@ -72,11 +72,7 @@ public static class ScriptCommands
             var scriptArgs = context.ParseResult.GetValueForArgument(scriptArgsArgument);
 
             // If no -f given, check if first positional arg is a .cs file
-            if (file == null && scriptArgs.Length > 0 && scriptArgs[0].EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-            {
-                file = new FileInfo(scriptArgs[0]);
-                scriptArgs = scriptArgs.Skip(1).ToArray();
-            }
+            (file, scriptArgs) = ResolvePositionalFile(file, scriptArgs);
 
             // Determine code source: file or stdin
             string? csharpCode = null;
@@ -228,6 +224,15 @@ public static class ScriptCommands
         scriptCommand.AddCommand(evalCommand);
 
         return scriptCommand;
+    }
+
+    internal static (FileInfo? file, string[] scriptArgs) ResolvePositionalFile(FileInfo? file, string[] scriptArgs)
+    {
+        if (file == null && scriptArgs.Length > 0 && scriptArgs[0].EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return (new FileInfo(scriptArgs[0]), scriptArgs.Skip(1).ToArray());
+        }
+        return (file, scriptArgs);
     }
 
     internal static string BuildEvalCode(string expression, string[] extraUsings, bool hasArgs, string? instanceIds = null)
