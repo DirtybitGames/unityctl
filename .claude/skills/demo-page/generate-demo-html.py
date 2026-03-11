@@ -68,7 +68,7 @@ def process_inline(text: str, image_map: dict[str, str]) -> str:
             f'style="max-width:100%;border-radius:8px;margin:8px 0;">'
         )
 
-    text = re.sub(r"!\[([^\]]*)\]\(([^)]+\.(?:png|jpg|jpeg|gif|webp|svg))\)", img_replace, text)
+    text = re.sub(r"(?<!\\)!\[([^\]]*)\]\(([^)]+\.(?:png|jpg|jpeg|gif|webp|svg))\)", img_replace, text)
 
     def link_replace(m):
         label, url = m.group(1), m.group(2)
@@ -94,7 +94,7 @@ def convert(md_path: str, out_dir: str):
     # Discover and copy images — map original paths to output hrefs
     image_map: dict[str, str] = {}
     img_idx = 0
-    for m in re.finditer(r"!\[([^\]]*)\]\(([^)]+\.(?:png|jpg|jpeg|gif|webp|svg))\)", md):
+    for m in re.finditer(r"(?<!\\)!\[([^\]]*)\]\(([^)]+\.(?:png|jpg|jpeg|gif|webp|svg))\)", md):
         path = m.group(2)
         if path in image_map:
             continue
