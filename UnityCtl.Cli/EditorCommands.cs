@@ -18,6 +18,7 @@ public static class EditorCommands
         var runCommand = new Command("run", "Launch Unity Editor for this project");
         runCommand.AddAlias("launch");
         runCommand.AddAlias("start");
+        runCommand.AddAlias("open");
 
         var waitOption = new Option<bool>(
             "--wait",
@@ -42,6 +43,7 @@ public static class EditorCommands
         // editor stop
         var stopCommand = new Command("stop", "Stop the Unity Editor for this project");
         stopCommand.AddAlias("kill");
+        stopCommand.AddAlias("close");
 
         stopCommand.SetHandler(async (InvocationContext context) =>
         {
