@@ -156,8 +156,7 @@ public class DtoSerializationTests
     {
         var result = new ScreenshotCaptureResult
         {
-            Path = "/tmp/screenshot.png",
-            TempPath = "Temp/screenshot_abc123.png",
+            Path = "Screenshots/screenshot.png",
             Width = 1920,
             Height = 1080
         };
@@ -166,7 +165,7 @@ public class DtoSerializationTests
         var deserialized = JsonHelper.Deserialize<ScreenshotCaptureResult>(json);
 
         Assert.NotNull(deserialized);
-        Assert.Equal("/tmp/screenshot.png", deserialized.Path);
+        Assert.Equal("Screenshots/screenshot.png", deserialized.Path);
         Assert.Equal(1920, deserialized.Width);
         Assert.Equal(1080, deserialized.Height);
     }

@@ -1039,36 +1039,34 @@ namespace UnityCtl
 
         private object HandleScreenshotCapture(RequestMessage request)
         {
-            var path = GetStringArgument(request, "path");
+            var filename = GetStringArgument(request, "filename");
             var width = GetIntArgument(request, "width");
             var height = GetIntArgument(request, "height");
 
-            var projectRoot = System.IO.Path.GetDirectoryName(UnityEngine.Application.dataPath)!;
-
-            // Generate default path with timestamp if not provided
-            if (string.IsNullOrEmpty(path))
+            // Generate default filename with timestamp if not provided
+            if (string.IsNullOrEmpty(filename))
             {
                 var timestamp = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                path = System.IO.Path.Combine(projectRoot, "Screenshots", $"screenshot_{timestamp}.png");
+                filename = $"screenshot_{timestamp}.png";
             }
 
             // Ensure .png extension
-            if (!path.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
-                !path.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
+            if (!filename.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
+                !filename.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
             {
-                path += ".png";
+                filename += ".png";
             }
 
-            // Resolve to absolute if relative (shouldn't happen since CLI resolves, but defensive)
-            if (!System.IO.Path.IsPathRooted(path))
-            {
-                path = System.IO.Path.GetFullPath(System.IO.Path.Combine(projectRoot, path));
-            }
+            // Always capture to Screenshots/<filename> — CaptureScreenshot requires
+            // project-relative paths (silently fails with absolute paths).
+            var capturePath = $"Screenshots/{filename}";
 
-            // Always capture to a project-relative temp path — CaptureScreenshot silently
-            // fails with absolute paths. CLI will wait for the temp file and move it.
-            var capturePath = $"Temp/screenshot_{System.Guid.NewGuid():N}.png";
-            var tempAbsolute = System.IO.Path.Combine(projectRoot, capturePath).Replace("\\", "/");
+            // Ensure Screenshots directory exists
+            if (!System.IO.Directory.Exists("Screenshots"))
+            {
+                System.IO.Directory.CreateDirectory("Screenshots");
+                DebugLog("[UnityCtl] Created Screenshots directory");
+            }
 
             // Get current game view resolution
             int actualWidth = UnityEngine.Screen.width;
@@ -1113,12 +1111,11 @@ namespace UnityCtl
                 DebugLog($"[UnityCtl] Capturing screenshot at game view resolution to: {capturePath}");
             }
 
-            // Return both the desired final path and the temp path where the file will appear.
-            // CLI handles waiting for the temp file and moving it to the final destination.
+            // Return project-relative capture path. CLI resolves against project root,
+            // waits for the file, and moves it to the user's desired destination.
             return new ScreenshotCaptureResult
             {
-                Path = path,
-                TempPath = tempAbsolute,
+                Path = capturePath,
                 Width = actualWidth,
                 Height = actualHeight
             };
