@@ -12,7 +12,7 @@ namespace UnityCtl.Cli;
 
 public static class ConfigCommands
 {
-    private static readonly string[] ValidKeys = { "project-path", "bridge-port", "wait-timeout" };
+    private static readonly string[] ValidKeys = { "project-path", "bridge-port", "wait-timeout", "enforce-version-match" };
 
     public static Command CreateCommand()
     {
@@ -184,6 +184,15 @@ public static class ConfigCommands
                 }
                 config["waitTimeout"] = timeout;
                 break;
+
+            case "enforce-version-match":
+                if (!bool.TryParse(value, out var enforce))
+                {
+                    Console.Error.WriteLine($"Error: Invalid value '{value}'. Must be 'true' or 'false'.");
+                    return;
+                }
+                config["enforceVersionMatch"] = enforce;
+                break;
         }
 
         await WriteConfigObjectAsync(config);
@@ -216,6 +225,7 @@ public static class ConfigCommands
             "project-path" => "projectPath",
             "bridge-port" => "bridgePort",
             "wait-timeout" => "waitTimeout",
+            "enforce-version-match" => "enforceVersionMatch",
             _ => normalizedKey
         };
 
@@ -272,6 +282,7 @@ public static class ConfigCommands
                         "projectPath" => "project-path",
                         "bridgePort" => "bridge-port",
                         "waitTimeout" => "wait-timeout",
+                        "enforceVersionMatch" => "enforce-version-match",
                         _ => kvp.Key
                     };
                     Console.WriteLine($"  {displayKey} = {kvp.Value}");

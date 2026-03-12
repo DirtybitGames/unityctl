@@ -18,6 +18,7 @@ public class BridgeClient
     private readonly string _baseUrl;
     private readonly string? _agentId;
     private readonly string? _projectRoot;
+    private bool _versionChecked;
 
     public BridgeClient(string baseUrl, string? agentId = null, string? projectRoot = null)
     {
@@ -126,6 +127,14 @@ public class BridgeClient
 
     public async Task<ResponseMessage?> SendCommandAsync(string command, Dictionary<string, object?>? args = null, int? timeoutSeconds = null)
     {
+        // One-time pre-flight version check when enforce-version-match is enabled
+        if (!_versionChecked)
+        {
+            _versionChecked = true;
+            if (!await VersionCheck.EnforceAsync(this, _projectRoot))
+                return null;
+        }
+
         try
         {
             var request = new
