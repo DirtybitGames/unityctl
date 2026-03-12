@@ -141,11 +141,13 @@ public static class StatusCommand
                         UnityPlugin = health.UnityPluginVersion
                     } : null,
                     VersionMismatch = versionCheck?.HasMismatch ?? false,
+                    PluginAhead = versionCheck?.PluginAhead ?? false,
                     EnforceVersionMatch = enforced
                 };
                 Console.WriteLine(JsonHelper.Serialize(jsonResult));
 
-                if (enforced && versionCheck is { HasMismatch: true })
+                // Error only when plugin is ahead (team member updated package, tools need sync)
+                if (enforced && versionCheck is { PluginAhead: true })
                 {
                     context.ExitCode = 1;
                 }
@@ -164,7 +166,7 @@ public static class StatusCommand
                     if (enforced)
                     {
                         var versionResult = VersionCheck.Check(health);
-                        if (versionResult.HasMismatch)
+                        if (versionResult.PluginAhead)
                         {
                             context.ExitCode = 1;
                         }
@@ -280,7 +282,6 @@ public static class StatusCommand
 
         if (!result.HasMismatch)
         {
-            // All versions match - show single line
             if (result.PluginVersion != null)
             {
                 Console.WriteLine($"Versions: {result.CliVersion} (all match)");
@@ -290,18 +291,18 @@ public static class StatusCommand
                 Console.WriteLine($"Versions: {result.CliVersion} (plugin not connected)");
             }
         }
-        else if (enforced)
+        else if (enforced && result.PluginAhead)
         {
-            // Version mismatch with enforcement - show error
+            // Plugin is newer than CLI/Bridge — someone updated the package, tools need sync
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("ERROR: Version mismatch (enforce-version-match is enabled)!");
+            Console.WriteLine("ERROR: Unity plugin is newer than CLI/Bridge (enforce-version-match is enabled)!");
             Console.ResetColor();
             Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
             Console.WriteLine("  Run 'unityctl update' to sync all components.");
         }
         else
         {
-            // Version mismatch without enforcement - show warning
+            // CLI/Bridge ahead of plugin, or enforcement disabled — warn only
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("WARNING: Version mismatch!");
             Console.ResetColor();

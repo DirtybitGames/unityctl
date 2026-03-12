@@ -6,8 +6,9 @@ using UnityCtl.Protocol;
 namespace UnityCtl.Cli;
 
 /// <summary>
-/// Pre-flight version check that can block commands when enforce-version-match is enabled.
-/// Compares CLI, Bridge, and Unity Plugin versions and errors on mismatch.
+/// Version check used by the status command. When enforce-version-match is enabled,
+/// a plugin version newer than CLI/Bridge is an error (team member needs to update tools).
+/// CLI/Bridge newer than plugin is only a warning (tools updated, package not yet).
 /// </summary>
 public static class VersionCheck
 {
@@ -38,26 +39,9 @@ public static class VersionCheck
     /// <summary>
     /// Result of a version check against the running bridge.
     /// </summary>
-    public record VersionCheckResult(bool HasMismatch, string? CliVersion, string? BridgeVersion, string? PluginVersion);
-
-    /// <summary>
-    /// Queries the bridge health endpoint and compares versions.
-    /// Returns null if the bridge is not reachable.
-    /// </summary>
-    public static async System.Threading.Tasks.Task<VersionCheckResult?> CheckAsync(BridgeClient client)
-    {
-        try
-        {
-            var health = await client.GetAsync<HealthResult>("/health");
-            if (health == null) return null;
-
-            return Check(health);
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    /// <param name="HasMismatch">True if any versions differ.</param>
+    /// <param name="PluginAhead">True if the Unity plugin version is newer than CLI or Bridge — indicates tools need updating.</param>
+    public record VersionCheckResult(bool HasMismatch, bool PluginAhead, string? CliVersion, string? BridgeVersion, string? PluginVersion);
 
     /// <summary>
     /// Compares CLI version against bridge and plugin versions from a health result.
@@ -79,37 +63,34 @@ public static class VersionCheck
         if (pluginBase != null && bridgeBase != null && pluginBase != bridgeBase)
             hasMismatch = true;
 
-        return new VersionCheckResult(hasMismatch, cliBase, bridgeBase, pluginBase);
+        // Determine if the plugin is ahead of CLI or Bridge
+        var pluginAhead = false;
+        if (pluginBase != null)
+        {
+            var pluginParsed = ParseVersion(pluginBase);
+            if (cliBase != null)
+            {
+                var cliParsed = ParseVersion(cliBase);
+                if (pluginParsed > cliParsed)
+                    pluginAhead = true;
+            }
+            if (bridgeBase != null)
+            {
+                var bridgeParsed = ParseVersion(bridgeBase);
+                if (pluginParsed > bridgeParsed)
+                    pluginAhead = true;
+            }
+        }
+
+        return new VersionCheckResult(hasMismatch, pluginAhead, cliBase, bridgeBase, pluginBase);
     }
 
-    /// <summary>
-    /// Runs the pre-flight version check. If enforce-version-match is enabled and
-    /// versions mismatch, prints an error to stderr and returns false (command should abort).
-    /// Returns true if the command may proceed.
-    /// </summary>
-    public static async System.Threading.Tasks.Task<bool> EnforceAsync(BridgeClient client, string? projectRoot = null)
+    private static Version ParseVersion(string version)
     {
-        if (!IsEnforced(projectRoot))
-            return true;
-
-        var result = await CheckAsync(client);
-        if (result == null)
-            return true; // Can't reach bridge health — let the command proceed and fail naturally
-
-        if (!result.HasMismatch)
-            return true;
-
-        PrintMismatchError(result);
-        return false;
-    }
-
-    internal static void PrintMismatchError(VersionCheckResult result)
-    {
-        Console.Error.WriteLine("Error: Version mismatch detected (enforce-version-match is enabled).");
-        Console.Error.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
-        Console.Error.WriteLine();
-        Console.Error.WriteLine("Run 'unityctl update' to sync all components to the same version.");
-        Console.Error.WriteLine("To disable this check: unityctl config set enforce-version-match false");
+        // Strip pre-release suffix (e.g. "1.2.3-beta" → "1.2.3")
+        var dashIndex = version.IndexOf('-');
+        var clean = dashIndex >= 0 ? version.Substring(0, dashIndex) : version;
+        return Version.TryParse(clean, out var v) ? v : new Version(0, 0);
     }
 
     private static string? GetBaseVersion(string? version)

@@ -178,7 +178,7 @@ Run `unityctl status` first to diagnose issues.
 
 ## Version Enforcement
 
-When `enforce-version-match` is enabled (`unityctl config set enforce-version-match true`), **all bridge commands will fail** if CLI, Bridge, and Unity Plugin versions don't match. If you see a version mismatch error:
+When `enforce-version-match` is enabled (`unityctl config set enforce-version-match true`), `unityctl status` returns an error if the Unity plugin version is newer than the CLI or Bridge. This means a team member updated the package and you need to sync your tools:
 
 1. Run `unityctl update` to sync all components
 2. Restart the bridge: `unityctl bridge stop && unityctl bridge start`
