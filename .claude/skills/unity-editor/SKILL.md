@@ -175,13 +175,3 @@ Run `unityctl status` first to diagnose issues.
 | Progress bar stuck | Check with `unityctl dialog list`, wait or dismiss |
 | Editor not found | Use `--unity-path` to specify Unity executable |
 | Version mismatch error | Run `unityctl update` immediately — do NOT proceed until resolved |
-
-## Version Enforcement
-
-When `enforce-version-match` is enabled (`unityctl config set enforce-version-match true`), `unityctl status` returns an error if the Unity plugin version is newer than the CLI or Bridge. This means a team member updated the package and you need to sync your tools:
-
-1. Run `unityctl update` to sync all components
-2. Restart the bridge: `unityctl bridge stop && unityctl bridge start`
-3. Verify with `unityctl status`
-
-**Do not ignore version mismatch errors or warnings.** They indicate the tools are out of sync, which can cause subtle failures.
