@@ -223,7 +223,7 @@ namespace UnityCtl
                 ProjectId = _projectId,
                 UnityVersion = Application.unityVersion,
                 EditorInstanceId = SystemInfo.deviceUniqueIdentifier,
-                Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu", "test" },
+                Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu", "test", "screenshot" },
                 ProtocolVersion = "1.0.0",
                 PluginVersion = GetPluginVersion()
             };
@@ -488,6 +488,14 @@ namespace UnityCtl
 
                     case UnityCtlCommands.ScreenshotCapture:
                         result = HandleScreenshotCapture(request);
+                        break;
+
+                    case UnityCtlCommands.ScreenshotListWindows:
+                        result = HandleScreenshotListWindows(request);
+                        break;
+
+                    case UnityCtlCommands.ScreenshotWindow:
+                        result = HandleScreenshotWindow(request);
                         break;
 
                     case UnityCtlCommands.ScriptExecute:
@@ -1119,6 +1127,240 @@ namespace UnityCtl
                 Width = actualWidth,
                 Height = actualHeight
             };
+        }
+
+        private object HandleScreenshotListWindows(RequestMessage request)
+        {
+            var allWindows = Resources.FindObjectsOfTypeAll<EditorWindow>();
+            var windowInfos = new System.Collections.Generic.List<EditorWindowInfo>();
+
+            foreach (var window in allWindows)
+            {
+                if (window == null) continue;
+                try
+                {
+                    var pos = window.position;
+                    windowInfos.Add(new EditorWindowInfo
+                    {
+                        Type = window.GetType().FullName,
+                        Title = window.titleContent?.text ?? "",
+                        Width = (int)pos.width,
+                        Height = (int)pos.height,
+                        Docked = window.docked
+                    });
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"[UnityCtl] Skipping window: {ex.Message}");
+                }
+            }
+
+            return new ScreenshotListWindowsResult { Windows = windowInfos.ToArray() };
+        }
+
+        private object HandleScreenshotWindow(RequestMessage request)
+        {
+            var windowArg = GetStringArgument(request, "window");
+            var filename = GetStringArgument(request, "filename");
+
+            if (string.IsNullOrEmpty(windowArg))
+            {
+                throw new System.ArgumentException("Required argument 'window' not provided");
+            }
+
+            // Find the target window by type name or title
+            var targetWindow = FindEditorWindow(windowArg);
+            if (targetWindow == null)
+            {
+                throw new System.ArgumentException($"No open editor window matching '{windowArg}'. Use screenshot.listWindows to see available windows.");
+            }
+
+            // Generate default filename with timestamp if not provided
+            if (string.IsNullOrEmpty(filename))
+            {
+                var timestamp = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                var sanitizedType = targetWindow.GetType().Name;
+                filename = $"window_{sanitizedType}_{timestamp}.png";
+            }
+
+            // Ensure .png extension
+            if (!filename.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
+                !filename.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
+            {
+                filename += ".png";
+            }
+
+            var capturePath = $"Screenshots/{filename}";
+
+            // Ensure Screenshots directory exists
+            if (!System.IO.Directory.Exists("Screenshots"))
+            {
+                System.IO.Directory.CreateDirectory("Screenshots");
+                DebugLog("[UnityCtl] Created Screenshots directory");
+            }
+
+            // Force repaint before capture
+            targetWindow.Repaint();
+
+            var pos = targetWindow.position;
+            int width = (int)pos.width;
+            int height = (int)pos.height;
+
+            // Try UI Toolkit capture first (Unity 2022.2+), fall back to screen pixel reading
+            bool captured = false;
+
+            // Attempt rootVisualElement capture via reflection (avoids compile-time dependency on Unity version)
+            try
+            {
+                var rootVE = targetWindow.rootVisualElement;
+                if (rootVE != null)
+                {
+                    // Look for the CaptureTo extension method: UnityEngine.UIElements.VisualElementExtensions.CaptureTo
+                    // or the panel.CaptureTo method depending on Unity version
+                    var veExtType = typeof(UnityEngine.UIElements.VisualElement).Assembly
+                        .GetType("UnityEngine.UIElements.VisualElementExtensions");
+
+                    if (veExtType != null)
+                    {
+                        // Try CaptureTo(VisualElement, Rect, Vector2, Texture2D) — Unity 2022.2+
+                        // Simpler: try the static method that captures entire element
+                        var methods = veExtType.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                        System.Reflection.MethodInfo captureMethod = null;
+                        foreach (var m in methods)
+                        {
+                            if (m.Name == "CaptureTo" || m.Name == "CaptureToTexture")
+                            {
+                                captureMethod = m;
+                                break;
+                            }
+                        }
+
+                        if (captureMethod == null)
+                        {
+                            DebugLog("[UnityCtl] CaptureTo method not found, falling back to screen pixel capture");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"[UnityCtl] UI Toolkit capture not available: {ex.Message}");
+            }
+
+            // Use screen pixel capture as primary reliable method
+            if (!captured)
+            {
+                captured = CaptureWindowViaScreenPixels(targetWindow, capturePath, width, height);
+            }
+
+            if (!captured)
+            {
+                throw new System.InvalidOperationException($"Failed to capture window '{windowArg}'");
+            }
+
+            var windowType = targetWindow.GetType().FullName;
+            var windowTitle = targetWindow.titleContent?.text ?? "";
+
+            DebugLog($"[UnityCtl] Captured window '{windowType}' ({width}x{height}) to: {capturePath}");
+
+            return new ScreenshotWindowResult
+            {
+                Path = capturePath,
+                Width = width,
+                Height = height,
+                WindowType = windowType,
+                WindowTitle = windowTitle
+            };
+        }
+
+        private static EditorWindow FindEditorWindow(string identifier)
+        {
+            var allWindows = Resources.FindObjectsOfTypeAll<EditorWindow>();
+
+            // 1. Exact type name match (full name)
+            foreach (var w in allWindows)
+            {
+                if (w != null && w.GetType().FullName == identifier)
+                    return w;
+            }
+
+            // 2. Suffix match on type name (e.g. "MyWindow" matches "MyNamespace.MyWindow")
+            foreach (var w in allWindows)
+            {
+                if (w == null) continue;
+                var fullName = w.GetType().FullName;
+                if (fullName != null && fullName.EndsWith("." + identifier, System.StringComparison.Ordinal))
+                    return w;
+            }
+
+            // 3. Short type name match (no namespace)
+            foreach (var w in allWindows)
+            {
+                if (w != null && w.GetType().Name == identifier)
+                    return w;
+            }
+
+            // 4. Window title match (case-insensitive)
+            foreach (var w in allWindows)
+            {
+                if (w != null && string.Equals(w.titleContent?.text, identifier, System.StringComparison.OrdinalIgnoreCase))
+                    return w;
+            }
+
+            return null;
+        }
+
+        private static bool CaptureWindowViaScreenPixels(EditorWindow window, string capturePath, int width, int height)
+        {
+            try
+            {
+                // Use InternalEditorUtility.ReadScreenPixel to capture the window's screen region
+                var readPixelMethod = typeof(UnityEditorInternal.InternalEditorUtility)
+                    .GetMethod("ReadScreenPixel",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+                if (readPixelMethod == null)
+                {
+                    DebugLogError("[UnityCtl] ReadScreenPixel method not found");
+                    return false;
+                }
+
+                var pos = window.position;
+                var pixelPos = new UnityEngine.Vector2(pos.x, pos.y);
+                var pixelSize = new UnityEngine.Vector2(width, height);
+
+                // ReadScreenPixel(Vector2 position, int width, int height) returns Color[]
+                var pixels = (UnityEngine.Color[])readPixelMethod.Invoke(null,
+                    new object[] { pixelPos, width, height });
+
+                if (pixels == null || pixels.Length == 0)
+                {
+                    DebugLogError("[UnityCtl] ReadScreenPixel returned empty");
+                    return false;
+                }
+
+                // Create texture and apply pixels
+                var texture = new UnityEngine.Texture2D(width, height, UnityEngine.TextureFormat.RGBA32, false);
+                texture.SetPixels(pixels);
+                texture.Apply();
+
+                // Encode and write
+                byte[] bytes;
+                if (capturePath.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
+                    bytes = UnityEngine.ImageConversion.EncodeToJPG(texture);
+                else
+                    bytes = UnityEngine.ImageConversion.EncodeToPNG(texture);
+
+                UnityEngine.Object.DestroyImmediate(texture);
+
+                System.IO.File.WriteAllBytes(capturePath, bytes);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Screen pixel capture failed: {ex.Message}");
+                return false;
+            }
         }
 
         private object HandleScriptExecute(RequestMessage request)
