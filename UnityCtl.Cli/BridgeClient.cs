@@ -18,6 +18,7 @@ public class BridgeClient
     private readonly string _baseUrl;
     private readonly string? _agentId;
     private readonly string? _projectRoot;
+
     public BridgeClient(string baseUrl, string? agentId = null, string? projectRoot = null)
     {
         _baseUrl = baseUrl;

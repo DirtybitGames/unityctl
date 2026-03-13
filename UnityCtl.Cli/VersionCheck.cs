@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using UnityCtl.Protocol;
 
@@ -30,7 +31,7 @@ public static class VersionCheck
             var value = config?["enforceVersionMatch"];
             return value?.GetValue<bool>() == true;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or JsonException)
         {
             return false;
         }
@@ -47,8 +48,14 @@ public static class VersionCheck
     /// Compares CLI version against bridge and plugin versions from a health result.
     /// </summary>
     public static VersionCheckResult Check(HealthResult health)
+        => Check(health, VersionInfo.Version);
+
+    /// <summary>
+    /// Compares the given CLI version against bridge and plugin versions from a health result.
+    /// </summary>
+    internal static VersionCheckResult Check(HealthResult health, string cliVersion)
     {
-        var cliBase = GetBaseVersion(VersionInfo.Version);
+        var cliBase = GetBaseVersion(cliVersion);
         var bridgeBase = GetBaseVersion(health.BridgeVersion);
         var pluginBase = GetBaseVersion(health.UnityPluginVersion);
 
@@ -68,29 +75,32 @@ public static class VersionCheck
         if (pluginBase != null)
         {
             var pluginParsed = ParseVersion(pluginBase);
-            if (cliBase != null)
+            if (pluginParsed != null)
             {
-                var cliParsed = ParseVersion(cliBase);
-                if (pluginParsed > cliParsed)
-                    pluginAhead = true;
-            }
-            if (bridgeBase != null)
-            {
-                var bridgeParsed = ParseVersion(bridgeBase);
-                if (pluginParsed > bridgeParsed)
-                    pluginAhead = true;
+                if (cliBase != null)
+                {
+                    var cliParsed = ParseVersion(cliBase);
+                    if (cliParsed != null && pluginParsed > cliParsed)
+                        pluginAhead = true;
+                }
+                if (bridgeBase != null)
+                {
+                    var bridgeParsed = ParseVersion(bridgeBase);
+                    if (bridgeParsed != null && pluginParsed > bridgeParsed)
+                        pluginAhead = true;
+                }
             }
         }
 
         return new VersionCheckResult(hasMismatch, pluginAhead, cliBase, bridgeBase, pluginBase);
     }
 
-    private static Version ParseVersion(string version)
+    private static Version? ParseVersion(string version)
     {
         // Strip pre-release suffix (e.g. "1.2.3-beta" → "1.2.3")
         var dashIndex = version.IndexOf('-');
         var clean = dashIndex >= 0 ? version.Substring(0, dashIndex) : version;
-        return Version.TryParse(clean, out var v) ? v : new Version(0, 0);
+        return Version.TryParse(clean, out var v) ? v : null;
     }
 
     private static string? GetBaseVersion(string? version)
