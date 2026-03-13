@@ -1302,13 +1302,13 @@ namespace UnityCtl
                 RepaintImmediatelyMethod?.Invoke(hostView, null);
                 RepaintImmediatelyMethod?.Invoke(hostView, null);
 
-                rt = new UnityEngine.RenderTexture(width, height, 0, UnityEngine.RenderTextureFormat.ARGB32);
+                rt = new UnityEngine.RenderTexture(width, height, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.Linear);
                 rt.Create();
 
                 GrabPixelsMethod.Invoke(hostView, new object[] { rt, new UnityEngine.Rect(0, 0, width, height) });
 
                 UnityEngine.RenderTexture.active = rt;
-                texture = new UnityEngine.Texture2D(width, height, UnityEngine.TextureFormat.RGBA32, false);
+                texture = new UnityEngine.Texture2D(width, height, UnityEngine.TextureFormat.RGBA32, false, true);
                 texture.ReadPixels(new UnityEngine.Rect(0, 0, width, height), 0, 0);
                 texture.Apply();
                 UnityEngine.RenderTexture.active = null;
