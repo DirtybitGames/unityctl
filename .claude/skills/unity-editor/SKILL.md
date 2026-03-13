@@ -174,4 +174,3 @@ Run `unityctl status` first to diagnose issues.
 | Command timed out | A native dialog may be blocking Unity: `unityctl dialog list` |
 | Progress bar stuck | Check with `unityctl dialog list`, wait or dismiss |
 | Editor not found | Use `--unity-path` to specify Unity executable |
-| Version mismatch error | Run `unityctl update` immediately — do NOT proceed until resolved |

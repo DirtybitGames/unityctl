@@ -303,7 +303,7 @@ public static class StatusCommand
             Console.WriteLine("WARNING: Version mismatch!");
             Console.ResetColor();
             Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
-            Console.WriteLine("  Consider updating all components to the same version.");
+            Console.WriteLine("  Run 'unityctl update' to sync all components to the same version.");
         }
 
         return result;
