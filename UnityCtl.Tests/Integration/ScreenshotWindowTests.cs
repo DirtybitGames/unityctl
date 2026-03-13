@@ -30,7 +30,9 @@ public class ScreenshotWindowTests : IAsyncLifetime
             .OnCommand(UnityCtlCommands.ScreenshotWindow, req =>
             {
                 var window = req.Args?["window"]?.ToString() ?? "unknown";
-                var filename = req.Args?["filename"]?.ToString();
+                object? filenameObj = null;
+                req.Args?.TryGetValue("filename", out filenameObj);
+                var filename = filenameObj?.ToString();
                 return new ScreenshotWindowResult
                 {
                     Path = $"Screenshots/{filename ?? "window_capture.png"}",

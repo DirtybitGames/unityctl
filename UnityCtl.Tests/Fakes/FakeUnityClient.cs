@@ -337,7 +337,24 @@ public class FakeUnityClient : IAsyncDisposable
             }
             else
             {
-                var result = handler.ResultFactory(request);
+                object? result;
+                try
+                {
+                    result = handler.ResultFactory(request);
+                }
+                catch (Exception ex)
+                {
+                    var errResponse = new ResponseMessage
+                    {
+                        Origin = MessageOrigin.Unity,
+                        RequestId = request.RequestId,
+                        Status = ResponseStatus.Error,
+                        Error = new ErrorPayload { Code = "handler_error", Message = ex.Message }
+                    };
+                    await SendMessageAsync(errResponse, ct);
+                    return;
+                }
+
                 var response = new ResponseMessage
                 {
                     Origin = MessageOrigin.Unity,

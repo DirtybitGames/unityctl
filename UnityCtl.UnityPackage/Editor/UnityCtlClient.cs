@@ -1199,61 +1199,14 @@ namespace UnityCtl
                 DebugLog("[UnityCtl] Created Screenshots directory");
             }
 
-            // Force repaint before capture
+            targetWindow.Focus();
             targetWindow.Repaint();
 
             var pos = targetWindow.position;
             int width = (int)pos.width;
             int height = (int)pos.height;
 
-            // Try UI Toolkit capture first (Unity 2022.2+), fall back to screen pixel reading
-            bool captured = false;
-
-            // Attempt rootVisualElement capture via reflection (avoids compile-time dependency on Unity version)
-            try
-            {
-                var rootVE = targetWindow.rootVisualElement;
-                if (rootVE != null)
-                {
-                    // Look for the CaptureTo extension method: UnityEngine.UIElements.VisualElementExtensions.CaptureTo
-                    // or the panel.CaptureTo method depending on Unity version
-                    var veExtType = typeof(UnityEngine.UIElements.VisualElement).Assembly
-                        .GetType("UnityEngine.UIElements.VisualElementExtensions");
-
-                    if (veExtType != null)
-                    {
-                        // Try CaptureTo(VisualElement, Rect, Vector2, Texture2D) — Unity 2022.2+
-                        // Simpler: try the static method that captures entire element
-                        var methods = veExtType.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                        System.Reflection.MethodInfo captureMethod = null;
-                        foreach (var m in methods)
-                        {
-                            if (m.Name == "CaptureTo" || m.Name == "CaptureToTexture")
-                            {
-                                captureMethod = m;
-                                break;
-                            }
-                        }
-
-                        if (captureMethod == null)
-                        {
-                            DebugLog("[UnityCtl] CaptureTo method not found, falling back to screen pixel capture");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"[UnityCtl] UI Toolkit capture not available: {ex.Message}");
-            }
-
-            // Use screen pixel capture as primary reliable method
-            if (!captured)
-            {
-                captured = CaptureWindowViaScreenPixels(targetWindow, capturePath, width, height);
-            }
-
-            if (!captured)
+            if (!CaptureWindowViaGrabPixels(targetWindow, capturePath, width, height))
             {
                 throw new System.InvalidOperationException($"Failed to capture window '{windowArg}'");
             }
@@ -1310,56 +1263,89 @@ namespace UnityCtl
             return null;
         }
 
-        private static bool CaptureWindowViaScreenPixels(EditorWindow window, string capturePath, int width, int height)
+        private static readonly System.Reflection.FieldInfo ParentViewField =
+            typeof(EditorWindow).GetField("m_Parent",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static readonly System.Type GuiViewType =
+            typeof(EditorWindow).Assembly.GetType("UnityEditor.GUIView");
+
+        private static readonly System.Reflection.MethodInfo GrabPixelsMethod =
+            GuiViewType?.GetMethod("GrabPixels",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static readonly System.Reflection.MethodInfo RepaintImmediatelyMethod =
+            GuiViewType?.GetMethod("RepaintImmediately",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static bool CaptureWindowViaGrabPixels(EditorWindow window, string capturePath, int width, int height)
         {
+            UnityEngine.RenderTexture rt = null;
+            UnityEngine.Texture2D texture = null;
             try
             {
-                // Use InternalEditorUtility.ReadScreenPixel to capture the window's screen region
-                var readPixelMethod = typeof(UnityEditorInternal.InternalEditorUtility)
-                    .GetMethod("ReadScreenPixel",
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-
-                if (readPixelMethod == null)
+                if (ParentViewField == null || GrabPixelsMethod == null)
                 {
-                    DebugLogError("[UnityCtl] ReadScreenPixel method not found");
+                    DebugLogError("[UnityCtl] GrabPixels capture not available (missing internal API)");
                     return false;
                 }
 
-                var pos = window.position;
-                var pixelPos = new UnityEngine.Vector2(pos.x, pos.y);
-                var pixelSize = new UnityEngine.Vector2(width, height);
-
-                // ReadScreenPixel(Vector2 position, int width, int height) returns Color[]
-                var pixels = (UnityEngine.Color[])readPixelMethod.Invoke(null,
-                    new object[] { pixelPos, width, height });
-
-                if (pixels == null || pixels.Length == 0)
+                var hostView = ParentViewField.GetValue(window);
+                if (hostView == null)
                 {
-                    DebugLogError("[UnityCtl] ReadScreenPixel returned empty");
+                    DebugLogError("[UnityCtl] Window has no parent HostView");
                     return false;
                 }
 
-                // Create texture and apply pixels
-                var texture = new UnityEngine.Texture2D(width, height, UnityEngine.TextureFormat.RGBA32, false);
-                texture.SetPixels(pixels);
+                // Force synchronous repaint — call twice so IMGUI windows complete
+                // both their layout and repaint passes
+                RepaintImmediatelyMethod?.Invoke(hostView, null);
+                RepaintImmediatelyMethod?.Invoke(hostView, null);
+
+                rt = new UnityEngine.RenderTexture(width, height, 0, UnityEngine.RenderTextureFormat.ARGB32);
+                rt.Create();
+
+                GrabPixelsMethod.Invoke(hostView, new object[] { rt, new UnityEngine.Rect(0, 0, width, height) });
+
+                UnityEngine.RenderTexture.active = rt;
+                texture = new UnityEngine.Texture2D(width, height, UnityEngine.TextureFormat.RGBA32, false);
+                texture.ReadPixels(new UnityEngine.Rect(0, 0, width, height), 0, 0);
+                texture.Apply();
+                UnityEngine.RenderTexture.active = null;
+
+                // Flip vertically — GrabPixels uses bottom-left origin
+                var pixels = texture.GetPixels();
+                var flipped = new UnityEngine.Color[pixels.Length];
+                for (int y = 0; y < height; y++)
+                {
+                    System.Array.Copy(pixels, y * width, flipped, (height - 1 - y) * width, width);
+                }
+                texture.SetPixels(flipped);
                 texture.Apply();
 
-                // Encode and write
                 byte[] bytes;
                 if (capturePath.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
                     bytes = UnityEngine.ImageConversion.EncodeToJPG(texture);
                 else
                     bytes = UnityEngine.ImageConversion.EncodeToPNG(texture);
 
-                UnityEngine.Object.DestroyImmediate(texture);
-
                 System.IO.File.WriteAllBytes(capturePath, bytes);
                 return true;
             }
             catch (Exception ex)
             {
-                DebugLogError($"[UnityCtl] Screen pixel capture failed: {ex.Message}");
+                DebugLogError($"[UnityCtl] Window capture failed: {ex.Message}");
                 return false;
+            }
+            finally
+            {
+                if (texture != null)
+                    UnityEngine.Object.DestroyImmediate(texture);
+                if (rt != null)
+                {
+                    rt.Release();
+                    UnityEngine.Object.DestroyImmediate(rt);
+                }
             }
         }
 
