@@ -50,7 +50,7 @@ unityctl test run            # Run edit mode tests
 unityctl test run --mode playmode
 
 # Screenshots
-unityctl screenshot capture
+unityctl screenshot capture                            # Capture game view
 
 # Video Recording (requires com.unity.recorder package)
 # Note: record start auto-enters play mode if not already playing

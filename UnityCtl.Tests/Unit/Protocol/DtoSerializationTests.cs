@@ -171,6 +171,54 @@ public class DtoSerializationTests
     }
 
     [Fact]
+    public void ScreenshotListWindowsResult_Roundtrips()
+    {
+        var result = new ScreenshotListWindowsResult
+        {
+            Windows = new[]
+            {
+                new EditorWindowInfo { Type = "UnityEditor.SceneView", Title = "Scene", Width = 1920, Height = 1080, Docked = true },
+                new EditorWindowInfo { Type = "MyNamespace.MyToolWindow", Title = "My Tool", Width = 400, Height = 300, Docked = false }
+            }
+        };
+
+        var json = JsonHelper.Serialize(result);
+        var deserialized = JsonHelper.Deserialize<ScreenshotListWindowsResult>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(2, deserialized.Windows.Length);
+        Assert.Equal("UnityEditor.SceneView", deserialized.Windows[0].Type);
+        Assert.Equal("Scene", deserialized.Windows[0].Title);
+        Assert.Equal(1920, deserialized.Windows[0].Width);
+        Assert.True(deserialized.Windows[0].Docked);
+        Assert.Equal("MyNamespace.MyToolWindow", deserialized.Windows[1].Type);
+        Assert.False(deserialized.Windows[1].Docked);
+    }
+
+    [Fact]
+    public void ScreenshotWindowResult_Roundtrips()
+    {
+        var result = new ScreenshotWindowResult
+        {
+            Path = "Screenshots/window_MyTool_2026-03-12.png",
+            Width = 400,
+            Height = 300,
+            WindowType = "MyNamespace.MyToolWindow",
+            WindowTitle = "My Tool"
+        };
+
+        var json = JsonHelper.Serialize(result);
+        var deserialized = JsonHelper.Deserialize<ScreenshotWindowResult>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal("Screenshots/window_MyTool_2026-03-12.png", deserialized.Path);
+        Assert.Equal(400, deserialized.Width);
+        Assert.Equal(300, deserialized.Height);
+        Assert.Equal("MyNamespace.MyToolWindow", deserialized.WindowType);
+        Assert.Equal("My Tool", deserialized.WindowTitle);
+    }
+
+    [Fact]
     public void BridgeConfig_Roundtrips()
     {
         var config = new BridgeConfig

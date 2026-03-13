@@ -218,6 +218,48 @@ public class ScreenshotCaptureResult
     public required int Height { get; init; }
 }
 
+public class EditorWindowInfo
+{
+    [JsonProperty("type")]
+    public required string Type { get; init; }
+
+    [JsonProperty("title")]
+    public required string Title { get; init; }
+
+    [JsonProperty("width")]
+    public required int Width { get; init; }
+
+    [JsonProperty("height")]
+    public required int Height { get; init; }
+
+    [JsonProperty("docked")]
+    public required bool Docked { get; init; }
+}
+
+public class ScreenshotListWindowsResult
+{
+    [JsonProperty("windows")]
+    public required EditorWindowInfo[] Windows { get; init; }
+}
+
+public class ScreenshotWindowResult
+{
+    [JsonProperty("path")]
+    public required string Path { get; init; }
+
+    [JsonProperty("width")]
+    public required int Width { get; init; }
+
+    [JsonProperty("height")]
+    public required int Height { get; init; }
+
+    [JsonProperty("windowType")]
+    public required string WindowType { get; init; }
+
+    [JsonProperty("windowTitle")]
+    public required string WindowTitle { get; init; }
+}
+
 public class ScriptExecuteResult
 {
     [JsonProperty("success")]

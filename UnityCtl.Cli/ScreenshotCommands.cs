@@ -114,6 +114,146 @@ public static class ScreenshotCommands
         });
 
         screenshotCommand.AddCommand(captureCommand);
+
+        // screenshot list-windows
+        var listWindowsCommand = new Command("list-windows", "List open editor windows");
+        listWindowsCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) { context.ExitCode = 1; return; }
+
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScreenshotListWindows, null, timeout);
+            if (response == null) { context.ExitCode = 1; return; }
+
+            if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
+                return;
+            }
+
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(response.Result));
+            }
+            else
+            {
+                var result = JsonConvert.DeserializeObject<ScreenshotListWindowsResult>(
+                    JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                    JsonHelper.Settings
+                );
+
+                if (result?.Windows != null)
+                {
+                    // Header
+                    Console.WriteLine($"{"Type",-50} {"Title",-25} {"Size",-12} Docked");
+                    Console.WriteLine(new string('-', 95));
+
+                    foreach (var w in result.Windows)
+                    {
+                        Console.WriteLine($"{w.Type,-50} {w.Title,-25} {w.Width}x{w.Height,-6} {(w.Docked ? "yes" : "no")}");
+                    }
+
+                    Console.WriteLine($"\n{result.Windows.Length} window(s) open");
+                }
+            }
+        });
+        screenshotCommand.AddCommand(listWindowsCommand);
+
+        // screenshot window <window> [output]
+        var windowCommand = new Command("window", "Capture a screenshot of a specific editor window");
+        var windowArg = new Argument<string>("window", "Window type name or title to capture");
+        var windowPathArg = new Argument<string?>("path", () => null, "Output path (optional)");
+        var windowOutputOption = new Option<string?>(["-o", "--output"], "Output path (same as positional argument)");
+
+        windowCommand.AddArgument(windowArg);
+        windowCommand.AddArgument(windowPathArg);
+        windowCommand.AddOption(windowOutputOption);
+
+        windowCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var jsonFlag = ContextHelper.GetJson(context);
+            var window = context.ParseResult.GetValueForArgument(windowArg);
+            var path = context.ParseResult.GetValueForOption(windowOutputOption)
+                       ?? context.ParseResult.GetValueForArgument(windowPathArg);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) { context.ExitCode = 1; return; }
+
+            string? desiredPath = path != null ? Path.GetFullPath(path) : null;
+            var filename = desiredPath != null ? Path.GetFileName(desiredPath) : null;
+
+            var args = new Dictionary<string, object?>
+            {
+                { "window", window },
+                { "filename", filename }
+            };
+
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScreenshotWindow, args, timeout);
+            if (response == null) { context.ExitCode = 1; return; }
+
+            if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
+                return;
+            }
+
+            if (jsonFlag)
+            {
+                Console.WriteLine(JsonHelper.Serialize(response.Result));
+            }
+            else
+            {
+                var result = JsonConvert.DeserializeObject<ScreenshotWindowResult>(
+                    JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                    JsonHelper.Settings
+                );
+
+                if (result != null)
+                {
+                    var resolvedProjectPath = projectPath ?? ProjectLocator.FindProjectRoot()!;
+                    var capturePath = Path.GetFullPath(Path.Combine(resolvedProjectPath, result.Path));
+
+                    // Window capture writes synchronously (File.WriteAllBytes), but give a brief moment
+                    for (int i = 0; i < 20; i++)
+                    {
+                        if (File.Exists(capturePath)) break;
+                        await Task.Delay(100);
+                    }
+
+                    var finalPath = desiredPath ?? capturePath;
+
+                    if (!File.Exists(capturePath))
+                    {
+                        Console.Error.WriteLine($"Warning: screenshot file not written after 2s: {capturePath}");
+                    }
+                    else if (finalPath != capturePath)
+                    {
+                        var directory = Path.GetDirectoryName(finalPath);
+                        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                            Directory.CreateDirectory(directory);
+
+                        File.Move(capturePath, finalPath, overwrite: true);
+                    }
+
+                    var displayPath = ContextHelper.FormatPath(finalPath);
+                    Console.WriteLine($"Window captured: {displayPath}");
+                    Console.WriteLine($"Window: {result.WindowType} (\"{result.WindowTitle}\")");
+                    Console.WriteLine($"Resolution: {result.Width}x{result.Height}");
+                }
+            }
+        });
+        screenshotCommand.AddCommand(windowCommand);
+
         return screenshotCommand;
     }
 }

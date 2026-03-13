@@ -25,6 +25,8 @@ public static class UnityCtlCommands
 
     // Screenshots
     public const string ScreenshotCapture = "screenshot.capture";
+    public const string ScreenshotWindow = "screenshot.window";
+    public const string ScreenshotListWindows = "screenshot.listWindows";
 
     // Script execution
     public const string ScriptExecute = "script.execute";

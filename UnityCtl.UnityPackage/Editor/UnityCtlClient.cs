@@ -223,7 +223,7 @@ namespace UnityCtl
                 ProjectId = _projectId,
                 UnityVersion = Application.unityVersion,
                 EditorInstanceId = SystemInfo.deviceUniqueIdentifier,
-                Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu", "test" },
+                Capabilities = new[] { "console", "asset", "scene", "play", "compile", "menu", "test", "screenshot" },
                 ProtocolVersion = "1.0.0",
                 PluginVersion = GetPluginVersion()
             };
@@ -488,6 +488,14 @@ namespace UnityCtl
 
                     case UnityCtlCommands.ScreenshotCapture:
                         result = HandleScreenshotCapture(request);
+                        break;
+
+                    case UnityCtlCommands.ScreenshotListWindows:
+                        result = HandleScreenshotListWindows(request);
+                        break;
+
+                    case UnityCtlCommands.ScreenshotWindow:
+                        result = HandleScreenshotWindow(request);
                         break;
 
                     case UnityCtlCommands.ScriptExecute:
@@ -1119,6 +1127,226 @@ namespace UnityCtl
                 Width = actualWidth,
                 Height = actualHeight
             };
+        }
+
+        private object HandleScreenshotListWindows(RequestMessage request)
+        {
+            var allWindows = Resources.FindObjectsOfTypeAll<EditorWindow>();
+            var windowInfos = new System.Collections.Generic.List<EditorWindowInfo>();
+
+            foreach (var window in allWindows)
+            {
+                if (window == null) continue;
+                try
+                {
+                    var pos = window.position;
+                    windowInfos.Add(new EditorWindowInfo
+                    {
+                        Type = window.GetType().FullName,
+                        Title = window.titleContent?.text ?? "",
+                        Width = (int)pos.width,
+                        Height = (int)pos.height,
+                        Docked = window.docked
+                    });
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"[UnityCtl] Skipping window: {ex.Message}");
+                }
+            }
+
+            return new ScreenshotListWindowsResult { Windows = windowInfos.ToArray() };
+        }
+
+        private object HandleScreenshotWindow(RequestMessage request)
+        {
+            var windowArg = GetStringArgument(request, "window");
+            var filename = GetStringArgument(request, "filename");
+
+            if (string.IsNullOrEmpty(windowArg))
+            {
+                throw new System.ArgumentException("Required argument 'window' not provided");
+            }
+
+            // Find the target window by type name or title
+            var targetWindow = FindEditorWindow(windowArg);
+            if (targetWindow == null)
+            {
+                throw new System.ArgumentException($"No open editor window matching '{windowArg}'. Use screenshot.listWindows to see available windows.");
+            }
+
+            // Generate default filename with timestamp if not provided
+            if (string.IsNullOrEmpty(filename))
+            {
+                var timestamp = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                var sanitizedType = targetWindow.GetType().Name;
+                filename = $"window_{sanitizedType}_{timestamp}.png";
+            }
+
+            // Ensure .png extension
+            if (!filename.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase) &&
+                !filename.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
+            {
+                filename += ".png";
+            }
+
+            var capturePath = $"Screenshots/{filename}";
+
+            // Ensure Screenshots directory exists
+            if (!System.IO.Directory.Exists("Screenshots"))
+            {
+                System.IO.Directory.CreateDirectory("Screenshots");
+                DebugLog("[UnityCtl] Created Screenshots directory");
+            }
+
+            targetWindow.Focus();
+            targetWindow.Repaint();
+
+            var pos = targetWindow.position;
+            int width = (int)pos.width;
+            int height = (int)pos.height;
+
+            if (!CaptureWindowViaGrabPixels(targetWindow, capturePath, width, height))
+            {
+                throw new System.InvalidOperationException($"Failed to capture window '{windowArg}'");
+            }
+
+            var windowType = targetWindow.GetType().FullName;
+            var windowTitle = targetWindow.titleContent?.text ?? "";
+
+            DebugLog($"[UnityCtl] Captured window '{windowType}' ({width}x{height}) to: {capturePath}");
+
+            return new ScreenshotWindowResult
+            {
+                Path = capturePath,
+                Width = width,
+                Height = height,
+                WindowType = windowType,
+                WindowTitle = windowTitle
+            };
+        }
+
+        private static EditorWindow FindEditorWindow(string identifier)
+        {
+            var allWindows = Resources.FindObjectsOfTypeAll<EditorWindow>();
+
+            // 1. Exact type name match (full name)
+            foreach (var w in allWindows)
+            {
+                if (w != null && w.GetType().FullName == identifier)
+                    return w;
+            }
+
+            // 2. Suffix match on type name (e.g. "MyWindow" matches "MyNamespace.MyWindow")
+            foreach (var w in allWindows)
+            {
+                if (w == null) continue;
+                var fullName = w.GetType().FullName;
+                if (fullName != null && fullName.EndsWith("." + identifier, System.StringComparison.Ordinal))
+                    return w;
+            }
+
+            // 3. Short type name match (no namespace)
+            foreach (var w in allWindows)
+            {
+                if (w != null && w.GetType().Name == identifier)
+                    return w;
+            }
+
+            // 4. Window title match (case-insensitive)
+            foreach (var w in allWindows)
+            {
+                if (w != null && string.Equals(w.titleContent?.text, identifier, System.StringComparison.OrdinalIgnoreCase))
+                    return w;
+            }
+
+            return null;
+        }
+
+        private static readonly System.Reflection.FieldInfo ParentViewField =
+            typeof(EditorWindow).GetField("m_Parent",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static readonly System.Type GuiViewType =
+            typeof(EditorWindow).Assembly.GetType("UnityEditor.GUIView");
+
+        private static readonly System.Reflection.MethodInfo GrabPixelsMethod =
+            GuiViewType?.GetMethod("GrabPixels",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static readonly System.Reflection.MethodInfo RepaintImmediatelyMethod =
+            GuiViewType?.GetMethod("RepaintImmediately",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static bool CaptureWindowViaGrabPixels(EditorWindow window, string capturePath, int width, int height)
+        {
+            UnityEngine.RenderTexture rt = null;
+            UnityEngine.Texture2D texture = null;
+            try
+            {
+                if (ParentViewField == null || GrabPixelsMethod == null)
+                {
+                    DebugLogError("[UnityCtl] GrabPixels capture not available (missing internal API)");
+                    return false;
+                }
+
+                var hostView = ParentViewField.GetValue(window);
+                if (hostView == null)
+                {
+                    DebugLogError("[UnityCtl] Window has no parent HostView");
+                    return false;
+                }
+
+                // Force synchronous repaint — call twice so IMGUI windows complete
+                // both their layout and repaint passes
+                RepaintImmediatelyMethod?.Invoke(hostView, null);
+                RepaintImmediatelyMethod?.Invoke(hostView, null);
+
+                rt = new UnityEngine.RenderTexture(width, height, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.Linear);
+                rt.Create();
+
+                GrabPixelsMethod.Invoke(hostView, new object[] { rt, new UnityEngine.Rect(0, 0, width, height) });
+
+                UnityEngine.RenderTexture.active = rt;
+                texture = new UnityEngine.Texture2D(width, height, UnityEngine.TextureFormat.RGBA32, false, true);
+                texture.ReadPixels(new UnityEngine.Rect(0, 0, width, height), 0, 0);
+                texture.Apply();
+                UnityEngine.RenderTexture.active = null;
+
+                // Flip vertically — GrabPixels uses bottom-left origin
+                var pixels = texture.GetPixels();
+                var flipped = new UnityEngine.Color[pixels.Length];
+                for (int y = 0; y < height; y++)
+                {
+                    System.Array.Copy(pixels, y * width, flipped, (height - 1 - y) * width, width);
+                }
+                texture.SetPixels(flipped);
+                texture.Apply();
+
+                byte[] bytes;
+                if (capturePath.EndsWith(".jpg", System.StringComparison.OrdinalIgnoreCase))
+                    bytes = UnityEngine.ImageConversion.EncodeToJPG(texture);
+                else
+                    bytes = UnityEngine.ImageConversion.EncodeToPNG(texture);
+
+                System.IO.File.WriteAllBytes(capturePath, bytes);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Window capture failed: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                if (texture != null)
+                    UnityEngine.Object.DestroyImmediate(texture);
+                if (rt != null)
+                {
+                    rt.Release();
+                    UnityEngine.Object.DestroyImmediate(rt);
+                }
+            }
         }
 
         private object HandleScriptExecute(RequestMessage request)
