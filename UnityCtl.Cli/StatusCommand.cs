@@ -118,6 +118,9 @@ public static class StatusCommand
 
             if (json)
             {
+                var enforced = VersionCheck.IsEnforced(projectRoot);
+                var versionCheck = health != null ? VersionCheck.Check(health) : null;
+
                 // Include version info and dialogs in JSON output
                 var jsonResult = new
                 {
@@ -136,13 +139,35 @@ public static class StatusCommand
                         Cli = VersionInfo.Version,
                         Bridge = health.BridgeVersion,
                         UnityPlugin = health.UnityPluginVersion
-                    } : null
+                    } : null,
+                    VersionMismatch = versionCheck?.HasMismatch ?? false,
+                    PluginAhead = versionCheck?.PluginAhead ?? false,
+                    EnforceVersionMatch = enforced
                 };
                 Console.WriteLine(JsonHelper.Serialize(jsonResult));
+
+                // Error only when plugin is ahead (team member updated package, tools need sync)
+                if (enforced && versionCheck is { PluginAhead: true })
+                {
+                    context.ExitCode = 1;
+                }
             }
             else
             {
                 PrintHumanReadableStatus(result, unityStatus.Message, health, detectedDialogs);
+
+                // Version information (in human-readable mode, handled after the rest of status)
+                if (health != null)
+                {
+                    Console.WriteLine();
+                    var enforced = VersionCheck.IsEnforced(projectRoot);
+                    var versionResult = PrintVersionInfo(health, enforced);
+
+                    if (enforced && versionResult.PluginAhead)
+                    {
+                        context.ExitCode = 1;
+                    }
+                }
             }
         });
 
@@ -245,71 +270,43 @@ public static class StatusCommand
                 Console.WriteLine("  Use 'unityctl dialog dismiss' to dismiss");
         }
 
-        // Version information
-        if (health != null)
-        {
-            Console.WriteLine();
-            PrintVersionInfo(health);
-        }
     }
 
-    private static void PrintVersionInfo(HealthResult health)
+    private static VersionCheck.VersionCheckResult PrintVersionInfo(HealthResult health, bool enforced)
     {
-        var cliVersion = VersionInfo.Version;
-        var bridgeVersion = health.BridgeVersion;
-        var pluginVersion = health.UnityPluginVersion;
+        var result = VersionCheck.Check(health);
 
-        // Compare base versions (strip build metadata after '+')
-        var cliBase = GetBaseVersion(cliVersion);
-        var bridgeBase = GetBaseVersion(bridgeVersion);
-        var pluginBase = GetBaseVersion(pluginVersion);
-
-        // Check for mismatches
-        var hasMismatch = false;
-
-        if (bridgeBase != null && bridgeBase != cliBase)
+        if (!result.HasMismatch)
         {
-            hasMismatch = true;
-        }
-
-        if (pluginBase != null && pluginBase != cliBase)
-        {
-            hasMismatch = true;
-        }
-
-        if (pluginBase != null && bridgeBase != null && pluginBase != bridgeBase)
-        {
-            hasMismatch = true;
-        }
-
-        if (!hasMismatch)
-        {
-            // All versions match - show single line
-            if (pluginBase != null)
+            if (result.PluginVersion != null)
             {
-                Console.WriteLine($"Versions: {cliBase} (all match)");
+                Console.WriteLine($"Versions: {result.CliVersion} (all match)");
             }
             else
             {
-                Console.WriteLine($"Versions: {cliBase} (plugin not connected)");
+                Console.WriteLine($"Versions: {result.CliVersion} (plugin not connected)");
             }
+        }
+        else if (enforced && result.PluginAhead)
+        {
+            // Plugin is newer than CLI/Bridge — someone updated the package, tools need sync
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("ERROR: Unity plugin is newer than CLI/Bridge (enforce-version-match is enabled)!");
+            Console.ResetColor();
+            Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
+            Console.WriteLine("  Run 'unityctl update' to sync all components.");
         }
         else
         {
-            // Version mismatch - show warning
+            // CLI/Bridge ahead of plugin, or enforcement disabled — warn only
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("WARNING: Version mismatch!");
             Console.ResetColor();
-            Console.WriteLine($"  CLI: {cliBase ?? "N/A"}, Bridge: {bridgeBase ?? "N/A"}, Plugin: {pluginBase ?? "N/A"}");
-            Console.WriteLine("  Consider updating all components to the same version.");
+            Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
+            Console.WriteLine("  Run 'unityctl update' to sync all components to the same version.");
         }
+
+        return result;
     }
 
-    private static string? GetBaseVersion(string? version)
-    {
-        if (version == null) return null;
-        // Strip build metadata (everything after '+')
-        var plusIndex = version.IndexOf('+');
-        return plusIndex >= 0 ? version.Substring(0, plusIndex) : version;
-    }
 }
