@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
@@ -12,7 +13,17 @@ namespace UnityCtl.Cli;
 
 public static class ConfigCommands
 {
-    private static readonly string[] ValidKeys = { "project-path", "bridge-port", "wait-timeout", "enforce-version-match" };
+    private record ConfigOption(string Key, string JsonKey, string Type, string Description, string? Default = null);
+
+    private static readonly ConfigOption[] Options =
+    {
+        new("project-path", "projectPath", "path", "Path to Unity project (for monorepo setups)"),
+        new("bridge-port", "bridgePort", "integer (1-65535)", "Override bridge listening port", "random"),
+        new("wait-timeout", "waitTimeout", "integer (seconds)", "Default timeout for 'unityctl wait'", "120"),
+        new("enforce-version-match", "enforceVersionMatch", "boolean", "Error if Unity plugin version differs from CLI/Bridge", "false"),
+    };
+
+    private static readonly string[] ValidKeys = Options.Select(o => o.Key).ToArray();
 
     public static Command CreateCommand()
     {
@@ -21,6 +32,7 @@ public static class ConfigCommands
         configCommand.AddCommand(CreateSetCommand());
         configCommand.AddCommand(CreateGetCommand());
         configCommand.AddCommand(CreateListCommand());
+        configCommand.AddCommand(CreateOptionsCommand());
 
         return configCommand;
     }
@@ -79,6 +91,51 @@ public static class ConfigCommands
 
         return listCommand;
     }
+
+    private static Command CreateOptionsCommand()
+    {
+        var optionsCommand = new Command("options", "List all available configuration options");
+
+        optionsCommand.SetHandler((InvocationContext context) =>
+        {
+            var json = ContextHelper.GetJson(context);
+
+            if (json)
+            {
+                var items = Options.Select(o => new
+                {
+                    key = o.Key,
+                    type = o.Type,
+                    description = o.Description,
+                    @default = o.Default,
+                });
+                Console.WriteLine(JsonHelper.Serialize(items));
+            }
+            else
+            {
+                Console.WriteLine("Available configuration options:");
+                Console.WriteLine();
+                foreach (var option in Options)
+                {
+                    Console.WriteLine($"  {option.Key}");
+                    Console.WriteLine($"    Type:        {option.Type}");
+                    Console.WriteLine($"    Description: {option.Description}");
+                    if (option.Default != null)
+                        Console.WriteLine($"    Default:     {option.Default}");
+                    Console.WriteLine();
+                }
+                Console.WriteLine("Usage: unityctl config set <key> <value>");
+            }
+        });
+
+        return optionsCommand;
+    }
+
+    private static string ToJsonKey(string cliKey) =>
+        Options.FirstOrDefault(o => o.Key == cliKey)?.JsonKey ?? cliKey;
+
+    private static string ToCliKey(string jsonKey) =>
+        Options.FirstOrDefault(o => o.JsonKey == jsonKey)?.Key ?? jsonKey;
 
     private static string GetConfigDir()
     {
@@ -219,15 +276,7 @@ public static class ConfigCommands
 
         var config = await ReadConfigObjectAsync();
 
-        // Map CLI key names to JSON property names
-        var jsonKey = normalizedKey switch
-        {
-            "project-path" => "projectPath",
-            "bridge-port" => "bridgePort",
-            "wait-timeout" => "waitTimeout",
-            "enforce-version-match" => "enforceVersionMatch",
-            _ => normalizedKey
-        };
+        var jsonKey = ToJsonKey(normalizedKey);
 
         var value = config[jsonKey]?.ToString();
 
@@ -276,15 +325,7 @@ public static class ConfigCommands
             {
                 foreach (var kvp in config)
                 {
-                    // Map JSON property names back to CLI key names for display
-                    var displayKey = kvp.Key switch
-                    {
-                        "projectPath" => "project-path",
-                        "bridgePort" => "bridge-port",
-                        "waitTimeout" => "wait-timeout",
-                        "enforceVersionMatch" => "enforce-version-match",
-                        _ => kvp.Key
-                    };
+                    var displayKey = ToCliKey(kvp.Key);
                     Console.WriteLine($"  {displayKey} = {kvp.Value}");
                 }
             }
