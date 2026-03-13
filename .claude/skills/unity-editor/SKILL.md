@@ -51,8 +51,6 @@ unityctl test run --mode playmode
 
 # Screenshots
 unityctl screenshot capture                            # Capture game view
-unityctl screenshot list-windows                       # List open editor windows (type, title, size)
-unityctl screenshot window <window> [-o output.png]    # Capture a specific editor window by type name or title
 
 # Video Recording (requires com.unity.recorder package)
 # Note: record start auto-enters play mode if not already playing
