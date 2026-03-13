@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.IO;
@@ -15,11 +16,14 @@ public static class SkillCommands
     private const string SkillFileName = "SKILL.md";
     private const string EmbeddedResourceName = "UnityCtl.Cli.Resources.SKILL.md";
 
+    private const string SkillExtraFileName = "skill-extra.md";
+
     public static Command CreateCommand()
     {
         var skillCommand = new Command("skill", "Claude Code skill management");
 
         skillCommand.AddCommand(CreateAddCommand());
+        skillCommand.AddCommand(CreateRebuildCommand());
         skillCommand.AddCommand(CreateRemoveCommand());
         skillCommand.AddCommand(CreateStatusCommand());
 
@@ -62,6 +66,150 @@ public static class SkillCommands
         });
 
         return addCommand;
+    }
+
+    private static Command CreateRebuildCommand()
+    {
+        var rebuildCommand = new Command("rebuild", "Rebuild composed SKILL.md from base + plugins + user extra");
+
+        var globalOption = new Option<bool>(
+            "--global",
+            "Rebuild global ~/.claude/skills/ instead of local .claude/skills/"
+        );
+        globalOption.AddAlias("-g");
+
+        var claudeDirOption = new Option<string?>(
+            "--claude-dir",
+            "Custom Claude directory (default: ~/.claude or ./.claude)"
+        );
+
+        rebuildCommand.AddOption(globalOption);
+        rebuildCommand.AddOption(claudeDirOption);
+
+        rebuildCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var global = context.ParseResult.GetValueForOption(globalOption);
+            var claudeDir = context.ParseResult.GetValueForOption(claudeDirOption);
+            var json = ContextHelper.GetJson(context);
+
+            var skillsDir = GetSkillsDirectory(global, claudeDir);
+            var skillPath = Path.Combine(skillsDir, SkillFolderName, SkillFileName);
+
+            var content = ComposeSkillContent();
+            if (content == null)
+            {
+                if (json)
+                {
+                    Console.WriteLine(JsonHelper.Serialize(new
+                    {
+                        success = false,
+                        error = "base_skill_not_found",
+                        message = "Could not find embedded SKILL.md resource"
+                    }));
+                }
+                else
+                {
+                    Console.Error.WriteLine("Error: Could not find base skill content.");
+                }
+                context.ExitCode = 1;
+                return;
+            }
+
+            var dir = Path.GetDirectoryName(skillPath);
+            if (dir != null) Directory.CreateDirectory(dir);
+
+            await File.WriteAllTextAsync(skillPath, content);
+
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(new
+                {
+                    success = true,
+                    path = skillPath,
+                    global,
+                    composed = true
+                }));
+            }
+            else
+            {
+                Console.WriteLine($"Rebuilt skill at: {skillPath}");
+                Console.WriteLine("Restart Claude Code to load the updated skill.");
+            }
+        });
+
+        return rebuildCommand;
+    }
+
+    /// <summary>
+    /// Composes the final SKILL.md from: base embedded skill + plugin sections + user extra.
+    /// </summary>
+    public static string? ComposeSkillContent()
+    {
+        // 1. Base skill content
+        var baseContent = GetEmbeddedSkillContent();
+        if (baseContent == null)
+            return null;
+
+        // 2. Plugin sections
+        var plugins = PluginLoader.DiscoverPlugins();
+        string? pluginSections = null;
+        if (plugins.Count > 0)
+        {
+            var sections = new List<string>();
+            sections.Add("## Plugin Commands");
+            sections.Add("");
+            foreach (var plugin in plugins)
+            {
+                sections.Add(PluginLoader.GenerateSkillSection(plugin));
+            }
+            pluginSections = string.Join("\n", sections);
+        }
+
+        // 3. User extra (.unityctl/skill-extra.md)
+        string? userExtra = null;
+        var extraPath = FindSkillExtraFile();
+        if (extraPath != null && File.Exists(extraPath))
+        {
+            userExtra = File.ReadAllText(extraPath);
+        }
+
+        // Compose
+        if (pluginSections == null && userExtra == null)
+            return baseContent;
+
+        var composed = baseContent.TrimEnd();
+
+        if (pluginSections != null)
+        {
+            composed += "\n\n" + pluginSections.TrimEnd();
+        }
+
+        if (userExtra != null)
+        {
+            composed += "\n\n" + userExtra.TrimEnd();
+        }
+
+        return composed + "\n";
+    }
+
+    private static string? FindSkillExtraFile()
+    {
+        // Walk up from CWD looking for .unityctl/skill-extra.md
+        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (current != null)
+        {
+            var extraPath = Path.Combine(current.FullName, ".unityctl", SkillExtraFileName);
+            if (File.Exists(extraPath))
+                return extraPath;
+
+            // Stop at .unityctl directory boundary
+            var unityctlDir = Path.Combine(current.FullName, ".unityctl");
+            if (Directory.Exists(unityctlDir))
+                return extraPath; // Return the path even if file doesn't exist (checked by caller)
+
+            current = current.Parent;
+        }
+        return null;
     }
 
     private static Command CreateRemoveCommand()
@@ -168,7 +316,7 @@ public static class SkillCommands
     /// </summary>
     public static async Task<bool> UpdateSkillFileAsync(string skillPath)
     {
-        var content = GetEmbeddedSkillContent();
+        var content = ComposeSkillContent();
         if (content == null) return false;
 
         var dir = Path.GetDirectoryName(skillPath);
@@ -209,8 +357,8 @@ public static class SkillCommands
             }
         }
 
-        // Get skill content
-        var skillContent = GetEmbeddedSkillContent();
+        // Get composed skill content (base + plugins + user extra)
+        var skillContent = ComposeSkillContent();
         if (skillContent == null)
         {
             if (json)

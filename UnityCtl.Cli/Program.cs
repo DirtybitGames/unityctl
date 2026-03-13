@@ -37,6 +37,7 @@ rootCommand.AddCommand(UpdateCommands.CreateCommand());
 rootCommand.AddCommand(ConfigCommands.CreateCommand());
 rootCommand.AddCommand(PackageCommands.CreateCommand());
 rootCommand.AddCommand(SkillCommands.CreateCommand());
+rootCommand.AddCommand(PluginCommands.CreateCommand());
 
 // Add subcommands - Status & Logs
 rootCommand.AddCommand(StatusCommand.CreateCommand());
@@ -59,6 +60,20 @@ rootCommand.AddCommand(RecordCommands.CreateCommand());
 rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(SnapshotCommand.CreateCommand());
 rootCommand.AddCommand(PrefabCommand.CreateCommand());
+
+// Dynamically register plugin commands
+try
+{
+    var plugins = PluginLoader.DiscoverPlugins();
+    foreach (var plugin in plugins)
+    {
+        rootCommand.AddCommand(PluginLoader.CreateCommandFromPlugin(plugin));
+    }
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Warning: Failed to load plugins: {ex.Message}");
+}
 
 // "Did you mean?" hints for common misses
 CommandHints.Register(rootCommand);
