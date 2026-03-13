@@ -161,15 +161,11 @@ public static class StatusCommand
                 {
                     Console.WriteLine();
                     var enforced = VersionCheck.IsEnforced(projectRoot);
-                    PrintVersionInfo(health, enforced);
+                    var versionResult = PrintVersionInfo(health, enforced);
 
-                    if (enforced)
+                    if (enforced && versionResult.PluginAhead)
                     {
-                        var versionResult = VersionCheck.Check(health);
-                        if (versionResult.PluginAhead)
-                        {
-                            context.ExitCode = 1;
-                        }
+                        context.ExitCode = 1;
                     }
                 }
             }
@@ -276,7 +272,7 @@ public static class StatusCommand
 
     }
 
-    private static void PrintVersionInfo(HealthResult health, bool enforced)
+    private static VersionCheck.VersionCheckResult PrintVersionInfo(HealthResult health, bool enforced)
     {
         var result = VersionCheck.Check(health);
 
@@ -309,6 +305,8 @@ public static class StatusCommand
             Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
             Console.WriteLine("  Consider updating all components to the same version.");
         }
+
+        return result;
     }
 
 }
