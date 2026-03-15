@@ -65,6 +65,22 @@ public static class ExecutablePluginLoader
     {
         var executableName = $"{ExecutablePrefix}{name}";
 
+        // Inject environment variables (best-effort, no InvocationContext available)
+        var envVars = new Dictionary<string, string>();
+        var projectRoot = ProjectLocator.FindProjectRoot();
+        if (projectRoot != null)
+        {
+            envVars["UNITYCTL_PROJECT_PATH"] = projectRoot;
+            var bridgeConfig = ProjectLocator.ReadBridgeConfig(projectRoot);
+            if (bridgeConfig != null)
+            {
+                envVars["UNITYCTL_BRIDGE_PORT"] = bridgeConfig.Port.ToString();
+                envVars["UNITYCTL_BRIDGE_URL"] = $"http://localhost:{bridgeConfig.Port}";
+            }
+        }
+
+        // Try to start "unityctl-<name>" directly. On Unix the OS resolves PATH.
+        // On Windows with UseShellExecute=false, this finds .exe files on PATH.
         var startInfo = new ProcessStartInfo
         {
             FileName = executableName,
@@ -77,18 +93,8 @@ public static class ExecutablePluginLoader
         foreach (var token in passThrough)
             startInfo.ArgumentList.Add(token);
 
-        // Inject environment variables (best-effort, no InvocationContext available)
-        var projectRoot = ProjectLocator.FindProjectRoot();
-        if (projectRoot != null)
-        {
-            startInfo.Environment["UNITYCTL_PROJECT_PATH"] = projectRoot;
-            var bridgeConfig = ProjectLocator.ReadBridgeConfig(projectRoot);
-            if (bridgeConfig != null)
-            {
-                startInfo.Environment["UNITYCTL_BRIDGE_PORT"] = bridgeConfig.Port.ToString();
-                startInfo.Environment["UNITYCTL_BRIDGE_URL"] = $"http://localhost:{bridgeConfig.Port}";
-            }
-        }
+        foreach (var (key, value) in envVars)
+            startInfo.Environment[key] = value;
 
         try
         {
@@ -106,9 +112,81 @@ public static class ExecutablePluginLoader
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            // Executable not found on PATH
-            return null;
+            // Not found as a direct executable
         }
+
+        // On Windows, .bat/.cmd scripts need cmd.exe /c to run.
+        // Use PATHEXT-aware lookup via "where" to find the exact path first,
+        // so we don't blindly invoke cmd.exe for non-existent commands.
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            string? resolvedPath = null;
+            try
+            {
+                var whereInfo = new ProcessStartInfo
+                {
+                    FileName = "where.exe",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                whereInfo.ArgumentList.Add(executableName);
+
+                using var whereProc = Process.Start(whereInfo);
+                if (whereProc != null)
+                {
+                    resolvedPath = (await whereProc.StandardOutput.ReadLineAsync())?.Trim();
+                    await whereProc.WaitForExitAsync();
+                    if (whereProc.ExitCode != 0)
+                        resolvedPath = null;
+                }
+            }
+            catch
+            {
+                // where.exe not available — give up
+            }
+
+            if (resolvedPath != null)
+            {
+                var cmdInfo = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                cmdInfo.ArgumentList.Add("/c");
+                cmdInfo.ArgumentList.Add(resolvedPath);
+
+                foreach (var token in passThrough)
+                    cmdInfo.ArgumentList.Add(token);
+
+                foreach (var (key, value) in envVars)
+                    cmdInfo.Environment[key] = value;
+
+                try
+                {
+                    using var process = Process.Start(cmdInfo);
+                    if (process != null)
+                    {
+                        var stdoutTask = StreamOutputAsync(process.StandardOutput, Console.Out);
+                        var stderrTask = StreamOutputAsync(process.StandardError, Console.Error);
+
+                        await Task.WhenAll(stdoutTask, stderrTask);
+                        await process.WaitForExitAsync();
+                        return process.ExitCode;
+                    }
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    // Resolved path but still couldn't execute
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
