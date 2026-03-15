@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.CommandLine;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityCtl.Cli;
 
@@ -62,17 +64,36 @@ rootCommand.AddCommand(SnapshotCommand.CreateCommand());
 rootCommand.AddCommand(PrefabCommand.CreateCommand());
 
 // Dynamically register plugin commands
+var registeredNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+foreach (var cmd in rootCommand.Children.OfType<Command>())
+    registeredNames.Add(cmd.Name);
+
 try
 {
     var plugins = PluginLoader.DiscoverPlugins();
     foreach (var plugin in plugins)
     {
         rootCommand.AddCommand(PluginLoader.CreateCommandFromPlugin(plugin));
+        registeredNames.Add(plugin.Manifest.Name);
     }
 }
 catch (Exception ex)
 {
     Console.Error.WriteLine($"Warning: Failed to load plugins: {ex.Message}");
+}
+
+// Dynamically register executable plugins (lowest precedence)
+try
+{
+    var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(registeredNames);
+    foreach (var plugin in executablePlugins)
+    {
+        rootCommand.AddCommand(ExecutablePluginLoader.CreateCommandFromExecutablePlugin(plugin));
+    }
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Warning: Failed to load executable plugins: {ex.Message}");
 }
 
 // "Did you mean?" hints for common misses

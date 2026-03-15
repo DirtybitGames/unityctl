@@ -11,6 +11,15 @@ namespace UnityCtl.Cli;
 
 public static class PluginCommands
 {
+    // Built-in command names to exclude from executable plugin discovery
+    internal static readonly string[] BuiltInCommandNames =
+    [
+        "setup", "update", "config", "package", "skill", "plugin",
+        "status", "wait", "logs",
+        "bridge", "editor", "dialog",
+        "scene", "play", "asset", "menu", "test", "screenshot", "record", "script", "snapshot", "prefab"
+    ];
+
     public static Command CreateCommand()
     {
         var pluginCommand = new Command("plugin", "Plugin management");
@@ -30,44 +39,72 @@ public static class PluginCommands
         listCommand.SetHandler((InvocationContext context) =>
         {
             var json = ContextHelper.GetJson(context);
-            var plugins = PluginLoader.DiscoverPlugins();
+            var scriptPlugins = PluginLoader.DiscoverPlugins();
+
+            // Exclude built-in command names and script plugin names from executable discovery
+            var excludeNames = new HashSet<string>(BuiltInCommandNames, StringComparer.OrdinalIgnoreCase);
+            foreach (var sp in scriptPlugins)
+                excludeNames.Add(sp.Manifest.Name);
+            var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(excludeNames);
 
             if (json)
             {
-                var output = plugins.Select(p => new
+                var scriptOutput = scriptPlugins.Select(p => new
                 {
                     name = p.Manifest.Name,
+                    type = "script",
                     version = p.Manifest.Version,
                     description = p.Manifest.Description,
                     commands = p.Manifest.Commands.Select(c => c.Name).ToArray(),
                     source = p.Source,
                     directory = p.Directory
                 });
-                Console.WriteLine(JsonHelper.Serialize(output));
+                var execOutput = executablePlugins.Select(p => new
+                {
+                    name = p.Name,
+                    type = "executable",
+                    version = (string?)null,
+                    description = p.Description,
+                    commands = Array.Empty<string>(),
+                    source = p.Source,
+                    directory = Path.GetDirectoryName(p.Path)
+                });
+                Console.WriteLine(JsonHelper.Serialize(scriptOutput.Concat<object>(execOutput)));
             }
             else
             {
-                if (plugins.Count == 0)
+                var totalCount = scriptPlugins.Count + executablePlugins.Count;
+                if (totalCount == 0)
                 {
                     Console.WriteLine("No plugins installed.");
                     Console.WriteLine();
                     Console.WriteLine("Create one with: unityctl plugin create <name>");
+                    Console.WriteLine("Or place a 'unityctl-<name>' executable on PATH.");
                     return;
                 }
 
-                Console.WriteLine($"Installed plugins ({plugins.Count}):");
+                Console.WriteLine($"Installed plugins ({totalCount}):");
                 Console.WriteLine();
 
-                foreach (var plugin in plugins)
+                foreach (var plugin in scriptPlugins)
                 {
                     var version = plugin.Manifest.Version != null ? $" v{plugin.Manifest.Version}" : "";
                     var cmds = string.Join(", ", plugin.Manifest.Commands.Select(c => c.Name));
-                    Console.WriteLine($"  {plugin.Manifest.Name}{version} ({plugin.Source})");
+                    Console.WriteLine($"  {plugin.Manifest.Name}{version} [script] ({plugin.Source})");
                     if (!string.IsNullOrEmpty(plugin.Manifest.Description))
                         Console.WriteLine($"    {plugin.Manifest.Description}");
                     if (cmds.Length > 0)
                         Console.WriteLine($"    Commands: {cmds}");
                     Console.WriteLine($"    Path: {ContextHelper.FormatPath(plugin.Directory)}");
+                    Console.WriteLine();
+                }
+
+                foreach (var plugin in executablePlugins)
+                {
+                    Console.WriteLine($"  {plugin.Name} [executable] ({plugin.Source})");
+                    if (!string.IsNullOrEmpty(plugin.Description))
+                        Console.WriteLine($"    {plugin.Description}");
+                    Console.WriteLine($"    Path: {ContextHelper.FormatPath(plugin.Path)}");
                     Console.WriteLine();
                 }
             }

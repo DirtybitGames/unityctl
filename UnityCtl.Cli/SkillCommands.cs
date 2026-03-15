@@ -150,10 +150,21 @@ public static class SkillCommands
         if (baseContent == null)
             return null;
 
-        // 2. Plugin sections
+        // Strip any previously composed plugin/extra sections to make rebuild idempotent.
+        // The embedded resource or dev fallback may contain a prior compose result.
+        var pluginMarker = "\n## Plugin Commands";
+        var markerIndex = baseContent.IndexOf(pluginMarker, StringComparison.Ordinal);
+        if (markerIndex >= 0)
+            baseContent = baseContent.Substring(0, markerIndex);
+
+        // 2. Plugin sections (script + executable)
         var plugins = PluginLoader.DiscoverPlugins();
+        var excludeNames = new HashSet<string>(PluginCommands.BuiltInCommandNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var sp in plugins)
+            excludeNames.Add(sp.Manifest.Name);
+        var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(excludeNames);
         string? pluginSections = null;
-        if (plugins.Count > 0)
+        if (plugins.Count > 0 || executablePlugins.Count > 0)
         {
             var sections = new List<string>();
             sections.Add("## Plugin Commands");
@@ -161,6 +172,12 @@ public static class SkillCommands
             foreach (var plugin in plugins)
             {
                 sections.Add(PluginLoader.GenerateSkillSection(plugin));
+            }
+            foreach (var execPlugin in executablePlugins)
+            {
+                var section = ExecutablePluginLoader.GetSkillSection(execPlugin);
+                if (section != null)
+                    sections.Add(section);
             }
             pluginSections = string.Join("\n", sections);
         }
