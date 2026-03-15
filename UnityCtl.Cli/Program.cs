@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.CommandLine;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityCtl.Cli;
 
@@ -37,6 +39,7 @@ rootCommand.AddCommand(UpdateCommands.CreateCommand());
 rootCommand.AddCommand(ConfigCommands.CreateCommand());
 rootCommand.AddCommand(PackageCommands.CreateCommand());
 rootCommand.AddCommand(SkillCommands.CreateCommand());
+rootCommand.AddCommand(PluginCommands.CreateCommand());
 
 // Add subcommands - Status & Logs
 rootCommand.AddCommand(StatusCommand.CreateCommand());
@@ -60,7 +63,56 @@ rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(SnapshotCommand.CreateCommand());
 rootCommand.AddCommand(PrefabCommand.CreateCommand());
 
+// Derive built-in command names dynamically from registered commands
+var registeredNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+foreach (var cmd in rootCommand.Children.OfType<Command>())
+    registeredNames.Add(cmd.Name);
+PluginCommands.BuiltInCommandNames = registeredNames;
+
+try
+{
+    var plugins = PluginLoader.DiscoverPlugins();
+    foreach (var plugin in plugins)
+    {
+        if (registeredNames.Contains(plugin.Manifest.Name))
+        {
+            Console.Error.WriteLine($"Warning: Plugin '{plugin.Manifest.Name}' conflicts with a built-in command and was skipped.");
+            continue;
+        }
+        rootCommand.AddCommand(PluginLoader.CreateCommandFromPlugin(plugin));
+        registeredNames.Add(plugin.Manifest.Name);
+    }
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Warning: Failed to load plugins: {ex.Message}");
+}
+
+// Register executable plugins from plugin directories only (cheap scan).
+// PATH executables are resolved lazily at invocation time (git-style).
+try
+{
+    var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(registeredNames);
+    foreach (var plugin in executablePlugins)
+    {
+        rootCommand.AddCommand(ExecutablePluginLoader.CreateCommandFromExecutablePlugin(plugin));
+    }
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Warning: Failed to load executable plugins: {ex.Message}");
+}
+
 // "Did you mean?" hints for common misses
 CommandHints.Register(rootCommand);
+
+// If the first arg doesn't match any registered command, try to run it as
+// "unityctl-<name>" on PATH (like git resolves "git foo" → "git-foo").
+if (args.Length > 0 && !registeredNames.Contains(args[0]) && !args[0].StartsWith("-"))
+{
+    var exitCode = await ExecutablePluginLoader.TryExecuteByName(args[0], args.Skip(1).ToArray());
+    if (exitCode.HasValue)
+        return exitCode.Value;
+}
 
 return await rootCommand.InvokeAsync(args);
