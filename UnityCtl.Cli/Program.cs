@@ -121,7 +121,8 @@ if (args.Length > 0)
             unmatchedCommand, passThrough,
             parseResult.GetValueForOption(projectOption),
             parseResult.GetValueForOption(agentIdOption),
-            parseResult.GetValueForOption(jsonOption));
+            parseResult.GetValueForOption(jsonOption),
+            parseResult.GetValueForOption(timeoutOption));
         if (exitCode.HasValue)
             return exitCode.Value;
     }

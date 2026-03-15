@@ -63,12 +63,12 @@ public static class ExecutablePluginLoader
     /// </summary>
     public static async Task<int?> TryExecuteByName(
         string name, string[] passThrough,
-        string? projectPath = null, string? agentId = null, bool json = false)
+        string? projectPath = null, string? agentId = null, bool json = false, int? timeout = null)
     {
         var executableName = $"{ExecutablePrefix}{name}";
 
         var startInfo = CreateStartInfo(executableName, passThrough);
-        SetPluginEnvironment(startInfo, projectPath, agentId, json);
+        SetPluginEnvironment(startInfo, projectPath, agentId, json, timeout);
 
         // Try to start "unityctl-<name>" directly. On Unix the OS resolves PATH.
         // On Windows with UseShellExecute=false, this finds .exe files on PATH.
@@ -85,7 +85,7 @@ public static class ExecutablePluginLoader
             if (resolvedPath != null)
             {
                 var cmdInfo = CreateStartInfo("cmd.exe", ["/c", resolvedPath, .. passThrough]);
-                SetPluginEnvironment(cmdInfo, projectPath, agentId, json);
+                SetPluginEnvironment(cmdInfo, projectPath, agentId, json, timeout);
                 result = await RunAndStreamAsync(cmdInfo);
                 if (result.HasValue)
                     return result.Value;
@@ -159,7 +159,8 @@ public static class ExecutablePluginLoader
         SetPluginEnvironment(startInfo,
             ContextHelper.GetProjectPath(context),
             ContextHelper.GetAgentId(context),
-            ContextHelper.GetJson(context));
+            ContextHelper.GetJson(context),
+            ContextHelper.GetTimeout(context));
 
         var result = await RunAndStreamAsync(startInfo);
         if (result.HasValue)
@@ -174,7 +175,7 @@ public static class ExecutablePluginLoader
     /// </summary>
     private static void SetPluginEnvironment(
         ProcessStartInfo startInfo,
-        string? projectPath = null, string? agentId = null, bool json = false)
+        string? projectPath = null, string? agentId = null, bool json = false, int? timeout = null)
     {
         var projectRoot = projectPath ?? ProjectLocator.FindProjectRoot();
         if (projectRoot != null)
@@ -193,6 +194,9 @@ public static class ExecutablePluginLoader
 
         if (json)
             startInfo.Environment["UNITYCTL_JSON"] = "1";
+
+        if (timeout.HasValue)
+            startInfo.Environment["UNITYCTL_TIMEOUT"] = timeout.Value.ToString();
     }
 
     private static ProcessStartInfo CreateStartInfo(string fileName, IReadOnlyList<string> arguments)

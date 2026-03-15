@@ -12,12 +12,12 @@ namespace UnityCtl.Cli;
 
 public static class PluginCommands
 {
+    private static readonly Regex ValidPluginName = new(@"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", RegexOptions.Compiled);
+
     /// <summary>
     /// Built-in command names, populated at startup from rootCommand.Children
     /// so it stays in sync automatically when new commands are added.
     /// </summary>
-    private static readonly Regex ValidPluginName = new(@"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", RegexOptions.Compiled);
-
     internal static ISet<string> BuiltInCommandNames { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     public static Command CreateCommand()
@@ -151,6 +151,26 @@ public static class PluginCommands
                 return;
             }
 
+            if (BuiltInCommandNames.Contains(name))
+            {
+                if (json)
+                {
+                    Console.WriteLine(JsonHelper.Serialize(new
+                    {
+                        success = false,
+                        error = "name_conflict",
+                        name,
+                        message = $"'{name}' conflicts with a built-in command."
+                    }));
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: '{name}' conflicts with a built-in command.");
+                }
+                context.ExitCode = 1;
+                return;
+            }
+
             var pluginsDir = global
                 ? PluginLoader.GetUserPluginsDirectory()
                 : PluginLoader.GetProjectPluginsDirectoryOrDefault();
@@ -260,18 +280,45 @@ public class Script
 
             if (plugin == null)
             {
+                // Check if it's an executable plugin (which can't be removed automatically)
+                var execPlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(includePath: true);
+                var execMatch = execPlugins.FirstOrDefault(p =>
+                    string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+
                 if (json)
                 {
-                    Console.WriteLine(JsonHelper.Serialize(new
+                    if (execMatch != null)
                     {
-                        success = false,
-                        error = "not_found",
-                        name
-                    }));
+                        Console.WriteLine(JsonHelper.Serialize(new
+                        {
+                            success = false,
+                            error = "executable_plugin",
+                            name,
+                            path = execMatch.Path,
+                            message = "Executable plugins must be removed manually."
+                        }));
+                    }
+                    else
+                    {
+                        Console.WriteLine(JsonHelper.Serialize(new
+                        {
+                            success = false,
+                            error = "not_found",
+                            name
+                        }));
+                    }
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Error: Plugin '{name}' not found.");
+                    if (execMatch != null)
+                    {
+                        Console.Error.WriteLine($"Error: '{name}' is an executable plugin and must be removed manually.");
+                        Console.Error.WriteLine($"  Path: {ContextHelper.FormatPath(execMatch.Path)}");
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine($"Error: Plugin '{name}' not found.");
+                    }
                 }
                 context.ExitCode = 1;
                 return;

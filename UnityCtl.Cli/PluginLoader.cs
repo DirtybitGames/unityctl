@@ -70,6 +70,12 @@ public static class PluginLoader
 
         foreach (var cmdDef in plugin.Manifest.Commands)
         {
+            if (!string.Equals(cmdDef.Handler.Type, "script", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine($"Warning: Plugin '{plugin.Manifest.Name}' command '{cmdDef.Name}' has unsupported handler type '{cmdDef.Handler.Type}' (expected 'script'), skipping.");
+                continue;
+            }
+
             var subCommand = new Command(cmdDef.Name, cmdDef.Description ?? cmdDef.Name);
 
             // Add arguments
