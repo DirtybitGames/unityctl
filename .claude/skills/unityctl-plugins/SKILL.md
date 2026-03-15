@@ -83,13 +83,17 @@ Add a `"skill": { "file": "SKILL.md" }` entry to plugin.json and create the mark
 
 Use `--global` / `-g` with `plugin create` to scaffold at user level.
 
+Plugin names must be lowercase alphanumeric with hyphens (e.g. `my-tool`, `scene-stats`). Must start and end with a letter or digit.
+
 ## Executable Plugins
 
 Any executable named `unityctl-<name>` becomes available as `unityctl <name>`. Best for workflows outside Unity: build pipelines, CI scripts, multi-step orchestration.
 
 ### How it works
 
-Place an executable (shell script, Python, Go binary, .bat/.cmd/.ps1 on Windows) named `unityctl-<name>` on PATH or in `.unityctl/plugins/`. All arguments after the command name are passed through.
+Place an executable (shell script, Python, Go binary, .bat/.cmd/.ps1 on Windows) named `unityctl-<name>` in `.unityctl/plugins/` or on PATH. All arguments after the command name are passed through.
+
+Executables in plugin directories are registered at startup (appear in `--help`). Executables on PATH are resolved lazily when invoked — like `git` resolving `git foo` → `git-foo`.
 
 ```bash
 unityctl smoke 30          # finds and runs unityctl-smoke with arg "30"
@@ -142,7 +146,9 @@ Run `unityctl skill rebuild` to update the composed SKILL.md with plugin documen
 ## Management commands
 
 ```bash
-unityctl plugin list           # list all plugins (script + executable)
-unityctl plugin create <name>  # scaffold a script plugin
-unityctl plugin remove <name>  # remove a script plugin
+unityctl plugin list              # list all plugins (script + executable)
+unityctl plugin create <name>     # scaffold a script plugin
+unityctl plugin create <name> -g  # scaffold at user level (~/.unityctl/plugins/)
+unityctl plugin remove <name>     # remove a script plugin (prompts for confirmation)
+unityctl plugin remove <name> -f  # remove without confirmation
 ```
