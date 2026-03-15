@@ -149,6 +149,5 @@ Run `unityctl skill rebuild` to update the composed SKILL.md with plugin documen
 unityctl plugin list              # list all plugins (script + executable)
 unityctl plugin create <name>     # scaffold a script plugin
 unityctl plugin create <name> -g  # scaffold at user level (~/.unityctl/plugins/)
-unityctl plugin remove <name>     # remove a script plugin (prompts for confirmation)
-unityctl plugin remove <name> -f  # remove without confirmation
+unityctl plugin remove <name>     # remove a script plugin
 ```
