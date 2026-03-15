@@ -18,6 +18,15 @@ public static class SkillCommands
 
     private const string SkillExtraFileName = "skill-extra.md";
 
+    /// <summary>
+    /// Additional skills that are installed/updated alongside the main unity-editor skill.
+    /// Each entry is (folderName, embeddedResourceName).
+    /// </summary>
+    private static readonly (string Folder, string Resource)[] AdditionalSkills =
+    [
+        ("unityctl-plugins", "UnityCtl.Cli.Resources.SKILL.plugins.md")
+    ];
+
     public static Command CreateCommand()
     {
         var skillCommand = new Command("skill", "Claude Code skill management");
@@ -298,17 +307,22 @@ public static class SkillCommands
 
     private static string? GetEmbeddedSkillContent()
     {
+        return GetEmbeddedResourceContent(EmbeddedResourceName, SkillFolderName);
+    }
+
+    private static string? GetEmbeddedResourceContent(string resourceName, string folderName)
+    {
         var assembly = Assembly.GetExecutingAssembly();
 
-        using var stream = assembly.GetManifestResourceStream(EmbeddedResourceName);
+        using var stream = assembly.GetManifestResourceStream(resourceName);
         if (stream == null)
         {
             // Fallback: try to find SKILL.md in development environment
             var possiblePaths = new[]
             {
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".claude", "skills", "unity-editor", "SKILL.md"),
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".claude", "skills", "unity-editor", "SKILL.md"),
-                Path.Combine(Directory.GetCurrentDirectory(), ".claude", "skills", "unity-editor", "SKILL.md")
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".claude", "skills", folderName, "SKILL.md"),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".claude", "skills", folderName, "SKILL.md"),
+                Path.Combine(Directory.GetCurrentDirectory(), ".claude", "skills", folderName, "SKILL.md")
             };
 
             foreach (var path in possiblePaths)
@@ -329,6 +343,7 @@ public static class SkillCommands
 
     /// <summary>
     /// Updates the skill file at the given path with the latest embedded content.
+    /// Also updates any additional skills installed in the same skills directory.
     /// Returns true if successful, false if embedded content was not found.
     /// </summary>
     public static async Task<bool> UpdateSkillFileAsync(string skillPath)
@@ -340,6 +355,14 @@ public static class SkillCommands
         if (dir != null) Directory.CreateDirectory(dir);
 
         await File.WriteAllTextAsync(skillPath, content);
+
+        // Update additional skills if they exist alongside the main skill
+        var skillsDir = Path.GetDirectoryName(dir); // up from unity-editor/ to skills/
+        if (skillsDir != null)
+        {
+            await InstallAdditionalSkillsAsync(skillsDir, onlyIfExists: true);
+        }
+
         return true;
     }
 
@@ -401,6 +424,9 @@ public static class SkillCommands
         // Write skill file
         await File.WriteAllTextAsync(skillPath, skillContent);
 
+        // Install additional skills
+        await InstallAdditionalSkillsAsync(skillsDir, onlyIfExists: false);
+
         if (json)
         {
             Console.WriteLine(JsonHelper.Serialize(new
@@ -413,19 +439,19 @@ public static class SkillCommands
         }
         else
         {
-            Console.WriteLine($"Installed Claude Code skill to: {skillPath}");
+            Console.WriteLine($"Installed Claude Code skills to: {skillsDir}");
             Console.WriteLine();
             if (global)
             {
-                Console.WriteLine("The skill is now available globally for all projects.");
+                Console.WriteLine("The skills are now available globally for all projects.");
             }
             else
             {
-                Console.WriteLine("The skill is now available for this project.");
+                Console.WriteLine("The skills are now available for this project.");
                 Console.WriteLine("Use --global to install for all projects.");
             }
             Console.WriteLine();
-            Console.WriteLine("Restart Claude Code to load the new skill.");
+            Console.WriteLine("Restart Claude Code to load the new skills.");
         }
     }
 
@@ -455,17 +481,21 @@ public static class SkillCommands
 
         File.Delete(skillPath);
 
+        // Remove additional skills
+        foreach (var (folder, _) in AdditionalSkills)
+        {
+            var additionalPath = Path.Combine(skillsDir, folder, SkillFileName);
+            if (File.Exists(additionalPath))
+                File.Delete(additionalPath);
+        }
+
         // Try to clean up empty directories
         try
         {
-            if (Directory.Exists(skillFolderPath) && !Directory.EnumerateFileSystemEntries(skillFolderPath).Any())
-            {
-                Directory.Delete(skillFolderPath);
-            }
-            if (Directory.Exists(skillsDir) && !Directory.EnumerateFileSystemEntries(skillsDir).Any())
-            {
-                Directory.Delete(skillsDir);
-            }
+            CleanupEmptyDirectory(skillFolderPath);
+            foreach (var (folder, _) in AdditionalSkills)
+                CleanupEmptyDirectory(Path.Combine(skillsDir, folder));
+            CleanupEmptyDirectory(skillsDir);
         }
         catch
         {
@@ -474,11 +504,40 @@ public static class SkillCommands
 
         if (json)
         {
-            Console.WriteLine(JsonHelper.Serialize(new { success = true, path = skillPath }));
+            Console.WriteLine(JsonHelper.Serialize(new { success = true, path = skillsDir }));
         }
         else
         {
-            Console.WriteLine($"Removed skill from: {skillPath}");
+            Console.WriteLine($"Removed skills from: {skillsDir}");
+        }
+    }
+
+    private static void CleanupEmptyDirectory(string path)
+    {
+        if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+            Directory.Delete(path);
+    }
+
+    /// <summary>
+    /// Installs additional skill files alongside the main unity-editor skill.
+    /// When onlyIfExists is true, only updates skills that already have a folder.
+    /// </summary>
+    private static async Task InstallAdditionalSkillsAsync(string skillsDir, bool onlyIfExists)
+    {
+        foreach (var (folder, resource) in AdditionalSkills)
+        {
+            var folderPath = Path.Combine(skillsDir, folder);
+            var filePath = Path.Combine(folderPath, SkillFileName);
+
+            if (onlyIfExists && !File.Exists(filePath))
+                continue;
+
+            var content = GetEmbeddedResourceContent(resource, folder);
+            if (content == null)
+                continue;
+
+            Directory.CreateDirectory(folderPath);
+            await File.WriteAllTextAsync(filePath, content);
         }
     }
 
@@ -488,34 +547,42 @@ public static class SkillCommands
         var globalSkillsDir = Path.Combine(home, ".claude", "skills");
         var localSkillsDir = Path.Combine(Directory.GetCurrentDirectory(), ".claude", "skills");
 
-        var globalPath = Path.Combine(globalSkillsDir, SkillFolderName, SkillFileName);
-        var localPath = Path.Combine(localSkillsDir, SkillFolderName, SkillFileName);
-
-        var globalExists = File.Exists(globalPath);
-        var localExists = File.Exists(localPath);
+        // All skill folders to check
+        var allFolders = new[] { SkillFolderName }.Concat(AdditionalSkills.Select(s => s.Folder)).ToArray();
 
         if (json)
         {
-            Console.WriteLine(JsonHelper.Serialize(new
+            var skills = allFolders.Select(folder => new
             {
-                global = new { installed = globalExists, path = globalPath },
-                local = new { installed = localExists, path = localPath }
-            }));
+                name = folder,
+                global = new { installed = File.Exists(Path.Combine(globalSkillsDir, folder, SkillFileName)), path = Path.Combine(globalSkillsDir, folder, SkillFileName) },
+                local = new { installed = File.Exists(Path.Combine(localSkillsDir, folder, SkillFileName)), path = Path.Combine(localSkillsDir, folder, SkillFileName) }
+            });
+            Console.WriteLine(JsonHelper.Serialize(skills));
         }
         else
         {
             Console.WriteLine("Claude Code Skill Status:");
-            Console.WriteLine();
-            Console.WriteLine($"Global ({globalPath}):");
-            Console.WriteLine($"  Installed: {(globalExists ? "Yes" : "No")}");
-            Console.WriteLine();
-            Console.WriteLine($"Local ({localPath}):");
-            Console.WriteLine($"  Installed: {(localExists ? "Yes" : "No")}");
 
-            if (!globalExists && !localExists)
+            var anyInstalled = false;
+            foreach (var folder in allFolders)
+            {
+                var globalPath = Path.Combine(globalSkillsDir, folder, SkillFileName);
+                var localPath = Path.Combine(localSkillsDir, folder, SkillFileName);
+                var globalExists = File.Exists(globalPath);
+                var localExists = File.Exists(localPath);
+                if (globalExists || localExists) anyInstalled = true;
+
+                Console.WriteLine();
+                Console.WriteLine($"  {folder}:");
+                Console.WriteLine($"    Global: {(globalExists ? "Yes" : "No")}");
+                Console.WriteLine($"    Local:  {(localExists ? "Yes" : "No")}");
+            }
+
+            if (!anyInstalled)
             {
                 Console.WriteLine();
-                Console.WriteLine("Run 'unityctl skill add' to add the skill locally,");
+                Console.WriteLine("Run 'unityctl skill add' to add skills locally,");
                 Console.WriteLine("or 'unityctl skill add --global' to add globally.");
             }
         }
