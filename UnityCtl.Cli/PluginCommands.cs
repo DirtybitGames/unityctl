@@ -39,12 +39,7 @@ public static class PluginCommands
         listCommand.SetHandler((InvocationContext context) =>
         {
             var json = ContextHelper.GetJson(context);
-            var scriptPlugins = PluginLoader.DiscoverPlugins();
-
-            // Exclude built-in command names and script plugin names from executable discovery
-            var excludeNames = new HashSet<string>(BuiltInCommandNames, StringComparer.OrdinalIgnoreCase);
-            foreach (var sp in scriptPlugins)
-                excludeNames.Add(sp.Manifest.Name);
+            var (scriptPlugins, excludeNames) = PluginLoader.DiscoverWithExclusions(BuiltInCommandNames);
             var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(excludeNames, includePath: true);
 
             if (json)

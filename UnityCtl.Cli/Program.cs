@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityCtl.Cli;
@@ -106,13 +107,24 @@ catch (Exception ex)
 // "Did you mean?" hints for common misses
 CommandHints.Register(rootCommand);
 
-// If the first arg doesn't match any registered command, try to run it as
+// If the first non-option arg doesn't match any registered command, try to run it as
 // "unityctl-<name>" on PATH (like git resolves "git foo" → "git-foo").
-if (args.Length > 0 && !registeredNames.Contains(args[0]) && !args[0].StartsWith("-"))
+// Use System.CommandLine's parser to extract global options so they're forwarded correctly.
+if (args.Length > 0)
 {
-    var exitCode = await ExecutablePluginLoader.TryExecuteByName(args[0], args.Skip(1).ToArray());
-    if (exitCode.HasValue)
-        return exitCode.Value;
+    var parseResult = rootCommand.Parse(args);
+    var unmatchedCommand = parseResult.UnmatchedTokens.FirstOrDefault();
+    if (unmatchedCommand != null && !unmatchedCommand.StartsWith("-"))
+    {
+        var passThrough = parseResult.UnmatchedTokens.Skip(1).ToArray();
+        var exitCode = await ExecutablePluginLoader.TryExecuteByName(
+            unmatchedCommand, passThrough,
+            parseResult.GetValueForOption(projectOption),
+            parseResult.GetValueForOption(agentIdOption),
+            parseResult.GetValueForOption(jsonOption));
+        if (exitCode.HasValue)
+            return exitCode.Value;
+    }
 }
 
 return await rootCommand.InvokeAsync(args);

@@ -21,6 +21,19 @@ public static class PluginLoader
     public const string ManifestFileName = "plugin.json";
 
     /// <summary>
+    /// Builds the exclude-names set (built-in + script plugin names) used when discovering executable plugins.
+    /// Returns both the script plugins and the combined exclude set.
+    /// </summary>
+    public static (List<LoadedPlugin> ScriptPlugins, HashSet<string> ExcludeNames) DiscoverWithExclusions(ISet<string> builtInNames)
+    {
+        var scriptPlugins = DiscoverPlugins();
+        var excludeNames = new HashSet<string>(builtInNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var sp in scriptPlugins)
+            excludeNames.Add(sp.Manifest.Name);
+        return (scriptPlugins, excludeNames);
+    }
+
+    /// <summary>
     /// Discovers all plugins from both project-level and user-level directories.
     /// Project-level plugins override user-level plugins with the same name.
     /// </summary>
@@ -30,11 +43,8 @@ public static class PluginLoader
 
         // User-level first (lower precedence)
         var userDir = GetUserPluginsDirectory();
-        if (userDir != null)
-        {
-            foreach (var plugin in LoadPluginsFromDirectory(userDir, "user"))
-                plugins[plugin.Manifest.Name] = plugin;
-        }
+        foreach (var plugin in LoadPluginsFromDirectory(userDir, "user"))
+            plugins[plugin.Manifest.Name] = plugin;
 
         // Project-level second (higher precedence, overwrites user-level)
         var projectDir = GetProjectPluginsDirectory();
@@ -124,11 +134,7 @@ public static class PluginLoader
 
         // Read the script file (validate path stays within plugin directory)
         var scriptPath = Path.GetFullPath(Path.Combine(pluginDir, handlerFile));
-        var resolvedPluginDir = Path.GetFullPath(pluginDir) + Path.DirectorySeparatorChar;
-        var pathComparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        if (!scriptPath.StartsWith(resolvedPluginDir, pathComparison))
+        if (!IsPathWithin(pluginDir, handlerFile))
         {
             Console.Error.WriteLine($"Error: Plugin script path escapes plugin directory: {handlerFile}");
             context.ExitCode = 1;
@@ -193,6 +199,21 @@ public static class PluginLoader
         }
 
         ScriptCommands.DisplayScriptResult(context, response, json);
+    }
+
+    /// <summary>
+    /// Checks whether a file path resolves to a location within the given directory.
+    /// Used to prevent path-traversal attacks in plugin handler file references.
+    /// </summary>
+    public static bool IsPathWithin(string directory, string filePath)
+    {
+        var resolvedFile = Path.GetFullPath(Path.Combine(directory, filePath));
+        var resolvedDir = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return resolvedFile.StartsWith(resolvedDir, comparison);
     }
 
     /// <summary>
@@ -279,11 +300,7 @@ public static class PluginLoader
         if (plugin.Manifest.Skill != null)
         {
             var skillPath = Path.GetFullPath(Path.Combine(plugin.Directory, plugin.Manifest.Skill.File));
-            var resolvedDir = Path.GetFullPath(plugin.Directory) + Path.DirectorySeparatorChar;
-            var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-            if (skillPath.StartsWith(resolvedDir, comparison)
+            if (IsPathWithin(plugin.Directory, plugin.Manifest.Skill.File)
                 && File.Exists(skillPath))
                 return File.ReadAllText(skillPath);
         }

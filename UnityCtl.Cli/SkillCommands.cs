@@ -162,10 +162,7 @@ public static class SkillCommands
             return null;
 
         // 2. Plugin sections (script + executable)
-        var plugins = PluginLoader.DiscoverPlugins();
-        var excludeNames = new HashSet<string>(PluginCommands.BuiltInCommandNames, StringComparer.OrdinalIgnoreCase);
-        foreach (var sp in plugins)
-            excludeNames.Add(sp.Manifest.Name);
+        var (plugins, excludeNames) = PluginLoader.DiscoverWithExclusions(PluginCommands.BuiltInCommandNames);
         var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(excludeNames);
         string? pluginSections = null;
         if (plugins.Count > 0 || executablePlugins.Count > 0)

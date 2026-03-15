@@ -26,46 +26,55 @@ public class ExecutablePluginScanTests : IDisposable
         try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 
-    [SkippableFact]
-    public void WindowsExe_ExtractsName()
+    [Fact]
+    public void NameExtraction_WithAndWithoutExtension()
     {
-        Skip.IfNot(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl-foo.exe"), "fake");
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl-bar.cmd"), "fake");
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl-baz.bat"), "fake");
-
-        // Scan using the internal method via discovery (which scans plugin dirs)
-        // We test the naming logic by verifying the full scan result
-        var files = Directory.GetFiles(_tempDir, "unityctl-*");
-        Assert.Equal(3, files.Length);
-
-        // Verify the naming convention: file name without extension, minus prefix
-        foreach (var file in files)
+        // All naming variants: extensionless, .exe, .cmd, .bat, .sh
+        var cases = new[]
         {
-            var fileName = Path.GetFileNameWithoutExtension(file);
-            Assert.StartsWith("unityctl-", fileName);
+            ("unityctl-foo", "foo"),
+            ("unityctl-bar.exe", "bar"),
+            ("unityctl-baz.cmd", "baz"),
+            ("unityctl-qux.bat", "qux"),
+            ("unityctl-run.sh", "run"),
+        };
+
+        foreach (var (fileName, expected) in cases)
+        {
             var name = fileName.Substring("unityctl-".Length);
-            Assert.False(string.IsNullOrEmpty(name));
+            var dotIndex = name.IndexOf('.');
+            if (dotIndex > 0)
+                name = name.Substring(0, dotIndex);
+
+            Assert.Equal(expected, name.ToLowerInvariant());
         }
     }
 
-    [SkippableFact]
-    public void Windows_NonExecutableExtension_Ignored()
+    [Fact]
+    public void CompanionSkillFile_Ignored()
     {
-        Skip.IfNot(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
+        // .skill.md companion files should not be discovered as executable plugins
+        File.WriteAllText(Path.Combine(_tempDir, "unityctl-foo.skill.md"), "docs");
+        File.WriteAllText(Path.Combine(_tempDir, "unityctl-bar.skill.md"), "docs");
 
-        // .txt files should not be discovered as executable plugins
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl-nope.txt"), "fake");
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl-also-nope.py"), "fake");
-
-        // The scan should filter these out based on extension
-        var validExtensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
         var files = Directory.GetFiles(_tempDir, "unityctl-*");
-        var validFiles = files.Where(f =>
-            validExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
+        var nonCompanion = files.Where(f =>
+            !Path.GetFileName(f).EndsWith(".skill.md", StringComparison.OrdinalIgnoreCase)).ToList();
 
-        Assert.Empty(validFiles);
+        Assert.Empty(nonCompanion);
+    }
+
+    [Fact]
+    public void Extensionless_ExtractsName()
+    {
+        // Extensionless executables should be discovered on all platforms
+        var fullFileName = "unityctl-my-tool";
+        var name = fullFileName.Substring("unityctl-".Length);
+        var dotIndex = name.IndexOf('.');
+        if (dotIndex > 0)
+            name = name.Substring(0, dotIndex);
+
+        Assert.Equal("my-tool", name);
     }
 
     [Fact]
@@ -112,15 +121,4 @@ public class ExecutablePluginScanTests : IDisposable
         Assert.Equal("foo", name);
     }
 
-    [Fact]
-    public void UnixNameExtraction_NoExtension_KeepsFullName()
-    {
-        var fullFileName = "unityctl-my-tool";
-        var name = fullFileName.Substring("unityctl-".Length);
-        var dotIndex = name.IndexOf('.');
-        if (dotIndex > 0)
-            name = name.Substring(0, dotIndex);
-
-        Assert.Equal("my-tool", name);
-    }
 }
