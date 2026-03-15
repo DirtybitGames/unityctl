@@ -21,19 +21,27 @@ public static class ExecutablePluginLoader
     private static readonly string[] WindowsExecutableExtensions = [".exe", ".cmd", ".bat", ".ps1"];
 
     /// <summary>
-    /// Discovers all executable plugins from PATH and plugin directories.
-    /// Returns deduplicated list; plugin directories take precedence over PATH.
+    /// Discovers all executable plugins from plugin directories and optionally PATH.
+    /// Plugin directories take precedence over PATH.
     /// </summary>
-    public static List<ExecutablePlugin> DiscoverExecutablePlugins(ISet<string>? excludeNames = null)
+    /// <param name="excludeNames">Command names to skip (built-in + script plugins).</param>
+    /// <param name="includePath">
+    /// When true, also scans PATH directories (expensive). Only used by `plugin list`.
+    /// At startup, PATH executables are resolved lazily via <see cref="TryExecuteByName"/>.
+    /// </param>
+    public static List<ExecutablePlugin> DiscoverExecutablePlugins(ISet<string>? excludeNames = null, bool includePath = false)
     {
         var plugins = new Dictionary<string, ExecutablePlugin>(StringComparer.OrdinalIgnoreCase);
 
-        // PATH first (lower precedence)
-        foreach (var plugin in ScanPath())
+        // PATH first (lower precedence) — only when explicitly requested
+        if (includePath)
         {
-            if (excludeNames != null && excludeNames.Contains(plugin.Name))
-                continue;
-            plugins[plugin.Name] = plugin;
+            foreach (var plugin in ScanPath())
+            {
+                if (excludeNames != null && excludeNames.Contains(plugin.Name))
+                    continue;
+                plugins[plugin.Name] = plugin;
+            }
         }
 
         // Plugin directories second (higher precedence, overwrites PATH)
@@ -45,6 +53,62 @@ public static class ExecutablePluginLoader
         }
 
         return plugins.Values.ToList();
+    }
+
+    /// <summary>
+    /// Attempts to execute an unrecognized command as "unityctl-{name}" on PATH,
+    /// similar to how git resolves "git foo" → "git-foo". The OS performs the PATH
+    /// lookup during process start, so no upfront scanning is needed.
+    /// Returns null if no such executable exists, or the exit code if it ran.
+    /// </summary>
+    public static async Task<int?> TryExecuteByName(string name, string[] passThrough)
+    {
+        var executableName = $"{ExecutablePrefix}{name}";
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executableName,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        foreach (var token in passThrough)
+            startInfo.ArgumentList.Add(token);
+
+        // Inject environment variables (best-effort, no InvocationContext available)
+        var projectRoot = ProjectLocator.FindProjectRoot();
+        if (projectRoot != null)
+        {
+            startInfo.Environment["UNITYCTL_PROJECT_PATH"] = projectRoot;
+            var bridgeConfig = ProjectLocator.ReadBridgeConfig(projectRoot);
+            if (bridgeConfig != null)
+            {
+                startInfo.Environment["UNITYCTL_BRIDGE_PORT"] = bridgeConfig.Port.ToString();
+                startInfo.Environment["UNITYCTL_BRIDGE_URL"] = $"http://localhost:{bridgeConfig.Port}";
+            }
+        }
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process == null)
+                return null;
+
+            var stdoutTask = StreamOutputAsync(process.StandardOutput, Console.Out);
+            var stderrTask = StreamOutputAsync(process.StandardError, Console.Error);
+
+            await Task.WhenAll(stdoutTask, stderrTask);
+            await process.WaitForExitAsync();
+
+            return process.ExitCode;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Executable not found on PATH
+            return null;
+        }
     }
 
     /// <summary>
@@ -299,8 +363,7 @@ public static class ExecutablePluginLoader
         }
         catch
         {
-            // Fallback: assume executable if on Unix and we can't determine
-            return true;
+            return false;
         }
     }
 }

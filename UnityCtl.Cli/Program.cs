@@ -88,7 +88,8 @@ catch (Exception ex)
     Console.Error.WriteLine($"Warning: Failed to load plugins: {ex.Message}");
 }
 
-// Dynamically register executable plugins (lowest precedence)
+// Register executable plugins from plugin directories only (cheap scan).
+// PATH executables are resolved lazily at invocation time (git-style).
 try
 {
     var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(registeredNames);
@@ -104,5 +105,14 @@ catch (Exception ex)
 
 // "Did you mean?" hints for common misses
 CommandHints.Register(rootCommand);
+
+// If the first arg doesn't match any registered command, try to run it as
+// "unityctl-<name>" on PATH (like git resolves "git foo" → "git-foo").
+if (args.Length > 0 && !registeredNames.Contains(args[0]) && !args[0].StartsWith("-"))
+{
+    var exitCode = await ExecutablePluginLoader.TryExecuteByName(args[0], args.Skip(1).ToArray());
+    if (exitCode.HasValue)
+        return exitCode.Value;
+}
 
 return await rootCommand.InvokeAsync(args);

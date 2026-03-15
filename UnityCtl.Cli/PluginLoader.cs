@@ -4,6 +4,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityCtl.Protocol;
@@ -123,7 +124,11 @@ public static class PluginLoader
 
         // Read the script file (validate path stays within plugin directory)
         var scriptPath = Path.GetFullPath(Path.Combine(pluginDir, handlerFile));
-        if (!scriptPath.StartsWith(Path.GetFullPath(pluginDir) + Path.DirectorySeparatorChar))
+        var resolvedPluginDir = Path.GetFullPath(pluginDir) + Path.DirectorySeparatorChar;
+        var pathComparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!scriptPath.StartsWith(resolvedPluginDir, pathComparison))
         {
             Console.Error.WriteLine($"Error: Plugin script path escapes plugin directory: {handlerFile}");
             context.ExitCode = 1;
@@ -274,7 +279,11 @@ public static class PluginLoader
         if (plugin.Manifest.Skill != null)
         {
             var skillPath = Path.GetFullPath(Path.Combine(plugin.Directory, plugin.Manifest.Skill.File));
-            if (skillPath.StartsWith(Path.GetFullPath(plugin.Directory) + Path.DirectorySeparatorChar)
+            var resolvedDir = Path.GetFullPath(plugin.Directory) + Path.DirectorySeparatorChar;
+            var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            if (skillPath.StartsWith(resolvedDir, comparison)
                 && File.Exists(skillPath))
                 return File.ReadAllText(skillPath);
         }

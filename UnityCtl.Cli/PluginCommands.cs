@@ -4,6 +4,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using UnityCtl.Protocol;
 
@@ -15,6 +16,8 @@ public static class PluginCommands
     /// Built-in command names, populated at startup from rootCommand.Children
     /// so it stays in sync automatically when new commands are added.
     /// </summary>
+    private static readonly Regex ValidPluginName = new(@"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", RegexOptions.Compiled);
+
     internal static ISet<string> BuiltInCommandNames { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     public static Command CreateCommand()
@@ -42,7 +45,7 @@ public static class PluginCommands
             var excludeNames = new HashSet<string>(BuiltInCommandNames, StringComparer.OrdinalIgnoreCase);
             foreach (var sp in scriptPlugins)
                 excludeNames.Add(sp.Manifest.Name);
-            var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(excludeNames);
+            var executablePlugins = ExecutablePluginLoader.DiscoverExecutablePlugins(excludeNames, includePath: true);
 
             if (json)
             {
@@ -130,6 +133,28 @@ public static class PluginCommands
             var name = context.ParseResult.GetValueForArgument(nameArgument);
             var global = context.ParseResult.GetValueForOption(globalOption);
             var json = ContextHelper.GetJson(context);
+
+            if (!ValidPluginName.IsMatch(name))
+            {
+                if (json)
+                {
+                    Console.WriteLine(JsonHelper.Serialize(new
+                    {
+                        success = false,
+                        error = "invalid_name",
+                        name,
+                        message = "Plugin name must contain only lowercase letters, digits, and hyphens, and must start and end with a letter or digit."
+                    }));
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: Invalid plugin name '{name}'.");
+                    Console.Error.WriteLine("Plugin name must contain only lowercase letters, digits, and hyphens,");
+                    Console.Error.WriteLine("and must start and end with a letter or digit.");
+                }
+                context.ExitCode = 1;
+                return;
+            }
 
             var pluginsDir = global
                 ? PluginLoader.GetUserPluginsDirectory()
@@ -226,11 +251,19 @@ public class Script
 
         var nameArgument = new Argument<string>("name", "Plugin name to remove");
 
+        var forceOption = new Option<bool>(
+            "--force",
+            "Remove without confirmation"
+        );
+        forceOption.AddAlias("-f");
+
         removeCommand.AddArgument(nameArgument);
+        removeCommand.AddOption(forceOption);
 
         removeCommand.SetHandler((InvocationContext context) =>
         {
             var name = context.ParseResult.GetValueForArgument(nameArgument);
+            var force = context.ParseResult.GetValueForOption(forceOption);
             var json = ContextHelper.GetJson(context);
 
             // Find the plugin
@@ -255,6 +288,19 @@ public class Script
                 }
                 context.ExitCode = 1;
                 return;
+            }
+
+            // Confirm removal unless --force or --json
+            if (!force && !json)
+            {
+                Console.WriteLine($"Remove plugin '{plugin.Manifest.Name}' from: {ContextHelper.FormatPath(plugin.Directory)}");
+                Console.Write("Are you sure? [y/N]: ");
+                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+                if (response != "y" && response != "yes")
+                {
+                    Console.WriteLine("Aborted.");
+                    return;
+                }
             }
 
             // Delete plugin directory

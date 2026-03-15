@@ -71,7 +71,8 @@ public static class SkillCommands
             var force = context.ParseResult.GetValueForOption(forceOption);
             var json = ContextHelper.GetJson(context);
 
-            await AddSkillAsync(global, claudeDir, force, json);
+            if (!await AddSkillAsync(global, claudeDir, force, json))
+                context.ExitCode = 1;
         });
 
         return addCommand;
@@ -355,7 +356,7 @@ public static class SkillCommands
         return true;
     }
 
-    public static async Task AddSkillAsync(bool global, string? claudeDir, bool force, bool json)
+    public static async Task<bool> AddSkillAsync(bool global, string? claudeDir, bool force, bool json)
     {
         var skillsDir = GetSkillsDirectory(global, claudeDir);
         var skillFolderPath = Path.Combine(skillsDir, SkillFolderName);
@@ -372,6 +373,7 @@ public static class SkillCommands
                     error = "already_exists",
                     path = skillPath
                 }));
+                return false;
             }
             else
             {
@@ -381,7 +383,7 @@ public static class SkillCommands
                 if (response != "y" && response != "yes")
                 {
                     Console.WriteLine("Aborted.");
-                    return;
+                    return false;
                 }
             }
         }
@@ -404,7 +406,7 @@ public static class SkillCommands
                 Console.Error.WriteLine("Error: Could not find skill file.");
                 Console.Error.WriteLine("The SKILL.md resource may not be embedded in this build.");
             }
-            return;
+            return false;
         }
 
         // Create directory if needed
@@ -442,6 +444,8 @@ public static class SkillCommands
             Console.WriteLine();
             Console.WriteLine("Restart Claude Code to load the new skills.");
         }
+
+        return true;
     }
 
     private static void RemoveSkill(bool global, string? claudeDir, bool json)
