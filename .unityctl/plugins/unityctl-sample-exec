@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Sample executable plugin demonstrating the unityctl-{name} convention.
+# When discovered, this becomes: unityctl sample-exec [args...]
+#
+# Environment variables injected by unityctl:
+#   UNITYCTL_PROJECT_PATH  — Unity project root
+#   UNITYCTL_BRIDGE_PORT   — Bridge HTTP port
+#   UNITYCTL_BRIDGE_URL    — Bridge base URL
+#   UNITYCTL_AGENT_ID      — Agent identifier (if set)
+#   UNITYCTL_JSON          — "1" when --json flag is active
+
+if [ "$UNITYCTL_JSON" = "1" ]; then
+    echo "{\"message\":\"Hello from sample-exec plugin\",\"project\":\"${UNITYCTL_PROJECT_PATH}\"}"
+else
+    echo "Hello from sample-exec plugin!"
+    [ -n "$UNITYCTL_PROJECT_PATH" ] && echo "Project: $UNITYCTL_PROJECT_PATH"
+    [ -n "$UNITYCTL_BRIDGE_URL" ] && echo "Bridge: $UNITYCTL_BRIDGE_URL"
+fi
