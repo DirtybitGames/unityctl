@@ -63,10 +63,11 @@ rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(SnapshotCommand.CreateCommand());
 rootCommand.AddCommand(PrefabCommand.CreateCommand());
 
-// Dynamically register plugin commands
+// Derive built-in command names dynamically from registered commands
 var registeredNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 foreach (var cmd in rootCommand.Children.OfType<Command>())
     registeredNames.Add(cmd.Name);
+PluginCommands.BuiltInCommandNames = registeredNames;
 
 try
 {

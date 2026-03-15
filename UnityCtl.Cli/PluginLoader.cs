@@ -181,73 +181,40 @@ public static class PluginLoader
             return;
         }
 
-        // Display result
-        if (json)
-        {
-            Console.WriteLine(JsonHelper.Serialize(response.Result));
-        }
-        else
-        {
-            var resultJson = JsonConvert.SerializeObject(response.Result, JsonHelper.Settings);
-            var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(resultJson, JsonHelper.Settings);
-            if (result != null)
-            {
-                if (result.Success)
-                {
-                    if (result.Result != null)
-                        Console.WriteLine(result.Result);
-                }
-                else
-                {
-                    Console.Error.WriteLine($"Execution failed: {result.Error}");
-                    if (result.Diagnostics != null)
-                    {
-                        foreach (var d in result.Diagnostics)
-                            Console.Error.WriteLine($"  {d}");
-                    }
-                    context.ExitCode = 1;
-                }
-            }
-        }
+        ScriptCommands.DisplayScriptResult(context, response, json);
     }
 
-    public static string? GetProjectPluginsDirectory()
+    /// <summary>
+    /// Walks up from CWD to find the nearest .unityctl/ directory.
+    /// Returns null if none found.
+    /// </summary>
+    public static string? FindDotUnityctlDirectory()
     {
-        // Walk up from CWD looking for .unityctl/plugins/
         var current = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (current != null)
         {
-            var pluginsDir = Path.Combine(current.FullName, ".unityctl", PluginDirName);
-            if (Directory.Exists(pluginsDir))
-                return pluginsDir;
-
-            // Also check if .unityctl exists (even without plugins yet)
-            var unityctlDir = Path.Combine(current.FullName, ".unityctl");
-            if (Directory.Exists(unityctlDir))
-            {
-                var candidate = Path.Combine(unityctlDir, PluginDirName);
-                return Directory.Exists(candidate) ? candidate : null;
-            }
-
+            var candidate = Path.Combine(current.FullName, ".unityctl");
+            if (Directory.Exists(candidate))
+                return candidate;
             current = current.Parent;
         }
         return null;
     }
 
+    public static string? GetProjectPluginsDirectory()
+    {
+        var dotUnityctl = FindDotUnityctlDirectory();
+        if (dotUnityctl == null) return null;
+
+        var pluginsDir = Path.Combine(dotUnityctl, PluginDirName);
+        return Directory.Exists(pluginsDir) ? pluginsDir : null;
+    }
+
     public static string GetProjectPluginsDirectoryOrDefault()
     {
-        // Walk up from CWD looking for .unityctl/
-        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (current != null)
-        {
-            var unityctlDir = Path.Combine(current.FullName, ".unityctl");
-            if (Directory.Exists(unityctlDir))
-                return Path.Combine(unityctlDir, PluginDirName);
-            current = current.Parent;
-        }
-
-        // Fallback: .unityctl/plugins in CWD
-        return Path.Combine(Directory.GetCurrentDirectory(), ".unityctl", PluginDirName);
+        var dotUnityctl = FindDotUnityctlDirectory()
+            ?? Path.Combine(Directory.GetCurrentDirectory(), ".unityctl");
+        return Path.Combine(dotUnityctl, PluginDirName);
     }
 
     public static string GetUserPluginsDirectory()

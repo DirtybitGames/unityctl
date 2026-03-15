@@ -11,14 +11,11 @@ namespace UnityCtl.Cli;
 
 public static class PluginCommands
 {
-    // Built-in command names to exclude from executable plugin discovery
-    internal static readonly string[] BuiltInCommandNames =
-    [
-        "setup", "update", "config", "package", "skill", "plugin",
-        "status", "wait", "logs",
-        "bridge", "editor", "dialog",
-        "scene", "play", "asset", "menu", "test", "screenshot", "record", "script", "snapshot", "prefab"
-    ];
+    /// <summary>
+    /// Built-in command names, populated at startup from rootCommand.Children
+    /// so it stays in sync automatically when new commands are added.
+    /// </summary>
+    internal static ISet<string> BuiltInCommandNames { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     public static Command CreateCommand()
     {

@@ -18,6 +18,7 @@ namespace UnityCtl.Cli;
 public static class ExecutablePluginLoader
 {
     private const string ExecutablePrefix = "unityctl-";
+    private static readonly string[] WindowsExecutableExtensions = [".exe", ".cmd", ".bat", ".ps1"];
 
     /// <summary>
     /// Discovers all executable plugins from PATH and plugin directories.
@@ -230,7 +231,8 @@ public static class ExecutablePluginLoader
         IEnumerable<string> files;
         try
         {
-            files = Directory.EnumerateFiles(directory);
+            // Use wildcard to filter at OS level instead of enumerating all files
+            files = Directory.EnumerateFiles(directory, "unityctl-*");
         }
         catch
         {
@@ -242,16 +244,12 @@ public static class ExecutablePluginLoader
             var fileName = Path.GetFileNameWithoutExtension(filePath);
             var extension = Path.GetExtension(filePath).ToLowerInvariant();
 
-            // On Windows, also match files with executable extensions
+            if (!fileName.StartsWith(ExecutablePrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                // Match: unityctl-foo.exe, unityctl-foo.cmd, unityctl-foo.bat, unityctl-foo.ps1
-                var executableExtensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
-
-                if (!fileName.StartsWith(ExecutablePrefix, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (!executableExtensions.Contains(extension))
+                if (!WindowsExecutableExtensions.Contains(extension))
                     continue;
 
                 var name = fileName.Substring(ExecutablePrefix.Length);
@@ -267,15 +265,10 @@ public static class ExecutablePluginLoader
             }
             else
             {
-                // On Unix: match any executable file named unityctl-*
-                var fullFileName = Path.GetFileName(filePath);
-                if (!fullFileName.StartsWith(ExecutablePrefix, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                // Check if file is executable (has any execute bit)
                 if (!IsUnixExecutable(filePath))
                     continue;
 
+                var fullFileName = Path.GetFileName(filePath);
                 var name = fullFileName.Substring(ExecutablePrefix.Length);
                 // Strip extension if present (e.g., unityctl-foo.sh → foo)
                 var dotIndex = name.IndexOf('.');

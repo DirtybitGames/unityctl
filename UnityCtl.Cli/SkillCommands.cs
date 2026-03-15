@@ -220,22 +220,11 @@ public static class SkillCommands
 
     private static string? FindSkillExtraFile()
     {
-        // Walk up from CWD looking for .unityctl/skill-extra.md
-        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (current != null)
-        {
-            var extraPath = Path.Combine(current.FullName, ".unityctl", SkillExtraFileName);
-            if (File.Exists(extraPath))
-                return extraPath;
+        var dotUnityctl = PluginLoader.FindDotUnityctlDirectory();
+        if (dotUnityctl == null) return null;
 
-            // Stop at .unityctl directory boundary
-            var unityctlDir = Path.Combine(current.FullName, ".unityctl");
-            if (Directory.Exists(unityctlDir))
-                return extraPath; // Return the path even if file doesn't exist (checked by caller)
-
-            current = current.Parent;
-        }
-        return null;
+        var extraPath = Path.Combine(dotUnityctl, SkillExtraFileName);
+        return File.Exists(extraPath) ? extraPath : null;
     }
 
     private static Command CreateRemoveCommand()
