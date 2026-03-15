@@ -59,8 +59,7 @@ public class BaseSkillIntegrityTests
     [Fact]
     public void SourceSkillMd_OnDisk_DoesNotContainPluginSections()
     {
-        // Find the source SKILL.md relative to the test assembly
-        // The repo structure is: repo/.claude/skills/unity-editor/SKILL.md
+        // The base skill source lives in UnityCtl.Cli/Resources/SKILL.md
         var assemblyDir = Path.GetDirectoryName(typeof(BaseSkillIntegrityTests).Assembly.Location)!;
 
         // Walk up to find repo root (look for .git)
@@ -79,7 +78,7 @@ public class BaseSkillIntegrityTests
         // Skip if we can't find the repo root (e.g., running from a package)
         Skip.If(repoRoot == null, "Could not find repo root");
 
-        var skillPath = Path.Combine(repoRoot!, ".claude", "skills", "unity-editor", "SKILL.md");
+        var skillPath = Path.Combine(repoRoot!, "UnityCtl.Cli", "Resources", "SKILL.md");
         Skip.IfNot(File.Exists(skillPath), $"SKILL.md not found at {skillPath}");
 
         var content = File.ReadAllText(skillPath);

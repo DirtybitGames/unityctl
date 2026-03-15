@@ -152,20 +152,14 @@ public static class SkillCommands
 
     /// <summary>
     /// Composes the final SKILL.md from: base embedded skill + plugin sections + user extra.
+    /// The base skill lives in UnityCtl.Cli/Resources/ and is never overwritten by compose output.
     /// </summary>
     public static string? ComposeSkillContent()
     {
-        // 1. Base skill content
+        // 1. Base skill content (from embedded resource in Resources/SKILL.md)
         var baseContent = GetEmbeddedSkillContent();
         if (baseContent == null)
             return null;
-
-        // Strip any previously composed plugin/extra sections to make rebuild idempotent.
-        // The embedded resource or dev fallback may contain a prior compose result.
-        var pluginMarker = "\n## Plugin Commands";
-        var markerIndex = baseContent.IndexOf(pluginMarker, StringComparison.Ordinal);
-        if (markerIndex >= 0)
-            baseContent = baseContent.Substring(0, markerIndex);
 
         // 2. Plugin sections (script + executable)
         var plugins = PluginLoader.DiscoverPlugins();
@@ -307,12 +301,18 @@ public static class SkillCommands
         using var stream = assembly.GetManifestResourceStream(resourceName);
         if (stream == null)
         {
-            // Fallback: try to find SKILL.md in development environment
+            // Fallback: try to find file in Resources/ during development.
+            // The resource logical name is like "UnityCtl.Cli.Resources.SKILL.md"
+            // — extract the filename portion after the last "Resources." prefix.
+            var prefix = "UnityCtl.Cli.Resources.";
+            var fileName = resourceName.StartsWith(prefix)
+                ? resourceName.Substring(prefix.Length)
+                : "SKILL.md";
+
             var possiblePaths = new[]
             {
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".claude", "skills", folderName, "SKILL.md"),
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".claude", "skills", folderName, "SKILL.md"),
-                Path.Combine(Directory.GetCurrentDirectory(), ".claude", "skills", folderName, "SKILL.md")
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "UnityCtl.Cli", "Resources", fileName),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "UnityCtl.Cli", "Resources", fileName),
             };
 
             foreach (var path in possiblePaths)

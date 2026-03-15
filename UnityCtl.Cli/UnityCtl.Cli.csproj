@@ -20,10 +20,10 @@
     <ProjectReference Include="..\UnityCtl.Protocol\UnityCtl.Protocol.csproj" />
   </ItemGroup>
 
-  <!-- Embed SKILL.md files as resources for skill installation -->
+  <!-- Embed base SKILL.md files as resources for skill installation -->
   <ItemGroup>
-    <EmbeddedResource Include="..\.claude\skills\unity-editor\SKILL.md" Link="Resources\SKILL.md" LogicalName="UnityCtl.Cli.Resources.SKILL.md" />
-    <EmbeddedResource Include="..\.claude\skills\unityctl-plugins\SKILL.md" Link="Resources\SKILL.plugins.md" LogicalName="UnityCtl.Cli.Resources.SKILL.plugins.md" />
+    <EmbeddedResource Include="Resources\SKILL.md" LogicalName="UnityCtl.Cli.Resources.SKILL.md" />
+    <EmbeddedResource Include="Resources\SKILL.plugins.md" LogicalName="UnityCtl.Cli.Resources.SKILL.plugins.md" />
   </ItemGroup>
 
 </Project>
