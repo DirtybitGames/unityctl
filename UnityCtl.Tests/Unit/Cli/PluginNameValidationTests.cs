@@ -1,16 +1,15 @@
 using System.Text.RegularExpressions;
+using UnityCtl.Cli;
 using Xunit;
 
 namespace UnityCtl.Tests.Unit.Cli;
 
 /// <summary>
 /// Tests the plugin name validation regex used by 'plugin create'.
-/// The regex is: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
 /// </summary>
 public class PluginNameValidationTests
 {
-    // Same regex as PluginCommands.ValidPluginName
-    private static readonly Regex ValidPluginName = new(@"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", RegexOptions.Compiled);
+    private static readonly Regex ValidPluginName = PluginCommands.ValidPluginName;
 
     [Theory]
     [InlineData("foo")]

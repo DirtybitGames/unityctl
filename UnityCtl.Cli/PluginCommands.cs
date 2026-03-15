@@ -12,13 +12,21 @@ namespace UnityCtl.Cli;
 
 public static class PluginCommands
 {
-    private static readonly Regex ValidPluginName = new(@"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", RegexOptions.Compiled);
+    internal static readonly Regex ValidPluginName = new(@"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", RegexOptions.Compiled);
 
     /// <summary>
-    /// Built-in command names, populated at startup from rootCommand.Children
+    /// Built-in command names, populated once at startup from rootCommand.Children
     /// so it stays in sync automatically when new commands are added.
     /// </summary>
-    internal static ISet<string> BuiltInCommandNames { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    internal static ISet<string> BuiltInCommandNames { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Initializes the built-in command names. Must be called once at startup before plugin discovery.
+    /// </summary>
+    internal static void InitializeBuiltInCommandNames(ISet<string> names)
+    {
+        BuiltInCommandNames = names ?? throw new ArgumentNullException(nameof(names));
+    }
 
     public static Command CreateCommand()
     {
@@ -272,6 +280,26 @@ public class Script
         {
             var name = context.ParseResult.GetValueForArgument(nameArgument);
             var json = ContextHelper.GetJson(context);
+
+            if (!ValidPluginName.IsMatch(name))
+            {
+                if (json)
+                {
+                    Console.WriteLine(JsonHelper.Serialize(new
+                    {
+                        success = false,
+                        error = "invalid_name",
+                        name,
+                        message = "Invalid plugin name."
+                    }));
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: Invalid plugin name '{name}'.");
+                }
+                context.ExitCode = 1;
+                return;
+            }
 
             // Find the plugin
             var plugins = PluginLoader.DiscoverPlugins();

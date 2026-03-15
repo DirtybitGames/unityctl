@@ -243,7 +243,8 @@ public static class SkillCommands
             var claudeDir = context.ParseResult.GetValueForOption(claudeDirOption);
             var json = ContextHelper.GetJson(context);
 
-            RemoveSkill(global, claudeDir, json);
+            if (!RemoveSkill(global, claudeDir, json))
+                context.ExitCode = 1;
         });
 
         return removeCommand;
@@ -288,10 +289,10 @@ public static class SkillCommands
 
     private static string? GetEmbeddedSkillContent()
     {
-        return GetEmbeddedResourceContent(EmbeddedResourceName, SkillFolderName);
+        return GetEmbeddedResourceContent(EmbeddedResourceName);
     }
 
-    private static string? GetEmbeddedResourceContent(string resourceName, string folderName)
+    private static string? GetEmbeddedResourceContent(string resourceName)
     {
         var assembly = Assembly.GetExecutingAssembly();
 
@@ -445,7 +446,7 @@ public static class SkillCommands
         return true;
     }
 
-    private static void RemoveSkill(bool global, string? claudeDir, bool json)
+    private static bool RemoveSkill(bool global, string? claudeDir, bool json)
     {
         var skillsDir = GetSkillsDirectory(global, claudeDir);
         var skillFolderPath = Path.Combine(skillsDir, SkillFolderName);
@@ -466,7 +467,7 @@ public static class SkillCommands
             {
                 Console.Error.WriteLine($"Skill not found at: {skillPath}");
             }
-            return;
+            return false;
         }
 
         File.Delete(skillPath);
@@ -500,6 +501,7 @@ public static class SkillCommands
         {
             Console.WriteLine($"Removed skills from: {skillsDir}");
         }
+        return true;
     }
 
     private static void CleanupEmptyDirectory(string path)
@@ -522,7 +524,7 @@ public static class SkillCommands
             if (onlyIfExists && !File.Exists(filePath))
                 continue;
 
-            var content = GetEmbeddedResourceContent(resource, folder);
+            var content = GetEmbeddedResourceContent(resource);
             if (content == null)
                 continue;
 

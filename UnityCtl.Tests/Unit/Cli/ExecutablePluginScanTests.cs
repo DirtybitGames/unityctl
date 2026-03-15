@@ -8,8 +8,7 @@ using Xunit;
 namespace UnityCtl.Tests.Unit.Cli;
 
 /// <summary>
-/// Tests executable plugin discovery from directories.
-/// Uses DiscoverExecutablePlugins with plugin directories containing test executables.
+/// Tests executable plugin discovery from directories using the actual ScanDirectoryForExecutables method.
 /// </summary>
 public class ExecutablePluginScanTests : IDisposable
 {
@@ -29,25 +28,20 @@ public class ExecutablePluginScanTests : IDisposable
     [Fact]
     public void NameExtraction_WithAndWithoutExtension()
     {
-        // All naming variants: extensionless, .exe, .cmd, .bat, .sh
-        var cases = new[]
-        {
-            ("unityctl-foo", "foo"),
-            ("unityctl-bar.exe", "bar"),
-            ("unityctl-baz.cmd", "baz"),
-            ("unityctl-qux.bat", "qux"),
-            ("unityctl-run.sh", "run"),
-        };
+        // Create test files
+        CreateExecutable("unityctl-foo");
+        CreateExecutable("unityctl-bar.exe");
+        CreateExecutable("unityctl-baz.cmd");
+        CreateExecutable("unityctl-qux.bat");
+        CreateExecutable("unityctl-run.sh");
 
-        foreach (var (fileName, expected) in cases)
-        {
-            var name = fileName.Substring("unityctl-".Length);
-            var dotIndex = name.IndexOf('.');
-            if (dotIndex > 0)
-                name = name.Substring(0, dotIndex);
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
 
-            Assert.Equal(expected, name.ToLowerInvariant());
-        }
+        Assert.Contains(plugins, p => p.Name == "foo");
+        Assert.Contains(plugins, p => p.Name == "bar");
+        Assert.Contains(plugins, p => p.Name == "baz");
+        Assert.Contains(plugins, p => p.Name == "qux");
+        Assert.Contains(plugins, p => p.Name == "run");
     }
 
     [Fact]
@@ -57,44 +51,38 @@ public class ExecutablePluginScanTests : IDisposable
         File.WriteAllText(Path.Combine(_tempDir, "unityctl-foo.skill.md"), "docs");
         File.WriteAllText(Path.Combine(_tempDir, "unityctl-bar.skill.md"), "docs");
 
-        var files = Directory.GetFiles(_tempDir, "unityctl-*");
-        var nonCompanion = files.Where(f =>
-            !Path.GetFileName(f).EndsWith(".skill.md", StringComparison.OrdinalIgnoreCase)).ToList();
-
-        Assert.Empty(nonCompanion);
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        Assert.Empty(plugins);
     }
 
     [Fact]
     public void Extensionless_ExtractsName()
     {
-        // Extensionless executables should be discovered on all platforms
-        var fullFileName = "unityctl-my-tool";
-        var name = fullFileName.Substring("unityctl-".Length);
-        var dotIndex = name.IndexOf('.');
-        if (dotIndex > 0)
-            name = name.Substring(0, dotIndex);
+        CreateExecutable("unityctl-my-tool");
 
-        Assert.Equal("my-tool", name);
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        Assert.Single(plugins);
+        Assert.Equal("my-tool", plugins[0].Name);
     }
 
     [Fact]
     public void EmptyPrefix_Skipped()
     {
         // "unityctl-.exe" should produce an empty name and be skipped
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl-.exe"), "fake");
+        CreateExecutable("unityctl-.exe");
 
-        var fileName = Path.GetFileNameWithoutExtension("unityctl-.exe");
-        var name = fileName.Substring("unityctl-".Length);
-        Assert.True(string.IsNullOrEmpty(name));
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        Assert.Empty(plugins);
     }
 
     [Fact]
     public void NameExtraction_Lowercased()
     {
-        // Verify that extracted names are lowercased
-        var fileName = "unityctl-MyPlugin";
-        var name = fileName.Substring("unityctl-".Length).ToLowerInvariant();
-        Assert.Equal("myplugin", name);
+        CreateExecutable("unityctl-MyPlugin");
+
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        Assert.Single(plugins);
+        Assert.Equal("myplugin", plugins[0].Name);
     }
 
     [Fact]
@@ -104,21 +92,49 @@ public class ExecutablePluginScanTests : IDisposable
         File.WriteAllText(Path.Combine(_tempDir, "other-tool.exe"), "fake");
         File.WriteAllText(Path.Combine(_tempDir, "unityctl.exe"), "fake"); // no hyphen after
 
-        var files = Directory.GetFiles(_tempDir, "unityctl-*");
-        Assert.Empty(files);
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        Assert.Empty(plugins);
     }
 
     [Fact]
     public void UnixNameExtraction_StripsExtension()
     {
-        // On Unix, "unityctl-foo.sh" should extract "foo" (extension stripped)
-        var fullFileName = "unityctl-foo.sh";
-        var name = fullFileName.Substring("unityctl-".Length);
-        var dotIndex = name.IndexOf('.');
-        if (dotIndex > 0)
-            name = name.Substring(0, dotIndex);
+        CreateExecutable("unityctl-foo.sh");
 
-        Assert.Equal("foo", name);
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        Assert.Single(plugins);
+        Assert.Equal("foo", plugins[0].Name);
     }
 
+    [Fact]
+    public void Source_IsPassedThrough()
+    {
+        CreateExecutable("unityctl-test-tool");
+
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+        Assert.Single(plugins);
+        Assert.Equal("project", plugins[0].Source);
+    }
+
+    [Fact]
+    public void Path_IsFullFilePath()
+    {
+        CreateExecutable("unityctl-check");
+
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        Assert.Single(plugins);
+        Assert.StartsWith(_tempDir, plugins[0].Path);
+    }
+
+    private void CreateExecutable(string fileName)
+    {
+        var path = Path.Combine(_tempDir, fileName);
+        File.WriteAllText(path, "fake");
+
+        // On Unix, set the executable permission
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            System.Diagnostics.Process.Start("chmod", ["+x", path])?.WaitForExit();
+        }
+    }
 }

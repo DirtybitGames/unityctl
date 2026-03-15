@@ -68,7 +68,7 @@ rootCommand.AddCommand(PrefabCommand.CreateCommand());
 var registeredNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 foreach (var cmd in rootCommand.Children.OfType<Command>())
     registeredNames.Add(cmd.Name);
-PluginCommands.BuiltInCommandNames = registeredNames;
+PluginCommands.InitializeBuiltInCommandNames(registeredNames);
 
 try
 {

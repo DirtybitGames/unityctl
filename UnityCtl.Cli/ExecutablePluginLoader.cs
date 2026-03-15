@@ -255,6 +255,8 @@ public static class ExecutablePluginLoader
                 return null;
 
             var resolvedPath = (await whereProc.StandardOutput.ReadLineAsync())?.Trim();
+            // Drain stderr to prevent potential deadlock if where.exe writes to it
+            await whereProc.StandardError.ReadToEndAsync();
             await whereProc.WaitForExitAsync();
             return whereProc.ExitCode == 0 ? resolvedPath : null;
         }
@@ -307,7 +309,7 @@ public static class ExecutablePluginLoader
         }
     }
 
-    private static IEnumerable<ExecutablePlugin> ScanDirectoryForExecutables(string directory, string source)
+    internal static IEnumerable<ExecutablePlugin> ScanDirectoryForExecutables(string directory, string source)
     {
         IEnumerable<string> files;
         try
@@ -337,7 +339,7 @@ public static class ExecutablePluginLoader
             // Extract command name: strip prefix, then strip extension
             var name = fullFileName.Substring(ExecutablePrefix.Length);
             var dotIndex = name.IndexOf('.');
-            if (dotIndex > 0)
+            if (dotIndex >= 0)
                 name = name.Substring(0, dotIndex);
 
             if (string.IsNullOrEmpty(name))
