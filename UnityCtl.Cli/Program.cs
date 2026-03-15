@@ -74,6 +74,11 @@ try
     var plugins = PluginLoader.DiscoverPlugins();
     foreach (var plugin in plugins)
     {
+        if (registeredNames.Contains(plugin.Manifest.Name))
+        {
+            Console.Error.WriteLine($"Warning: Plugin '{plugin.Manifest.Name}' conflicts with a built-in command and was skipped.");
+            continue;
+        }
         rootCommand.AddCommand(PluginLoader.CreateCommandFromPlugin(plugin));
         registeredNames.Add(plugin.Manifest.Name);
     }

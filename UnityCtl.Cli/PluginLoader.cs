@@ -121,8 +121,14 @@ public static class PluginLoader
         var json = ContextHelper.GetJson(context);
         var timeout = ContextHelper.GetTimeout(context);
 
-        // Read the script file
-        var scriptPath = Path.Combine(pluginDir, handlerFile);
+        // Read the script file (validate path stays within plugin directory)
+        var scriptPath = Path.GetFullPath(Path.Combine(pluginDir, handlerFile));
+        if (!scriptPath.StartsWith(Path.GetFullPath(pluginDir) + Path.DirectorySeparatorChar))
+        {
+            Console.Error.WriteLine($"Error: Plugin script path escapes plugin directory: {handlerFile}");
+            context.ExitCode = 1;
+            return;
+        }
         if (!File.Exists(scriptPath))
         {
             Console.Error.WriteLine($"Error: Plugin script not found: {scriptPath}");
@@ -267,8 +273,9 @@ public static class PluginLoader
         // Check for custom skill section file
         if (plugin.Manifest.Skill != null)
         {
-            var skillPath = Path.Combine(plugin.Directory, plugin.Manifest.Skill.File);
-            if (File.Exists(skillPath))
+            var skillPath = Path.GetFullPath(Path.Combine(plugin.Directory, plugin.Manifest.Skill.File));
+            if (skillPath.StartsWith(Path.GetFullPath(plugin.Directory) + Path.DirectorySeparatorChar)
+                && File.Exists(skillPath))
                 return File.ReadAllText(skillPath);
         }
 
