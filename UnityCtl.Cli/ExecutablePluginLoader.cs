@@ -292,20 +292,13 @@ public static class ExecutablePluginLoader
 
     private static IEnumerable<ExecutablePlugin> ScanPluginDirectories()
     {
-        // User-level: ~/.unityctl/plugins/
-        var userDir = PluginLoader.GetUserPluginsDirectory();
-        if (Directory.Exists(userDir))
+        foreach (var (dir, source) in PluginLoader.GetPluginDirectories())
         {
-            foreach (var plugin in ScanDirectoryForExecutables(userDir, "user"))
-                yield return plugin;
-        }
-
-        // Project-level: .unityctl/plugins/
-        var projectDir = PluginLoader.GetProjectPluginsDirectory();
-        if (projectDir != null && Directory.Exists(projectDir))
-        {
-            foreach (var plugin in ScanDirectoryForExecutables(projectDir, "project"))
-                yield return plugin;
+            if (Directory.Exists(dir))
+            {
+                foreach (var plugin in ScanDirectoryForExecutables(dir, source))
+                    yield return plugin;
+            }
         }
     }
 

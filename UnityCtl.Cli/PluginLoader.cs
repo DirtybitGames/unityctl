@@ -34,6 +34,19 @@ public static class PluginLoader
     }
 
     /// <summary>
+    /// Returns plugin directories in precedence order (user-level first, project-level second).
+    /// Higher-precedence entries appear later so they overwrite earlier ones in dictionary-based merges.
+    /// </summary>
+    public static IEnumerable<(string Path, string Source)> GetPluginDirectories()
+    {
+        yield return (GetUserPluginsDirectory(), "user");
+
+        var projectDir = GetProjectPluginsDirectory();
+        if (projectDir != null)
+            yield return (projectDir, "project");
+    }
+
+    /// <summary>
     /// Discovers all plugins from both project-level and user-level directories.
     /// Project-level plugins override user-level plugins with the same name.
     /// </summary>
@@ -41,16 +54,9 @@ public static class PluginLoader
     {
         var plugins = new Dictionary<string, LoadedPlugin>(StringComparer.OrdinalIgnoreCase);
 
-        // User-level first (lower precedence)
-        var userDir = GetUserPluginsDirectory();
-        foreach (var plugin in LoadPluginsFromDirectory(userDir, "user"))
-            plugins[plugin.Manifest.Name] = plugin;
-
-        // Project-level second (higher precedence, overwrites user-level)
-        var projectDir = GetProjectPluginsDirectory();
-        if (projectDir != null)
+        foreach (var (dir, source) in GetPluginDirectories())
         {
-            foreach (var plugin in LoadPluginsFromDirectory(projectDir, "project"))
+            foreach (var plugin in LoadPluginsFromDirectory(dir, source))
                 plugins[plugin.Manifest.Name] = plugin;
         }
 
@@ -213,7 +219,11 @@ public static class PluginLoader
     /// </summary>
     public static bool IsPathWithin(string directory, string filePath)
     {
-        var resolvedFile = Path.GetFullPath(Path.Combine(directory, filePath));
+        // Normalize backslashes to forward slashes on all platforms so that a manifest
+        // authored on Windows (using "subdir\file.cs") is still validated correctly on Unix
+        // where backslash is not a path separator.
+        var normalizedFile = filePath.Replace('\\', '/');
+        var resolvedFile = Path.GetFullPath(Path.Combine(directory, normalizedFile));
         var resolvedDir = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
         var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)

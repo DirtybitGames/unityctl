@@ -103,46 +103,25 @@ public static class SkillCommands
             var json = ContextHelper.GetJson(context);
 
             var skillsDir = GetSkillsDirectory(global, claudeDir);
-            var skillPath = Path.Combine(skillsDir, SkillFolderName, SkillFileName);
-
-            var content = ComposeSkillContent();
-            if (content == null)
+            if (!await WriteComposedSkillAsync(skillsDir, json))
             {
-                if (json)
-                {
-                    Console.WriteLine(JsonHelper.Serialize(new
-                    {
-                        success = false,
-                        error = "base_skill_not_found",
-                        message = "Could not find embedded SKILL.md resource"
-                    }));
-                }
-                else
-                {
-                    Console.Error.WriteLine("Error: Could not find base skill content.");
-                }
                 context.ExitCode = 1;
                 return;
             }
-
-            var dir = Path.GetDirectoryName(skillPath);
-            if (dir != null) Directory.CreateDirectory(dir);
-
-            await File.WriteAllTextAsync(skillPath, content);
 
             if (json)
             {
                 Console.WriteLine(JsonHelper.Serialize(new
                 {
                     success = true,
-                    path = skillPath,
+                    path = Path.Combine(skillsDir, SkillFolderName, SkillFileName),
                     global,
                     composed = true
                 }));
             }
             else
             {
-                Console.WriteLine($"Rebuilt skill at: {skillPath}");
+                Console.WriteLine($"Rebuilt skill at: {Path.Combine(skillsDir, SkillFolderName, SkillFileName)}");
                 Console.WriteLine("Restart Claude Code to load the updated skill.");
             }
         });
@@ -299,9 +278,9 @@ public static class SkillCommands
         using var stream = assembly.GetManifestResourceStream(resourceName);
         if (stream == null)
         {
-            // Fallback: try to find file in Resources/ during development.
-            // The resource logical name is like "UnityCtl.Cli.Resources.SKILL.md"
-            // — extract the filename portion after the last "Resources." prefix.
+#if DEBUG
+            // Fallback: try to find file in Resources/ during development when the
+            // embedded resource may not be available (e.g. running via `dotnet run`).
             var prefix = "UnityCtl.Cli.Resources.";
             var fileName = resourceName.StartsWith(prefix)
                 ? resourceName.Substring(prefix.Length)
@@ -317,11 +296,9 @@ public static class SkillCommands
             {
                 var fullPath = Path.GetFullPath(path);
                 if (File.Exists(fullPath))
-                {
                     return File.ReadAllText(fullPath);
-                }
             }
-
+#endif
             return null;
         }
 
@@ -357,8 +334,7 @@ public static class SkillCommands
     public static async Task<bool> AddSkillAsync(bool global, string? claudeDir, bool force, bool json)
     {
         var skillsDir = GetSkillsDirectory(global, claudeDir);
-        var skillFolderPath = Path.Combine(skillsDir, SkillFolderName);
-        var skillPath = Path.Combine(skillFolderPath, SkillFileName);
+        var skillPath = Path.Combine(skillsDir, SkillFolderName, SkillFileName);
 
         // Check if skill already exists
         if (File.Exists(skillPath) && !force)
@@ -386,32 +362,8 @@ public static class SkillCommands
             }
         }
 
-        // Get composed skill content (base + plugins + user extra)
-        var skillContent = ComposeSkillContent();
-        if (skillContent == null)
-        {
-            if (json)
-            {
-                Console.WriteLine(JsonHelper.Serialize(new
-                {
-                    success = false,
-                    error = "skill_not_found",
-                    message = "Could not find embedded SKILL.md resource"
-                }));
-            }
-            else
-            {
-                Console.Error.WriteLine("Error: Could not find skill file.");
-                Console.Error.WriteLine("The SKILL.md resource may not be embedded in this build.");
-            }
+        if (!await WriteComposedSkillAsync(skillsDir, json))
             return false;
-        }
-
-        // Create directory if needed
-        Directory.CreateDirectory(skillFolderPath);
-
-        // Write skill file
-        await File.WriteAllTextAsync(skillPath, skillContent);
 
         // Install additional skills
         await InstallAdditionalSkillsAsync(skillsDir, onlyIfExists: false);
@@ -443,6 +395,38 @@ public static class SkillCommands
             Console.WriteLine("Restart Claude Code to load the new skills.");
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// Composes the skill content and writes it to the main skill file in the given skills directory.
+    /// Returns false and prints an error if the base skill resource is missing.
+    /// </summary>
+    private static async Task<bool> WriteComposedSkillAsync(string skillsDir, bool json)
+    {
+        var content = ComposeSkillContent();
+        if (content == null)
+        {
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(new
+                {
+                    success = false,
+                    error = "skill_not_found",
+                    message = "Could not find embedded SKILL.md resource"
+                }));
+            }
+            else
+            {
+                Console.Error.WriteLine("Error: Could not find skill file.");
+                Console.Error.WriteLine("The SKILL.md resource may not be embedded in this build.");
+            }
+            return false;
+        }
+
+        var skillFolderPath = Path.Combine(skillsDir, SkillFolderName);
+        Directory.CreateDirectory(skillFolderPath);
+        await File.WriteAllTextAsync(Path.Combine(skillFolderPath, SkillFileName), content);
         return true;
     }
 

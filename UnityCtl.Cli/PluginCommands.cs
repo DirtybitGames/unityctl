@@ -227,17 +227,19 @@ public static class PluginCommands
             File.WriteAllText(Path.Combine(pluginDir, "plugin.json"), manifestJson);
 
             // Write example script
-            var exampleScript = @"using UnityEngine;
+            var exampleScript = """
+                using UnityEngine;
 
-public class Script
-{
-    public static object Main(string[] args)
-    {
-        Debug.Log(""Hello from " + name + @" plugin!"");
-        return ""Hello from Unity!"";
-    }
-}
-";
+                public class Script
+                {
+                    public static object Main(string[] args)
+                    {
+                        Debug.Log("Hello from {{NAME}} plugin!");
+                        return "Hello from Unity!";
+                    }
+                }
+
+                """.Replace("{{NAME}}", name);
             File.WriteAllText(Path.Combine(pluginDir, "hello.cs"), exampleScript);
 
             if (json)

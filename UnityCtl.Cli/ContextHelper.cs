@@ -11,36 +11,24 @@ namespace UnityCtl.Cli;
 
 internal static class ContextHelper
 {
-    public static string? GetProjectPath(InvocationContext context)
-    {
-        var parseResult = context.ParseResult;
-        var rootCommand = parseResult.RootCommandResult.Command;
-        var option = rootCommand.Options.FirstOrDefault(o => o.Name == "project") as Option<string>;
-        return option != null ? parseResult.GetValueForOption(option) : null;
-    }
+    public static string? GetProjectPath(InvocationContext context) =>
+        GetGlobalOption<string>(context, "project");
 
-    public static string? GetAgentId(InvocationContext context)
-    {
-        var parseResult = context.ParseResult;
-        var rootCommand = parseResult.RootCommandResult.Command;
-        var option = rootCommand.Options.FirstOrDefault(o => o.Name == "agent-id") as Option<string>;
-        return option != null ? parseResult.GetValueForOption(option) : null;
-    }
+    public static string? GetAgentId(InvocationContext context) =>
+        GetGlobalOption<string>(context, "agent-id");
 
-    public static bool GetJson(InvocationContext context)
-    {
-        var parseResult = context.ParseResult;
-        var rootCommand = parseResult.RootCommandResult.Command;
-        var option = rootCommand.Options.FirstOrDefault(o => o.Name == "json") as Option<bool>;
-        return option != null && parseResult.GetValueForOption(option);
-    }
+    public static bool GetJson(InvocationContext context) =>
+        GetGlobalOption<bool>(context, "json");
 
-    public static int? GetTimeout(InvocationContext context)
+    public static int? GetTimeout(InvocationContext context) =>
+        GetGlobalOption<int?>(context, "timeout");
+
+    private static T? GetGlobalOption<T>(InvocationContext context, string name)
     {
         var parseResult = context.ParseResult;
-        var rootCommand = parseResult.RootCommandResult.Command;
-        var option = rootCommand.Options.FirstOrDefault(o => o.Name == "timeout") as Option<int?>;
-        return option != null ? parseResult.GetValueForOption(option) : null;
+        var option = parseResult.RootCommandResult.Command.Options
+            .FirstOrDefault(o => o.Name == name) as Option<T>;
+        return option != null ? parseResult.GetValueForOption(option) : default;
     }
 
     public static bool? GetResultBool(ResponseMessage response, string key)

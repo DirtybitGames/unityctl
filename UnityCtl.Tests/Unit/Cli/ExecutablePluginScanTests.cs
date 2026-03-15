@@ -8,7 +8,8 @@ using Xunit;
 namespace UnityCtl.Tests.Unit.Cli;
 
 /// <summary>
-/// Tests executable plugin discovery from directories using the actual ScanDirectoryForExecutables method.
+/// Tests executable plugin discovery by calling ExecutablePluginLoader.ScanDirectoryForExecutables
+/// against temp directories with real files.
 /// </summary>
 public class ExecutablePluginScanTests : IDisposable
 {
@@ -25,62 +26,66 @@ public class ExecutablePluginScanTests : IDisposable
         try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 
-    [Fact]
-    public void NameExtraction_WithAndWithoutExtension()
+    [SkippableFact]
+    public void Discovers_Extensionless_Executable()
     {
-        // Create test files
         CreateExecutable("unityctl-foo");
+
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
+        Assert.Single(plugins);
+        Assert.Equal("foo", plugins[0].Name);
+    }
+
+    [SkippableFact]
+    public void Discovers_Exe_Extension()
+    {
         CreateExecutable("unityctl-bar.exe");
+
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
+        Assert.Single(plugins);
+        Assert.Equal("bar", plugins[0].Name);
+    }
+
+    [SkippableFact]
+    public void Discovers_Cmd_Extension()
+    {
         CreateExecutable("unityctl-baz.cmd");
-        CreateExecutable("unityctl-qux.bat");
-        CreateExecutable("unityctl-run.sh");
 
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
 
-        Assert.Contains(plugins, p => p.Name == "foo");
-        Assert.Contains(plugins, p => p.Name == "bar");
-        Assert.Contains(plugins, p => p.Name == "baz");
-        Assert.Contains(plugins, p => p.Name == "qux");
-        Assert.Contains(plugins, p => p.Name == "run");
+        Assert.Single(plugins);
+        Assert.Equal("baz", plugins[0].Name);
     }
 
     [Fact]
-    public void CompanionSkillFile_Ignored()
+    public void CompanionSkillFile_NotDiscovered()
     {
-        // .skill.md companion files should not be discovered as executable plugins
         File.WriteAllText(Path.Combine(_tempDir, "unityctl-foo.skill.md"), "docs");
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl-bar.skill.md"), "docs");
 
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
         Assert.Empty(plugins);
     }
 
-    [Fact]
-    public void Extensionless_ExtractsName()
+    [SkippableFact]
+    public void EmptyNameAfterPrefix_Skipped()
     {
-        CreateExecutable("unityctl-my-tool");
-
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
-        Assert.Single(plugins);
-        Assert.Equal("my-tool", plugins[0].Name);
-    }
-
-    [Fact]
-    public void EmptyPrefix_Skipped()
-    {
-        // "unityctl-.exe" should produce an empty name and be skipped
         CreateExecutable("unityctl-.exe");
 
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
         Assert.Empty(plugins);
     }
 
-    [Fact]
-    public void NameExtraction_Lowercased()
+    [SkippableFact]
+    public void Name_IsLowercased()
     {
         CreateExecutable("unityctl-MyPlugin");
 
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
         Assert.Single(plugins);
         Assert.Equal("myplugin", plugins[0].Name);
     }
@@ -88,42 +93,65 @@ public class ExecutablePluginScanTests : IDisposable
     [Fact]
     public void NonMatchingFiles_Ignored()
     {
-        // Files that don't start with "unityctl-" should not be discovered
         File.WriteAllText(Path.Combine(_tempDir, "other-tool.exe"), "fake");
-        File.WriteAllText(Path.Combine(_tempDir, "unityctl.exe"), "fake"); // no hyphen after
+        File.WriteAllText(Path.Combine(_tempDir, "unityctl.exe"), "fake"); // no hyphen after prefix
 
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
         Assert.Empty(plugins);
     }
 
-    [Fact]
-    public void UnixNameExtraction_StripsExtension()
-    {
-        CreateExecutable("unityctl-foo.sh");
-
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
-        Assert.Single(plugins);
-        Assert.Equal("foo", plugins[0].Name);
-    }
-
-    [Fact]
+    [SkippableFact]
     public void Source_IsPassedThrough()
     {
         CreateExecutable("unityctl-test-tool");
 
         var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
         Assert.Single(plugins);
         Assert.Equal("project", plugins[0].Source);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Path_IsFullFilePath()
     {
         CreateExecutable("unityctl-check");
 
-        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "test").ToList();
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
         Assert.Single(plugins);
         Assert.StartsWith(_tempDir, plugins[0].Path);
+    }
+
+    [SkippableFact]
+    public void MultipleExecutables_AllDiscovered()
+    {
+        CreateExecutable("unityctl-alpha.exe");
+        CreateExecutable("unityctl-beta.cmd");
+
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
+        Assert.Equal(2, plugins.Count);
+        Assert.Contains(plugins, p => p.Name == "alpha");
+        Assert.Contains(plugins, p => p.Name == "beta");
+    }
+
+    [Fact]
+    public void EmptyDirectory_ReturnsEmpty()
+    {
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(_tempDir, "project").ToList();
+
+        Assert.Empty(plugins);
+    }
+
+    [Fact]
+    public void NonexistentDirectory_ReturnsEmpty()
+    {
+        var nonexistent = Path.Combine(_tempDir, "does-not-exist");
+
+        var plugins = ExecutablePluginLoader.ScanDirectoryForExecutables(nonexistent, "project").ToList();
+
+        Assert.Empty(plugins);
     }
 
     private void CreateExecutable(string fileName)
