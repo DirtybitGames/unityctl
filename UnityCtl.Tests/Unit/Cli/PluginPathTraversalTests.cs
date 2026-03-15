@@ -46,11 +46,17 @@ public class PluginPathTraversalTests : IDisposable
     [Theory]
     [InlineData("../../secret.cs")]
     [InlineData("../secret.cs")]
-    [InlineData("..\\..\\secret.cs")]
     [InlineData("subdir/../../secret.cs")]
     public void TraversalPaths_Rejected(string handlerFile)
     {
         Assert.False(PluginLoader.IsPathWithin(_pluginDir, handlerFile));
+    }
+
+    [SkippableFact]
+    public void BackslashTraversal_OnWindows_Rejected()
+    {
+        Skip.IfNot(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
+        Assert.False(PluginLoader.IsPathWithin(_pluginDir, "..\\..\\secret.cs"));
     }
 
     [Fact]
