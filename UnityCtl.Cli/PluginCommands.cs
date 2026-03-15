@@ -251,19 +251,11 @@ public class Script
 
         var nameArgument = new Argument<string>("name", "Plugin name to remove");
 
-        var forceOption = new Option<bool>(
-            "--force",
-            "Remove without confirmation"
-        );
-        forceOption.AddAlias("-f");
-
         removeCommand.AddArgument(nameArgument);
-        removeCommand.AddOption(forceOption);
 
         removeCommand.SetHandler((InvocationContext context) =>
         {
             var name = context.ParseResult.GetValueForArgument(nameArgument);
-            var force = context.ParseResult.GetValueForOption(forceOption);
             var json = ContextHelper.GetJson(context);
 
             // Find the plugin
@@ -288,19 +280,6 @@ public class Script
                 }
                 context.ExitCode = 1;
                 return;
-            }
-
-            // Confirm removal unless --force or --json
-            if (!force && !json)
-            {
-                Console.WriteLine($"Remove plugin '{plugin.Manifest.Name}' from: {ContextHelper.FormatPath(plugin.Directory)}");
-                Console.Write("Are you sure? [y/N]: ");
-                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-                if (response != "y" && response != "yes")
-                {
-                    Console.WriteLine("Aborted.");
-                    return;
-                }
             }
 
             // Delete plugin directory
