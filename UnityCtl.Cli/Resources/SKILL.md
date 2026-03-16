@@ -174,19 +174,3 @@ Run `unityctl status` first to diagnose issues.
 | Command timed out | A native dialog may be blocking Unity: `unityctl dialog list` |
 | Progress bar stuck | Check with `unityctl dialog list`, wait or dismiss |
 | Editor not found | Use `--unity-path` to specify Unity executable |
-
-## Plugin Commands
-
-### Plugin: sample-script
-
-Sample script plugin demonstrating the plugin system
-
-- `unityctl sample-script hello [name] [--loud]`
-  Say hello from Unity
-
-### Plugin: sample-exec (executable)
-
-A sample executable plugin that prints connection info. Demonstrates the `unityctl-{name}` naming convention.
-
-- `unityctl sample-exec [args...]`
-  Prints greeting and bridge connection details.

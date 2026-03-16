@@ -38,7 +38,18 @@ dotnet test
 
 ## Skill
 
-Claude Code skill for AI integration: `.claude/skills/unity-editor/SKILL.md`
+The Claude Code skill has two layers:
+
+- **Base skill**: `UnityCtl.Cli/Resources/SKILL.md` — the source of truth, embedded into the CLI assembly. Edit this file when adding or changing CLI commands.
+- **Composed skill**: `.claude/skills/unity-editor/SKILL.md` — generated output (base + plugin docs + user extra). This is what Claude Code loads. Committed so it works on clone.
+
+After editing the base skill or changing plugins, regenerate the composed output:
+
+```bash
+./uc skill add --force    # or: ./uc skill rebuild
+```
+
+**Do not edit `.claude/skills/unity-editor/SKILL.md` directly** — it will be overwritten by the next rebuild.
 
 ## Notes
 

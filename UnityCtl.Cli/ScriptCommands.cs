@@ -305,7 +305,7 @@ public static class ScriptCommands
         return sb.ToString();
     }
 
-    private static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json, bool isEval, string? generatedCode = null)
+    internal static void DisplayScriptResult(InvocationContext context, ResponseMessage response, bool json, bool isEval = false, string? generatedCode = null)
     {
         var result = JsonConvert.DeserializeObject<ScriptExecuteResult>(
             JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),

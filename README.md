@@ -114,8 +114,26 @@ This installs the Unity package and Claude Code skill. If run outside a Unity pr
 | `unityctl config set/get/list` | Manage configuration |
 | `unityctl package add/remove/status` | Manage Unity package |
 | `unityctl skill add/remove/status` | Manage Claude Code skill |
+| `unityctl skill rebuild` | Rebuild skill with plugin docs included |
+| `unityctl plugin list` | List discovered plugins |
+| `unityctl plugin create <name>` | Scaffold a new script plugin |
+| `unityctl plugin remove <name>` | Remove a script plugin |
 
 Run `unityctl --help` for the full command list.
+
+## Plugins
+
+Extend unityctl with custom commands — no changes to the bridge or Unity plugin required.
+
+- **Script plugins** — C# scripts executed inside Unity via the existing `script.execute` RPC. Best for commands that need Unity APIs.
+- **Executable plugins** — any `unityctl-<name>` binary on PATH or in `.unityctl/plugins/`, following the git/kubectl convention. Best for orchestration and CI workflows.
+
+```bash
+unityctl plugin create scene-stats   # scaffold a script plugin
+unityctl scene-stats stats           # use it like a built-in command
+```
+
+Plugins are discovered from `.unityctl/plugins/` (project-level) and `~/.unityctl/plugins/` (user-level). Their docs are automatically included in the Claude Code skill when you run `unityctl setup` or `unityctl skill rebuild`.
 
 ## Architecture
 
@@ -142,7 +160,8 @@ The API is kept simple, and leans mostly on the script execution to get work don
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical details
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
-- [.claude/skills/unity-editor/SKILL.md](.claude/skills/unity-editor/SKILL.md) - AI assistant skill file
+
+A Claude Code skill is installed as part of `unityctl setup` and kept up to date by `unityctl update`. It teaches Claude how to use the CLI without consuming context window on every task.
 
 ## License
 
