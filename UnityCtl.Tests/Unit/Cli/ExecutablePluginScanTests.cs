@@ -154,6 +154,54 @@ public class ExecutablePluginScanTests : IDisposable
         Assert.Empty(plugins);
     }
 
+    [Fact]
+    public void ReadShebang_EnvBash_ReturnsBash()
+    {
+        var path = CreateScript("#!/usr/bin/env bash\necho hello");
+        Assert.Equal("bash", ExecutablePluginLoader.ReadShebangInterpreter(path));
+    }
+
+    [Fact]
+    public void ReadShebang_AbsolutePath_ReturnsFileName()
+    {
+        var path = CreateScript("#!/bin/bash\necho hello");
+        Assert.Equal("bash", ExecutablePluginLoader.ReadShebangInterpreter(path));
+    }
+
+    [Fact]
+    public void ReadShebang_EnvPython_ReturnsPython()
+    {
+        var path = CreateScript("#!/usr/bin/env python3\nimport sys");
+        Assert.Equal("python3", ExecutablePluginLoader.ReadShebangInterpreter(path));
+    }
+
+    [Fact]
+    public void ReadShebang_NoShebang_ReturnsNull()
+    {
+        var path = CreateScript("echo hello\n");
+        Assert.Null(ExecutablePluginLoader.ReadShebangInterpreter(path));
+    }
+
+    [Fact]
+    public void ReadShebang_EmptyFile_ReturnsNull()
+    {
+        var path = CreateScript("");
+        Assert.Null(ExecutablePluginLoader.ReadShebangInterpreter(path));
+    }
+
+    [Fact]
+    public void ReadShebang_NonexistentFile_ReturnsNull()
+    {
+        Assert.Null(ExecutablePluginLoader.ReadShebangInterpreter(Path.Combine(_tempDir, "nope")));
+    }
+
+    private string CreateScript(string content)
+    {
+        var path = Path.Combine(_tempDir, $"script-{Guid.NewGuid():N}");
+        File.WriteAllText(path, content);
+        return path;
+    }
+
     private void CreateExecutable(string fileName)
     {
         var path = Path.Combine(_tempDir, fileName);

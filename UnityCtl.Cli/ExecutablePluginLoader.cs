@@ -76,14 +76,20 @@ public static class ExecutablePluginLoader
         if (result.HasValue)
             return result.Value;
 
-        // On Windows, .bat/.cmd scripts need cmd.exe /c to run.
-        // Use PATHEXT-aware lookup via "where" to find the exact path first,
-        // so we don't blindly invoke cmd.exe for non-existent commands.
+        // On Windows, extensionless scripts and .bat/.cmd files can't be started directly.
+        // Resolve the actual file via "where", then route through the appropriate interpreter.
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             var resolvedPath = await ResolveViaWhere(executableName);
             if (resolvedPath != null)
             {
+                var resolvedInfo = CreateStartInfoForPlugin(resolvedPath, passThrough);
+                SetPluginEnvironment(resolvedInfo, projectPath, agentId, json, timeout);
+                result = await RunAndStreamAsync(resolvedInfo);
+                if (result.HasValue)
+                    return result.Value;
+
+                // Fall back to cmd.exe /c for .bat/.cmd files
                 var cmdInfo = CreateStartInfo("cmd.exe", ["/c", resolvedPath, .. passThrough]);
                 SetPluginEnvironment(cmdInfo, projectPath, agentId, json, timeout);
                 result = await RunAndStreamAsync(cmdInfo);
@@ -155,7 +161,7 @@ public static class ExecutablePluginLoader
         ExecutablePlugin plugin,
         IReadOnlyList<string> passThrough)
     {
-        var startInfo = CreateStartInfo(plugin.Path, passThrough);
+        var startInfo = CreateStartInfoForPlugin(plugin.Path, passThrough);
         SetPluginEnvironment(startInfo,
             ContextHelper.GetProjectPath(context),
             ContextHelper.GetAgentId(context),
@@ -168,6 +174,92 @@ public static class ExecutablePluginLoader
 
         Console.Error.WriteLine($"Error: Failed to start plugin executable: {plugin.Path}");
         return 1;
+    }
+
+    /// <summary>
+    /// Creates a ProcessStartInfo for a discovered plugin file. On Windows, extensionless
+    /// scripts with a shebang line (e.g. #!/usr/bin/env bash) are routed through the
+    /// interpreter since Windows can't handle shebangs natively.
+    /// </summary>
+    private static ProcessStartInfo CreateStartInfoForPlugin(string filePath, IReadOnlyList<string> arguments)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Path.HasExtension(filePath))
+        {
+            var interpreter = ReadShebangInterpreter(filePath);
+            if (interpreter != null)
+            {
+                // On Windows, "bash" might resolve to WSL's bash.exe which can't see
+                // Windows paths. Use Git Bash instead when available.
+                var resolvedInterpreter = ResolveWindowsInterpreter(interpreter);
+                return CreateStartInfo(resolvedInterpreter, [filePath, .. arguments]);
+            }
+        }
+
+        return CreateStartInfo(filePath, arguments);
+    }
+
+    /// <summary>
+    /// Resolves an interpreter name to a full path on Windows, preferring Git Bash
+    /// over WSL's bash.exe which runs in a separate Linux environment.
+    /// </summary>
+    private static string ResolveWindowsInterpreter(string interpreter)
+    {
+        if (interpreter is "bash" or "sh")
+        {
+            // Try Git for Windows first (most common on developer machines)
+            var gitBash = FindGitBash();
+            if (gitBash != null)
+                return gitBash;
+        }
+
+        return interpreter;
+    }
+
+    private static string? FindGitBash()
+    {
+        // Standard Git for Windows install locations
+        var candidates = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "usr", "bin", "bash.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Git", "usr", "bin", "bash.exe"),
+        };
+
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path))
+                return path;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the first line of a file and extracts the interpreter from a shebang line.
+    /// Handles "#!/usr/bin/env bash" → "bash" and "#!/bin/bash" → "bash".
+    /// Returns null if no shebang is found.
+    /// </summary>
+    internal static string? ReadShebangInterpreter(string filePath)
+    {
+        try
+        {
+            using var reader = new StreamReader(filePath);
+            var firstLine = reader.ReadLine();
+            if (firstLine == null || !firstLine.StartsWith("#!"))
+                return null;
+
+            var shebang = firstLine.Substring(2).Trim();
+
+            // "#!/usr/bin/env bash" → "bash"
+            if (shebang.StartsWith("/usr/bin/env "))
+                return shebang.Substring("/usr/bin/env ".Length).Trim();
+
+            // "#!/bin/bash" → "bash"
+            return Path.GetFileName(shebang);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
