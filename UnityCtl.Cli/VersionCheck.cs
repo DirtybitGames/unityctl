@@ -48,16 +48,17 @@ public static class VersionCheck
     /// Compares CLI version against bridge and plugin versions from a health result.
     /// </summary>
     public static VersionCheckResult Check(HealthResult health)
-        => Check(health, VersionInfo.Version);
+        => Check(VersionInfo.Version, health.BridgeVersion, health.UnityPluginVersion);
 
     /// <summary>
-    /// Compares the given CLI version against bridge and plugin versions from a health result.
+    /// Compares the given CLI, bridge, and plugin versions for mismatches.
+    /// Any version may be null (e.g. bridge not running, plugin not connected).
     /// </summary>
-    internal static VersionCheckResult Check(HealthResult health, string cliVersion)
+    public static VersionCheckResult Check(string cliVersion, string? bridgeVersion, string? pluginVersion)
     {
         var cliBase = GetBaseVersion(cliVersion);
-        var bridgeBase = GetBaseVersion(health.BridgeVersion);
-        var pluginBase = GetBaseVersion(health.UnityPluginVersion);
+        var bridgeBase = GetBaseVersion(bridgeVersion);
+        var pluginBase = GetBaseVersion(pluginVersion);
 
         var hasMismatch = false;
 
@@ -93,6 +94,41 @@ public static class VersionCheck
         }
 
         return new VersionCheckResult(hasMismatch, pluginAhead, cliBase, bridgeBase, pluginBase);
+    }
+
+    private const string PackageName = "com.dirtybit.unityctl";
+
+    /// <summary>
+    /// Reads the installed plugin version from Packages/manifest.json.
+    /// Returns the version string (e.g. "0.7.0") or null if not found.
+    /// </summary>
+    public static string? ReadPluginVersionFromManifest(string projectRoot)
+    {
+        try
+        {
+            var manifestPath = Path.Combine(projectRoot, "Packages", "manifest.json");
+            if (!File.Exists(manifestPath)) return null;
+
+            var content = File.ReadAllText(manifestPath);
+            var manifest = JsonNode.Parse(content);
+            var value = manifest?["dependencies"]?[PackageName]?.ToString();
+            if (value == null) return null;
+
+            // Extract version from git URL: "...#v0.7.0" → "0.7.0"
+            var hashIndex = value.LastIndexOf('#');
+            if (hashIndex < 0) return null;
+
+            var version = value.Substring(hashIndex + 1);
+            // Strip leading 'v' if present
+            if (version.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+                version = version.Substring(1);
+
+            return version;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Version? ParseVersion(string version)

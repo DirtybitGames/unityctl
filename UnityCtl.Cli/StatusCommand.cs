@@ -116,12 +116,19 @@ public static class StatusCommand
                 }
             }
 
+            // Resolve plugin version: prefer live value from bridge, fall back to manifest
+            var pluginVersionFromBridge = health?.UnityPluginVersion;
+            var pluginVersion = pluginVersionFromBridge
+                ?? VersionCheck.ReadPluginVersionFromManifest(projectRoot);
+            var pluginVersionSource = pluginVersionFromBridge != null ? "connected" : "manifest";
+            var enforced = VersionCheck.IsEnforced(projectRoot);
+            var versionCheck = VersionCheck.Check(
+                VersionInfo.Version,
+                health?.BridgeVersion,
+                pluginVersion);
+
             if (json)
             {
-                var enforced = VersionCheck.IsEnforced(projectRoot);
-                var versionCheck = health != null ? VersionCheck.Check(health) : null;
-
-                // Include version info and dialogs in JSON output
                 var jsonResult = new
                 {
                     result.ProjectPath,
@@ -134,20 +141,20 @@ public static class StatusCommand
                     result.BridgePid,
                     result.UnityConnectedToBridge,
                     Dialogs = detectedDialogs,
-                    Versions = health != null ? new
+                    Versions = new
                     {
                         Cli = VersionInfo.Version,
-                        Bridge = health.BridgeVersion,
-                        UnityPlugin = health.UnityPluginVersion
-                    } : null,
-                    VersionMismatch = versionCheck?.HasMismatch ?? false,
-                    PluginAhead = versionCheck?.PluginAhead ?? false,
+                        Bridge = health?.BridgeVersion,
+                        UnityPlugin = pluginVersion,
+                        UnityPluginSource = pluginVersion != null ? pluginVersionSource : null
+                    },
+                    VersionMismatch = versionCheck.HasMismatch,
+                    PluginAhead = versionCheck.PluginAhead,
                     EnforceVersionMatch = enforced
                 };
                 Console.WriteLine(JsonHelper.Serialize(jsonResult));
 
-                // Error only when plugin is ahead (team member updated package, tools need sync)
-                if (enforced && versionCheck is { PluginAhead: true })
+                if (enforced && versionCheck.PluginAhead)
                 {
                     context.ExitCode = 1;
                 }
@@ -156,17 +163,12 @@ public static class StatusCommand
             {
                 PrintHumanReadableStatus(result, unityStatus.Message, health, detectedDialogs);
 
-                // Version information (in human-readable mode, handled after the rest of status)
-                if (health != null)
-                {
-                    Console.WriteLine();
-                    var enforced = VersionCheck.IsEnforced(projectRoot);
-                    var versionResult = PrintVersionInfo(health, enforced);
+                Console.WriteLine();
+                var versionResult = PrintVersionInfo(versionCheck, enforced, health != null, pluginVersionSource);
 
-                    if (enforced && versionResult.PluginAhead)
-                    {
-                        context.ExitCode = 1;
-                    }
+                if (enforced && versionResult.PluginAhead)
+                {
+                    context.ExitCode = 1;
                 }
             }
         });
@@ -272,41 +274,40 @@ public static class StatusCommand
 
     }
 
-    private static VersionCheck.VersionCheckResult PrintVersionInfo(HealthResult health, bool enforced)
+    private static VersionCheck.VersionCheckResult PrintVersionInfo(VersionCheck.VersionCheckResult result, bool enforced, bool bridgeConnected, string pluginSource)
     {
-        var result = VersionCheck.Check(health);
-
         if (!result.HasMismatch)
         {
-            if (result.PluginVersion != null)
-            {
-                Console.WriteLine($"Versions: {result.CliVersion} (all match)");
-            }
-            else
-            {
-                Console.WriteLine($"Versions: {result.CliVersion} (plugin not connected)");
-            }
+            var suffix = result.PluginVersion != null ? "all match" : "plugin not installed";
+            Console.WriteLine($"Versions: {result.CliVersion} ({suffix})");
         }
         else if (enforced && result.PluginAhead)
         {
-            // Plugin is newer than CLI/Bridge — someone updated the package, tools need sync
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine("ERROR: Unity plugin is newer than CLI/Bridge (enforce-version-match is enabled)!");
             Console.ResetColor();
-            Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
+            PrintVersionDetails(result, bridgeConnected, pluginSource);
             Console.WriteLine("  Run 'unityctl update' to sync all components.");
         }
         else
         {
-            // CLI/Bridge ahead of plugin, or enforcement disabled — warn only
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("WARNING: Version mismatch!");
             Console.ResetColor();
-            Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {result.BridgeVersion ?? "N/A"}, Plugin: {result.PluginVersion ?? "N/A"}");
+            PrintVersionDetails(result, bridgeConnected, pluginSource);
             Console.WriteLine("  Run 'unityctl update' to sync all components to the same version.");
         }
 
         return result;
+    }
+
+    private static void PrintVersionDetails(VersionCheck.VersionCheckResult result, bool bridgeConnected, string pluginSource)
+    {
+        var bridgeLabel = bridgeConnected ? (result.BridgeVersion ?? "N/A") : "not running";
+        var pluginLabel = result.PluginVersion != null
+            ? $"{result.PluginVersion} (from {pluginSource})"
+            : "N/A";
+        Console.WriteLine($"  CLI: {result.CliVersion ?? "N/A"}, Bridge: {bridgeLabel}, Plugin: {pluginLabel}");
     }
 
 }
