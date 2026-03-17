@@ -139,20 +139,9 @@ public static class ConfigCommands
 
     private static string GetConfigDir()
     {
-        // Look for existing config in current directory tree
-        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (current != null)
-        {
-            var configDir = Path.Combine(current.FullName, ProjectLocator.BridgeConfigDir);
-            if (Directory.Exists(configDir))
-            {
-                return configDir;
-            }
-            current = current.Parent;
-        }
-
-        // Default to current directory
-        return Path.Combine(Directory.GetCurrentDirectory(), ProjectLocator.BridgeConfigDir);
+        return ProjectLocator.FindConfigDirectory()
+            ?? ProjectLocator.FindDotUnityctlDirectory()
+            ?? Path.Combine(Directory.GetCurrentDirectory(), ProjectLocator.BridgeConfigDir);
     }
 
     private static string GetConfigPath()

@@ -71,6 +71,40 @@ public static class ProjectLocator
     }
 
     /// <summary>
+    /// Walks up from startPath (or CWD) to find the nearest .unityctl/ directory.
+    /// Returns the .unityctl/ directory path, or null if none found.
+    /// </summary>
+    public static string? FindDotUnityctlDirectory(string? startPath = null)
+    {
+        var current = startPath != null ? new DirectoryInfo(startPath) : new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (current != null)
+        {
+            var candidate = Path.Combine(current.FullName, BridgeConfigDir);
+            if (Directory.Exists(candidate))
+                return candidate;
+            current = current.Parent;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Walks up from startPath (or CWD) to find the nearest .unityctl/ directory
+    /// that contains config.json. Returns the .unityctl/ directory path, or null if none found.
+    /// </summary>
+    public static string? FindConfigDirectory(string? startPath = null)
+    {
+        var current = startPath != null ? new DirectoryInfo(startPath) : new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (current != null)
+        {
+            var candidate = Path.Combine(current.FullName, BridgeConfigDir);
+            if (File.Exists(Path.Combine(candidate, ConfigFile)))
+                return candidate;
+            current = current.Parent;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Finds the Unity project root by looking for .unityctl/config.json or ProjectSettings/ProjectVersion.txt
     /// </summary>
     public static string? FindProjectRoot(string? startPath = null)

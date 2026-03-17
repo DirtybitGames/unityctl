@@ -20,10 +20,10 @@ public static class VersionCheck
     {
         try
         {
-            var root = projectRoot ?? ProjectLocator.FindProjectRoot();
-            if (root == null) return false;
+            var configDir = ProjectLocator.FindConfigDirectory(projectRoot);
+            if (configDir == null) return false;
 
-            var configPath = Path.Combine(root, ProjectLocator.BridgeConfigDir, ProjectLocator.ConfigFile);
+            var configPath = Path.Combine(configDir, ProjectLocator.ConfigFile);
             if (!File.Exists(configPath)) return false;
 
             var content = File.ReadAllText(configPath);

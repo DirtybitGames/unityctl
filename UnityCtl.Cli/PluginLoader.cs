@@ -238,15 +238,7 @@ public static class PluginLoader
     /// </summary>
     public static string? FindDotUnityctlDirectory()
     {
-        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, ".unityctl");
-            if (Directory.Exists(candidate))
-                return candidate;
-            current = current.Parent;
-        }
-        return null;
+        return ProjectLocator.FindDotUnityctlDirectory();
     }
 
     public static string? GetProjectPluginsDirectory()
