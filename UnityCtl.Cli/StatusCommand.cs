@@ -60,6 +60,11 @@ public static class StatusCommand
                     // Process has exited
                     bridgeRunning = false;
                 }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    // Access denied - PID reused by a process we can't query
+                    bridgeRunning = false;
+                }
 
                 // If bridge is running, check if Unity is connected
                 if (bridgeRunning)

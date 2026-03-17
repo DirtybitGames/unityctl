@@ -224,6 +224,10 @@ public class BridgeClient
             {
                 // Process has exited - stale config, continue to start new bridge
             }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Access denied - PID reused by a process we can't query, stale config
+            }
         }
 
         Console.WriteLine($"Starting bridge for project: {projectRoot}");
