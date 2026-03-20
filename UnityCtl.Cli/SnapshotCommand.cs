@@ -155,9 +155,35 @@ public static class SnapshotCommand
                 if (result.OpenedFromInstanceId.HasValue)
                     sb.AppendLine($"Opened from: [i:{result.OpenedFromInstanceId}]");
             }
+            else if (result.Scenes is { Length: > 1 })
+            {
+                // Multi-scene mode
+                var playIndicator = result.IsPlaying ? " (playing)" : "";
+                sb.AppendLine($"{result.Scenes.Length} scenes loaded{playIndicator}");
+                sb.AppendLine($"{result.RootObjectCount} root objects");
+                sb.AppendLine();
+
+                foreach (var scene in result.Scenes)
+                {
+                    var activeMarker = scene.IsActive ? " [active]" : "";
+                    sb.AppendLine($"--- {scene.SceneName} ({scene.ScenePath}){activeMarker} ---");
+                    sb.AppendLine($"{scene.RootObjectCount} root objects");
+                    sb.AppendLine();
+
+                    foreach (var obj in scene.Objects)
+                    {
+                        FormatObject(sb, obj, 0, components, interactive, layout, isDrillDown);
+                    }
+
+                    sb.AppendLine();
+                }
+
+                Console.Write(sb.ToString());
+                return;
+            }
             else
             {
-                // Scene mode
+                // Single scene mode
                 var playIndicator = result.IsPlaying ? " (playing)" : "";
                 sb.AppendLine($"Scene: {result.SceneName}{playIndicator}");
             }

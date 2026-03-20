@@ -374,4 +374,99 @@ public class SnapshotTests : IAsyncLifetime
         var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.Snapshot);
         Assert.Equal("Assets/Prefabs/TestGroup.prefab", received.Args?["prefabPath"]?.ToString());
     }
+
+    // --- Multi-scene support ---
+
+    [Fact]
+    public async Task Snapshot_MultipleScenes_IncludesScenesArray()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.Snapshot, _ => new SnapshotResult
+        {
+            Stage = "scene (editing)",
+            SceneName = "MainScene",
+            ScenePath = "Assets/Scenes/MainScene.unity",
+            IsPlaying = false,
+            RootObjectCount = 3,
+            Objects = new[]
+            {
+                new SnapshotObject { InstanceId = 100, Name = "Camera" },
+                new SnapshotObject { InstanceId = 200, Name = "Player" },
+                new SnapshotObject { InstanceId = 300, Name = "Enemy" }
+            },
+            Scenes = new[]
+            {
+                new SnapshotSceneInfo
+                {
+                    SceneName = "MainScene",
+                    ScenePath = "Assets/Scenes/MainScene.unity",
+                    IsActive = true,
+                    RootObjectCount = 2,
+                    Objects = new[]
+                    {
+                        new SnapshotObject { InstanceId = 100, Name = "Camera" },
+                        new SnapshotObject { InstanceId = 200, Name = "Player" }
+                    }
+                },
+                new SnapshotSceneInfo
+                {
+                    SceneName = "Level2",
+                    ScenePath = "Assets/Scenes/Level2.unity",
+                    IsActive = false,
+                    RootObjectCount = 1,
+                    Objects = new[]
+                    {
+                        new SnapshotObject { InstanceId = 300, Name = "Enemy" }
+                    }
+                }
+            }
+        });
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.Snapshot);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+
+        // Top-level fields still present for backward compat
+        Assert.Equal("MainScene", result["sceneName"]?.ToString());
+        Assert.Equal(3, result["rootObjectCount"]?.Value<int>());
+        Assert.Equal(3, (result["objects"] as JArray)?.Count);
+
+        // Scenes array present with per-scene breakdown
+        var scenes = result["scenes"] as JArray;
+        Assert.NotNull(scenes);
+        Assert.Equal(2, scenes!.Count);
+
+        var scene1 = scenes[0] as JObject;
+        Assert.Equal("MainScene", scene1?["sceneName"]?.ToString());
+        Assert.True(scene1?["isActive"]?.Value<bool>());
+        Assert.Equal(2, scene1?["rootObjectCount"]?.Value<int>());
+        Assert.Equal(2, (scene1?["objects"] as JArray)?.Count);
+
+        var scene2 = scenes[1] as JObject;
+        Assert.Equal("Level2", scene2?["sceneName"]?.ToString());
+        Assert.False(scene2?["isActive"]?.Value<bool>());
+        Assert.Equal(1, scene2?["rootObjectCount"]?.Value<int>());
+    }
+
+    [Fact]
+    public async Task Snapshot_SingleScene_OmitsScenesArray()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.Snapshot, _ => new SnapshotResult
+        {
+            Stage = "scene (editing)",
+            SceneName = "MainScene",
+            ScenePath = "Assets/Scenes/MainScene.unity",
+            IsPlaying = false,
+            RootObjectCount = 1,
+            Objects = new[] { new SnapshotObject { InstanceId = 100, Name = "Camera" } }
+            // Scenes is null — single scene
+        });
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.Snapshot);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Null(result["scenes"]); // Not emitted for single scene
+        Assert.Equal("MainScene", result["sceneName"]?.ToString());
+    }
 }

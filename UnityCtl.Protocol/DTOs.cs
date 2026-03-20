@@ -405,6 +405,27 @@ public class SnapshotResult
 
     [JsonProperty("objects")]
     public required SnapshotObject[] Objects { get; init; }
+
+    [JsonProperty("scenes", NullValueHandling = NullValueHandling.Ignore)]
+    public SnapshotSceneInfo[]? Scenes { get; init; }
+}
+
+public class SnapshotSceneInfo
+{
+    [JsonProperty("sceneName")]
+    public string SceneName { get; set; } = "";
+
+    [JsonProperty("scenePath")]
+    public string ScenePath { get; set; } = "";
+
+    [JsonProperty("isActive")]
+    public bool IsActive { get; set; }
+
+    [JsonProperty("rootObjectCount")]
+    public int RootObjectCount { get; set; }
+
+    [JsonProperty("objects")]
+    public SnapshotObject[] Objects { get; set; } = Array.Empty<SnapshotObject>();
 }
 
 public class SnapshotObject

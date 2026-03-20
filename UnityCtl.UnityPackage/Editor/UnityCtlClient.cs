@@ -1543,24 +1543,51 @@ namespace UnityCtl
                 };
             }
 
-            // Normal scene mode
+            // Normal scene mode — snapshot all loaded scenes
             var activeScene = SceneManager.GetActiveScene();
-            var sceneRoots = activeScene.GetRootGameObjects();
+            var isPlaying = EditorApplication.isPlaying;
+            var sceneCount = SceneManager.sceneCount;
 
-            var filtered = string.IsNullOrEmpty(filter)
-                ? sceneRoots
-                : sceneRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+            var allScenes = new List<Protocol.SnapshotSceneInfo>();
+            var allObjects = new List<Protocol.SnapshotObject>();
+            var totalRootCount = 0;
+
+            for (int i = 0; i < sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded) continue;
+
+                var roots = scene.GetRootGameObjects();
+                var filteredRoots = string.IsNullOrEmpty(filter)
+                    ? roots
+                    : roots.Where(go => MatchesFilter(go, filter)).ToArray();
+
+                var serialized = filteredRoots
+                    .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
+                    .ToArray();
+
+                allScenes.Add(new Protocol.SnapshotSceneInfo
+                {
+                    SceneName = scene.name,
+                    ScenePath = scene.path,
+                    IsActive = scene == activeScene,
+                    RootObjectCount = roots.Length,
+                    Objects = serialized
+                });
+
+                allObjects.AddRange(serialized);
+                totalRootCount += roots.Length;
+            }
 
             return new Protocol.SnapshotResult
             {
                 Stage = currentStage.Stage,
                 SceneName = activeScene.name,
                 ScenePath = activeScene.path,
-                IsPlaying = EditorApplication.isPlaying,
-                RootObjectCount = sceneRoots.Length,
-                Objects = filtered
-                    .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
-                    .ToArray()
+                IsPlaying = isPlaying,
+                RootObjectCount = totalRootCount,
+                Objects = allObjects.ToArray(),
+                Scenes = allScenes.Count > 1 ? allScenes.ToArray() : null
             };
         }
 
