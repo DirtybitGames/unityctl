@@ -462,16 +462,20 @@ namespace UnityCtl
                         break;
 
                     case UnityCtlCommands.PlayPause:
-                        if (!EditorApplication.isPlaying)
+                        EditorApplication.isPaused = !EditorApplication.isPaused;
+                        if (EditorApplication.isPlaying)
                         {
-                            result = new PlayModeResult { State = "NotPlaying" };
-                        }
-                        else
-                        {
-                            EditorApplication.isPaused = !EditorApplication.isPaused;
                             result = new PlayModeResult
                             {
                                 State = EditorApplication.isPaused ? PlayModeState.Paused : PlayModeState.Playing
+                            };
+                        }
+                        else
+                        {
+                            // In edit mode: pre-arm pause so play mode starts paused on first frame
+                            result = new PlayModeResult
+                            {
+                                State = EditorApplication.isPaused ? PlayModeState.PauseOnPlay : PlayModeState.Stopped
                             };
                         }
                         break;

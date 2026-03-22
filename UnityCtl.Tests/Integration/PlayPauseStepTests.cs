@@ -50,16 +50,31 @@ public class PlayPauseStepTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PlayPause_WhenNotPlaying_ReturnsNotPlaying()
+    public async Task PlayPause_WhenNotPlaying_ReturnsPauseOnPlay()
     {
+        // Toggling pause in edit mode arms "pause on play" so play mode starts paused
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayPause, _ =>
-            new PlayModeResult { State = "NotPlaying" });
+            new PlayModeResult { State = PlayModeState.PauseOnPlay });
 
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayPause);
 
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
-        Assert.Equal("NotPlaying", result["state"]?.ToString());
+        Assert.Equal(PlayModeState.PauseOnPlay, result["state"]?.ToString());
+    }
+
+    [Fact]
+    public async Task PlayPause_WhenNotPlayingAndAlreadyArmed_ReturnsStopped()
+    {
+        // Toggling pause again in edit mode disarms "pause on play"
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayPause, _ =>
+            new PlayModeResult { State = PlayModeState.Stopped });
+
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayPause);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("stopped", result["state"]?.ToString());
     }
 
     // ── play.step ───────────────────────────────────────────────────────

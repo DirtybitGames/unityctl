@@ -82,6 +82,7 @@ public static class PlayModeState
     public const string Paused = "paused";
     public const string Stopped = "stopped";
     public const string Transitioning = "transitioning";
+    public const string PauseOnPlay = "pauseOnPlay";
 }
 
 public static class LogLevel
