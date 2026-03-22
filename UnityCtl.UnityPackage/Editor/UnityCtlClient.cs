@@ -457,39 +457,31 @@ namespace UnityCtl
                         {
                             State = EditorApplication.isPlaying
                                 ? (EditorApplication.isPaused ? PlayModeState.Paused : PlayModeState.Playing)
-                                : PlayModeState.Stopped
+                                : PlayModeState.Stopped,
+                            PauseOnPlay = EditorApplication.isPaused && !EditorApplication.isPlaying
                         };
                         break;
 
                     case UnityCtlCommands.PlayPause:
                         EditorApplication.isPaused = !EditorApplication.isPaused;
-                        if (EditorApplication.isPlaying)
+                        result = new PlayModeResult
                         {
-                            result = new PlayModeResult
-                            {
-                                State = EditorApplication.isPaused ? PlayModeState.Paused : PlayModeState.Playing
-                            };
-                        }
-                        else
-                        {
-                            // In edit mode: pre-arm pause so play mode starts paused on first frame
-                            result = new PlayModeResult
-                            {
-                                State = EditorApplication.isPaused ? PlayModeState.PauseOnPlay : PlayModeState.Stopped
-                            };
-                        }
+                            State = EditorApplication.isPlaying
+                                ? (EditorApplication.isPaused ? PlayModeState.Paused : PlayModeState.Playing)
+                                : PlayModeState.Stopped,
+                            PauseOnPlay = EditorApplication.isPaused && !EditorApplication.isPlaying
+                        };
                         break;
 
                     case UnityCtlCommands.PlayStep:
                         if (!EditorApplication.isPlaying)
                         {
-                            result = new PlayModeResult { State = "NotPlaying" };
+                            SendResponseError(request.RequestId, "NOT_PLAYING",
+                                "Cannot step: not in play mode");
+                            return;
                         }
-                        else
-                        {
-                            EditorApplication.Step();
-                            result = new PlayModeResult { State = "stepped" };
-                        }
+                        EditorApplication.Step();
+                        result = new PlayModeResult { State = PlayModeState.Paused };
                         break;
 
                     case UnityCtlCommands.AssetImport:

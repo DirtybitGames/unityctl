@@ -89,7 +89,9 @@ public static class PlayCommands
 
             if (result != null)
             {
-                Console.WriteLine($"Play mode: {result.State}");
+                var line = $"Play mode: {result.State}";
+                if (result.PauseOnPlay) line += " (pause on play armed)";
+                Console.WriteLine(line);
             }
         }
     }
