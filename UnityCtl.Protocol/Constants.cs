@@ -15,6 +15,8 @@ public static class UnityCtlCommands
     public const string PlayEnter = "play.enter";
     public const string PlayExit = "play.exit";
     public const string PlayStatus = "play.status";
+    public const string PlayPause = "play.pause";
+    public const string PlayStep = "play.step";
 
     // Menu items
     public const string MenuList = "menu.list";
@@ -77,6 +79,7 @@ public static class ResponseStatus
 public static class PlayModeState
 {
     public const string Playing = "playing";
+    public const string Paused = "paused";
     public const string Stopped = "stopped";
     public const string Transitioning = "transitioning";
 }
