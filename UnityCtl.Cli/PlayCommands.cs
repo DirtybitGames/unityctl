@@ -30,9 +30,21 @@ public static class PlayCommands
         statusCommand.SetHandler(async (InvocationContext context) =>
             await HandlePlayCommand(context, UnityCtlCommands.PlayStatus));
 
+        // play pause
+        var pauseCommand = new Command("pause", "Pause or unpause play mode (toggle)");
+        pauseCommand.SetHandler(async (InvocationContext context) =>
+            await HandlePlayCommand(context, UnityCtlCommands.PlayPause));
+
+        // play step
+        var stepCommand = new Command("step", "Advance one frame (while paused)");
+        stepCommand.SetHandler(async (InvocationContext context) =>
+            await HandlePlayCommand(context, UnityCtlCommands.PlayStep));
+
         playCommand.AddCommand(enterCommand);
         playCommand.AddCommand(exitCommand);
         playCommand.AddCommand(statusCommand);
+        playCommand.AddCommand(pauseCommand);
+        playCommand.AddCommand(stepCommand);
         return playCommand;
     }
 
@@ -77,7 +89,9 @@ public static class PlayCommands
 
             if (result != null)
             {
-                Console.WriteLine($"Play mode: {result.State}");
+                var line = $"Play mode: {result.State}";
+                if (result.PauseOnPlay) line += " (pause on play armed)";
+                Console.WriteLine(line);
             }
         }
     }

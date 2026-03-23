@@ -455,8 +455,33 @@ namespace UnityCtl
                     case UnityCtlCommands.PlayStatus:
                         result = new PlayModeResult
                         {
-                            State = EditorApplication.isPlaying ? PlayModeState.Playing : PlayModeState.Stopped
+                            State = EditorApplication.isPlaying
+                                ? (EditorApplication.isPaused ? PlayModeState.Paused : PlayModeState.Playing)
+                                : PlayModeState.Stopped,
+                            PauseOnPlay = EditorApplication.isPaused && !EditorApplication.isPlaying
                         };
+                        break;
+
+                    case UnityCtlCommands.PlayPause:
+                        EditorApplication.isPaused = !EditorApplication.isPaused;
+                        result = new PlayModeResult
+                        {
+                            State = EditorApplication.isPlaying
+                                ? (EditorApplication.isPaused ? PlayModeState.Paused : PlayModeState.Playing)
+                                : PlayModeState.Stopped,
+                            PauseOnPlay = EditorApplication.isPaused && !EditorApplication.isPlaying
+                        };
+                        break;
+
+                    case UnityCtlCommands.PlayStep:
+                        if (!EditorApplication.isPlaying)
+                        {
+                            SendResponseError(request.RequestId, "NOT_PLAYING",
+                                "Cannot step: not in play mode");
+                            return;
+                        }
+                        EditorApplication.Step();
+                        result = new PlayModeResult { State = PlayModeState.Paused };
                         break;
 
                     case UnityCtlCommands.AssetImport:

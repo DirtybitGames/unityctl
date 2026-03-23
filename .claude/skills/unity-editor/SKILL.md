@@ -33,6 +33,8 @@ unityctl asset refresh       # Compile scripts, returns errors on failure
 
 # Play Mode
 unityctl play enter/exit     # Enter or exit play mode
+unityctl play pause          # Toggle pause (works in edit mode too — arms pause-on-play)
+unityctl play step           # Advance one frame (only in play mode)
 
 # Logs
 unityctl logs                # Show logs since last clear (auto-clears on play/compile)

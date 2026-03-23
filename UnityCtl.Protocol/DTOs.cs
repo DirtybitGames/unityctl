@@ -65,6 +65,9 @@ public class PlayModeResult
 {
     [JsonProperty("state")]
     public required string State { get; init; }
+
+    [JsonProperty("pauseOnPlay", DefaultValueHandling = DefaultValueHandling.Ignore)]
+    public bool PauseOnPlay { get; init; }
 }
 
 public class AssetImportResult
