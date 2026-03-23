@@ -2070,13 +2070,9 @@ namespace UnityCtl
         private static bool? GetInteractable(GameObject go)
         {
             // Check for Selectable (Button, Toggle, Slider, etc.)
-            var selectable = go.GetComponent("Selectable");
+            var selectable = go.GetComponent<Selectable>();
             if (selectable != null)
-            {
-                var interactableProp = selectable.GetType().GetProperty("interactable");
-                if (interactableProp != null)
-                    return (bool)interactableProp.GetValue(selectable);
-            }
+                return selectable.interactable;
 
             // Check for IPointerClickHandler/IPointerDownHandler (catches custom interactive elements)
             foreach (var c in go.GetComponents<Component>())
