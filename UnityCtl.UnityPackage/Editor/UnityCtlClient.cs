@@ -2055,28 +2055,13 @@ namespace UnityCtl
                     return textProp.GetValue(textComponent) as string;
             }
 
-            // Try TextMeshPro
+            // Try TextMeshPro (TMP_Text is the base class for both TextMeshProUGUI and TextMeshPro)
             var tmpComponent = go.GetComponent("TextMeshProUGUI") ?? go.GetComponent("TextMeshPro");
             if (tmpComponent != null)
             {
                 var textProp = tmpComponent.GetType().GetProperty("text");
                 if (textProp != null)
                     return textProp.GetValue(tmpComponent) as string;
-            }
-
-            // Broadened: scan all components for a public string "text" property (catches custom UI)
-            foreach (var c in go.GetComponents<Component>())
-            {
-                if (c == null || c is Transform) continue;
-                var type = c.GetType();
-                // Skip known Unity types already checked above
-                if (type.Name == "Text" || type.Name == "TextMeshProUGUI" || type.Name == "TextMeshPro") continue;
-                var prop = type.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
-                if (prop != null && prop.PropertyType == typeof(string))
-                {
-                    var val = prop.GetValue(c) as string;
-                    if (!string.IsNullOrEmpty(val)) return val;
-                }
             }
 
             return null;
@@ -2093,22 +2078,14 @@ namespace UnityCtl
                     return (bool)interactableProp.GetValue(selectable);
             }
 
-            // Broadened: check for IPointerClickHandler or IPointerDownHandler on any component
-            // (catches custom interactive elements that don't inherit from Selectable)
+            // Check for IPointerClickHandler/IPointerDownHandler (catches custom interactive elements)
             foreach (var c in go.GetComponents<Component>())
             {
                 if (c == null) continue;
                 var type = c.GetType();
                 if (typeof(IPointerClickHandler).IsAssignableFrom(type) ||
                     typeof(IPointerDownHandler).IsAssignableFrom(type))
-                {
-                    // Has a click/pointer handler — check if it has an "interactable" property
-                    var interactableProp = type.GetProperty("interactable", BindingFlags.Public | BindingFlags.Instance);
-                    if (interactableProp != null && interactableProp.PropertyType == typeof(bool))
-                        return (bool)interactableProp.GetValue(c);
-                    // Has handler but no interactable property — assume interactable
                     return true;
-                }
             }
 
             return null;
