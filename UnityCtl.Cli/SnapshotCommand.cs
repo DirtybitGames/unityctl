@@ -30,14 +30,9 @@ public static class SnapshotCommand
             "Include all serialized property values"
         );
 
-        var interactiveOption = new Option<bool>(
-            "--interactive",
-            "Show UI text content and interactable state"
-        );
-
-        var layoutOption = new Option<bool>(
-            "--layout",
-            "Show RectTransform info instead of world position"
+        var screenOption = new Option<bool>(
+            "--screen",
+            "Include screen-space bounds, visibility, and hittability"
         );
 
         var filterOption = new Option<string?>(
@@ -58,8 +53,7 @@ public static class SnapshotCommand
         snapshotCommand.AddOption(idOption);
         snapshotCommand.AddOption(depthOption);
         snapshotCommand.AddOption(componentsOption);
-        snapshotCommand.AddOption(interactiveOption);
-        snapshotCommand.AddOption(layoutOption);
+        snapshotCommand.AddOption(screenOption);
         snapshotCommand.AddOption(filterOption);
         snapshotCommand.AddOption(sceneOption);
         snapshotCommand.AddOption(prefabOption);
@@ -73,8 +67,7 @@ public static class SnapshotCommand
             var id = context.ParseResult.GetValueForOption(idOption);
             var depth = context.ParseResult.GetValueForOption(depthOption);
             var components = context.ParseResult.GetValueForOption(componentsOption);
-            var interactive = context.ParseResult.GetValueForOption(interactiveOption);
-            var layout = context.ParseResult.GetValueForOption(layoutOption);
+            var screen = context.ParseResult.GetValueForOption(screenOption);
             var filter = context.ParseResult.GetValueForOption(filterOption);
             var scene = context.ParseResult.GetValueForOption(sceneOption);
             var prefab = context.ParseResult.GetValueForOption(prefabOption);
@@ -94,8 +87,7 @@ public static class SnapshotCommand
                 { "depth", depth },
                 { "id", id },
                 { "components", components },
-                { "interactive", interactive },
-                { "layout", layout },
+                { "screen", screen },
                 { "filter", filter },
                 { "scenePath", scene },
                 { "prefabPath", prefab }
@@ -125,15 +117,78 @@ public static class SnapshotCommand
 
                 if (result != null)
                 {
-                    FormatSnapshot(result, components, interactive, layout, id.HasValue);
+                    FormatSnapshot(result, components, screen, id.HasValue);
                 }
             }
         });
 
+        // Add query subcommand
+        snapshotCommand.AddCommand(CreateQueryCommand());
+
         return snapshotCommand;
     }
 
-    private static void FormatSnapshot(SnapshotResult result, bool components, bool interactive, bool layout, bool isDrillDown)
+    private static Command CreateQueryCommand()
+    {
+        var queryCommand = new Command("query", "Hit-test at screen coordinates — what's at this pixel?");
+
+        var xArg = new Argument<int>("x", "Screen X coordinate");
+        var yArg = new Argument<int>("y", "Screen Y coordinate");
+
+        queryCommand.AddArgument(xArg);
+        queryCommand.AddArgument(yArg);
+
+        queryCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
+            var x = context.ParseResult.GetValueForArgument(xArg);
+            var y = context.ParseResult.GetValueForArgument(yArg);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) { context.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
+            {
+                { "x", x },
+                { "y", y }
+            };
+
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.SnapshotQuery, args, timeout);
+            if (response == null) { context.ExitCode = 1; return; }
+
+            if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
+                return;
+            }
+
+            if (json)
+            {
+                Console.WriteLine(JsonHelper.Serialize(response.Result));
+            }
+            else
+            {
+                var result = JsonConvert.DeserializeObject<SnapshotQueryResult>(
+                    JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+                    JsonHelper.Settings
+                );
+
+                if (result != null)
+                {
+                    FormatQueryResult(result);
+                }
+            }
+        });
+
+        return queryCommand;
+    }
+
+    private static void FormatSnapshot(SnapshotResult result, bool components, bool screen, bool isDrillDown)
     {
         var sb = new StringBuilder();
 
@@ -172,7 +227,7 @@ public static class SnapshotCommand
 
                     foreach (var obj in scene.Objects)
                     {
-                        FormatObject(sb, obj, 0, components, interactive, layout, isDrillDown);
+                        FormatObject(sb, obj, 0, components, screen, isDrillDown);
                     }
 
                     sb.AppendLine();
@@ -194,13 +249,13 @@ public static class SnapshotCommand
 
         foreach (var obj in result.Objects)
         {
-            FormatObject(sb, obj, 0, components, interactive, layout, isDrillDown);
+            FormatObject(sb, obj, 0, components, screen, isDrillDown);
         }
 
         Console.Write(sb.ToString());
     }
 
-    private static void FormatObject(StringBuilder sb, SnapshotObject obj, int indent, bool components, bool interactive, bool layout, bool isDrillDown)
+    private static void FormatObject(StringBuilder sb, SnapshotObject obj, int indent, bool components, bool screen, bool isDrillDown)
     {
         var prefix = new string(' ', indent * 2);
 
@@ -225,17 +280,12 @@ public static class SnapshotCommand
         // Position/layout info
         if (components)
         {
-            // Full component detail
-            FormatDrillDown(sb, obj, prefix, layout);
+            FormatDrillDown(sb, obj, prefix);
         }
         else
         {
-            // Summary mode
-            if (interactive && !string.IsNullOrEmpty(obj.Text))
-            {
-                sb.AppendLine($"{prefix}  \"{obj.Text}\"{(obj.Interactable == true ? " interactable" : obj.Interactable == false ? " disabled" : "")}");
-            }
-            else if (layout && !string.IsNullOrEmpty(obj.Rect))
+            // UI objects: show rect + text/interactable; 3D objects: show world position
+            if (!string.IsNullOrEmpty(obj.Rect))
             {
                 sb.Append($"{prefix}  {obj.Rect}");
                 if (!string.IsNullOrEmpty(obj.Anchors)) sb.Append($" {obj.Anchors}");
@@ -248,6 +298,41 @@ public static class SnapshotCommand
                 if (!string.IsNullOrEmpty(obj.Scale)) sb.Append($" scale{obj.Scale}");
                 sb.AppendLine();
             }
+
+            // UI text and interactable state (always shown when present)
+            if (!string.IsNullOrEmpty(obj.Text))
+            {
+                sb.Append($"{prefix}  \"{obj.Text}\"");
+                if (obj.Interactable == true) sb.Append(" interactable");
+                else if (obj.Interactable == false) sb.Append(" disabled");
+                sb.AppendLine();
+            }
+            else if (obj.Interactable != null)
+            {
+                sb.AppendLine($"{prefix}  {(obj.Interactable == true ? "interactable" : "disabled")}");
+            }
+        }
+
+        // Screen-space info
+        if (screen && !string.IsNullOrEmpty(obj.ScreenRect))
+        {
+            sb.Append($"{prefix}  {obj.ScreenRect}");
+            if (obj.Visible == true)
+            {
+                sb.Append(" visible");
+                if (obj.Hittable == true)
+                    sb.Append(" hittable");
+                else if (obj.Hittable == false)
+                {
+                    sb.Append(" blocked-by:");
+                    sb.Append(obj.BlockedBy.HasValue ? $"[i:{obj.BlockedBy}]" : "unknown");
+                }
+            }
+            else if (obj.Visible == false)
+            {
+                sb.Append(" off-screen");
+            }
+            sb.AppendLine();
         }
 
         // Children
@@ -255,7 +340,7 @@ public static class SnapshotCommand
         {
             foreach (var child in obj.Children)
             {
-                FormatObject(sb, child, indent + 1, components, interactive, layout, isDrillDown);
+                FormatObject(sb, child, indent + 1, components, screen, isDrillDown);
             }
         }
         else if (obj.ChildCount > 0 && !isDrillDown)
@@ -264,7 +349,7 @@ public static class SnapshotCommand
         }
     }
 
-    private static void FormatDrillDown(StringBuilder sb, SnapshotObject obj, string prefix, bool layout)
+    private static void FormatDrillDown(StringBuilder sb, SnapshotObject obj, string prefix)
     {
         if (obj.Components != null)
         {
@@ -278,7 +363,7 @@ public static class SnapshotCommand
                 if (!string.IsNullOrEmpty(obj.Scale))
                     sb.AppendLine($"{prefix}    localScale: {obj.Scale}");
             }
-            if (layout && !string.IsNullOrEmpty(obj.Rect))
+            if (!string.IsNullOrEmpty(obj.Rect))
             {
                 sb.AppendLine($"{prefix}  RectTransform:");
                 sb.AppendLine($"{prefix}    rect: {obj.Rect}");
@@ -308,6 +393,49 @@ public static class SnapshotCommand
         }
 
         // Children are rendered by FormatObject's recursive loop after this method returns
+    }
+
+    private static void FormatQueryResult(SnapshotQueryResult result)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Hit at ({result.X}, {result.Y}):");
+
+        var hasUi = result.UiHits is { Length: > 0 };
+        var hasWorld = result.WorldHits is { Length: > 0 };
+
+        if (!hasUi && !hasWorld)
+        {
+            sb.AppendLine("  (nothing)");
+            Console.Write(sb.ToString());
+            return;
+        }
+
+        if (hasUi)
+        {
+            sb.AppendLine($"  UI ({result.UiHits!.Length} hits):");
+            for (int i = 0; i < result.UiHits.Length; i++)
+            {
+                var hit = result.UiHits[i];
+                sb.Append($"    {i + 1}. {hit.Name} [i:{hit.InstanceId}] — {hit.Path}");
+                if (!string.IsNullOrEmpty(hit.Text))
+                    sb.Append($" \"{hit.Text}\"");
+                if (hit.Interactable == true) sb.Append(" interactable");
+                else if (hit.Interactable == false) sb.Append(" disabled");
+                sb.AppendLine();
+            }
+        }
+
+        if (hasWorld)
+        {
+            sb.AppendLine($"  3D ({result.WorldHits!.Length} hits):");
+            for (int i = 0; i < result.WorldHits.Length; i++)
+            {
+                var hit = result.WorldHits[i];
+                sb.AppendLine($"    {i + 1}. {hit.Name} [i:{hit.InstanceId}] — {hit.Path}  dist:{hit.Distance:F1}");
+            }
+        }
+
+        Console.Write(sb.ToString());
     }
 
     private static void FormatPropertyValue(StringBuilder sb, string key, object value, string indent)

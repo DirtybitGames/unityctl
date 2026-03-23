@@ -13,7 +13,9 @@ using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using UnityCtl.Protocol;
 
 namespace UnityCtl
@@ -541,6 +543,10 @@ namespace UnityCtl
 
                     case UnityCtlCommands.Snapshot:
                         result = HandleSnapshot(request);
+                        break;
+
+                    case UnityCtlCommands.SnapshotQuery:
+                        result = HandleSnapshotQuery(request);
                         break;
 
                     case UnityCtlCommands.PrefabOpen:
@@ -1413,8 +1419,7 @@ namespace UnityCtl
             var depth = GetIntArgument(request, "depth") ?? 2;
             var targetId = GetIntArgument(request, "id");
             var includeComponents = GetBoolArgument(request, "components");
-            var interactive = GetBoolArgument(request, "interactive");
-            var layout = GetBoolArgument(request, "layout");
+            var screen = GetBoolArgument(request, "screen");
             var filter = GetStringArgument(request, "filter");
             var scenePath = GetStringArgument(request, "scenePath");
             var prefabPath = GetStringArgument(request, "prefabPath");
@@ -1451,7 +1456,7 @@ namespace UnityCtl
                     PrefabAssetPath = prefabPath,
                     IsPlaying = EditorApplication.isPlaying,
                     RootObjectCount = 1,
-                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout)).ToArray()
+                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, screen)).ToArray()
                 };
             }
 
@@ -1489,7 +1494,7 @@ namespace UnityCtl
                             ScenePath = scene.path,
                             IsPlaying = false,
                             RootObjectCount = 1,
-                            Objects = sceneIdRoots.Select(g => SerializeGameObject(g, depth, includeComponents, interactive, layout)).ToArray()
+                            Objects = sceneIdRoots.Select(g => SerializeGameObject(g, depth, includeComponents, screen)).ToArray()
                         };
                     }
 
@@ -1506,7 +1511,7 @@ namespace UnityCtl
                         IsPlaying = false,
                         RootObjectCount = roots.Length,
                         Objects = filteredRoots
-                            .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
+                            .Select(go => SerializeGameObject(go, depth, includeComponents, screen))
                             .ToArray()
                     };
                 }
@@ -1538,7 +1543,7 @@ namespace UnityCtl
                     IsPlaying = EditorApplication.isPlaying,
                     RootObjectCount = 1,
                     Objects = matches
-                        ? new[] { SerializeGameObject(go, depth, includeComponents, interactive, layout) }
+                        ? new[] { SerializeGameObject(go, depth, includeComponents, screen) }
                         : Array.Empty<Protocol.SnapshotObject>()
                 };
             }
@@ -1564,7 +1569,7 @@ namespace UnityCtl
                     OpenedFromInstanceId = currentStage.OpenedFromInstanceId,
                     IsPlaying = false,
                     RootObjectCount = 1,
-                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout)).ToArray()
+                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, screen)).ToArray()
                 };
             }
 
@@ -1588,7 +1593,7 @@ namespace UnityCtl
                     : roots.Where(go => MatchesFilter(go, filter)).ToArray();
 
                 var serialized = filteredRoots
-                    .Select(go => SerializeGameObject(go, depth, includeComponents, interactive, layout))
+                    .Select(go => SerializeGameObject(go, depth, includeComponents, screen))
                     .ToArray();
 
                 allScenes.Add(new Protocol.SnapshotSceneInfo
@@ -1748,7 +1753,7 @@ namespace UnityCtl
         }
 
         private static Protocol.SnapshotObject SerializeGameObject(
-            GameObject go, int depth, bool includeComponents, bool interactive, bool layout)
+            GameObject go, int depth, bool includeComponents, bool screen)
         {
             var t = go.transform;
             var obj = new Protocol.SnapshotObject
@@ -1781,7 +1786,8 @@ namespace UnityCtl
                     obj.PrefabAssetType = "Model";
             }
 
-            if (layout && t is RectTransform rt)
+            // Auto-detect UI vs 3D: RectTransform → show rect layout; otherwise → world position
+            if (t is RectTransform rt)
             {
                 obj.Rect = string.Format(System.Globalization.CultureInfo.InvariantCulture,
                     "rect({0:F0}, {1:F0}, {2:F0}, {3:F0})", rt.rect.x, rt.rect.y, rt.rect.width, rt.rect.height);
@@ -1799,10 +1805,14 @@ namespace UnityCtl
                     obj.Rotation = FormatQuaternion(t.localRotation);
             }
 
-            if (interactive)
+            // Always emit UI text and interactable state (no flag needed)
+            obj.Text = GetUIText(go);
+            obj.Interactable = GetInteractable(go);
+
+            // Screen-space info
+            if (screen)
             {
-                obj.Text = GetUIText(go);
-                obj.Interactable = GetInteractable(go);
+                ComputeScreenSpaceInfo(go, obj);
             }
 
             if (depth > 0 && t.childCount > 0)
@@ -1810,7 +1820,7 @@ namespace UnityCtl
                 obj.Children = new Protocol.SnapshotObject[t.childCount];
                 for (int i = 0; i < t.childCount; i++)
                     obj.Children[i] = SerializeGameObject(
-                        t.GetChild(i).gameObject, depth - 1, includeComponents, interactive, layout);
+                        t.GetChild(i).gameObject, depth - 1, includeComponents, screen);
             }
 
             return obj;
@@ -2054,6 +2064,21 @@ namespace UnityCtl
                     return textProp.GetValue(tmpComponent) as string;
             }
 
+            // Broadened: scan all components for a public string "text" property (catches custom UI)
+            foreach (var c in go.GetComponents<Component>())
+            {
+                if (c == null || c is Transform) continue;
+                var type = c.GetType();
+                // Skip known Unity types already checked above
+                if (type.Name == "Text" || type.Name == "TextMeshProUGUI" || type.Name == "TextMeshPro") continue;
+                var prop = type.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
+                if (prop != null && prop.PropertyType == typeof(string))
+                {
+                    var val = prop.GetValue(c) as string;
+                    if (!string.IsNullOrEmpty(val)) return val;
+                }
+            }
+
             return null;
         }
 
@@ -2068,7 +2093,338 @@ namespace UnityCtl
                     return (bool)interactableProp.GetValue(selectable);
             }
 
+            // Broadened: check for IPointerClickHandler or IPointerDownHandler on any component
+            // (catches custom interactive elements that don't inherit from Selectable)
+            foreach (var c in go.GetComponents<Component>())
+            {
+                if (c == null) continue;
+                var type = c.GetType();
+                if (typeof(IPointerClickHandler).IsAssignableFrom(type) ||
+                    typeof(IPointerDownHandler).IsAssignableFrom(type))
+                {
+                    // Has a click/pointer handler — check if it has an "interactable" property
+                    var interactableProp = type.GetProperty("interactable", BindingFlags.Public | BindingFlags.Instance);
+                    if (interactableProp != null && interactableProp.PropertyType == typeof(bool))
+                        return (bool)interactableProp.GetValue(c);
+                    // Has handler but no interactable property — assume interactable
+                    return true;
+                }
+            }
+
             return null;
+        }
+
+        private static void ComputeScreenSpaceInfo(GameObject go, Protocol.SnapshotObject obj)
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+
+            var t = go.transform;
+
+            if (t is RectTransform rt)
+            {
+                // UI element — get screen-space bounds from RectTransform corners
+                var canvas = go.GetComponentInParent<Canvas>();
+                if (canvas == null) return;
+
+                var corners = new Vector3[4];
+                rt.GetWorldCorners(corners);
+
+                Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera ?? cam;
+
+                float minX = float.MaxValue, minY = float.MaxValue;
+                float maxX = float.MinValue, maxY = float.MinValue;
+
+                for (int i = 0; i < 4; i++)
+                {
+                    Vector2 screenPoint;
+                    if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+                    {
+                        screenPoint = corners[i];
+                    }
+                    else
+                    {
+                        screenPoint = RectTransformUtility.WorldToScreenPoint(canvasCam, corners[i]);
+                    }
+                    if (screenPoint.x < minX) minX = screenPoint.x;
+                    if (screenPoint.y < minY) minY = screenPoint.y;
+                    if (screenPoint.x > maxX) maxX = screenPoint.x;
+                    if (screenPoint.y > maxY) maxY = screenPoint.y;
+                }
+
+                var w = maxX - minX;
+                var h = maxY - minY;
+                obj.ScreenRect = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "screen({0:F0}, {1:F0}, {2:F0}, {3:F0})", minX, minY, w, h);
+
+                // Visible if on screen
+                obj.Visible = minX < Screen.width && maxX > 0 && minY < Screen.height && maxY > 0;
+
+                // Hittability: raycast at center to check if this element is the top hit
+                if (obj.Visible == true && obj.Interactable != null)
+                {
+                    var centerX = (minX + maxX) / 2f;
+                    var centerY = (minY + maxY) / 2f;
+                    var hitId = GetUIHitAtPoint(new Vector2(centerX, centerY), canvas);
+                    if (hitId == go.GetInstanceID() || IsDescendantOf(hitId, go))
+                    {
+                        // Hit is self or a child (e.g. button label) — counts as hittable
+                        obj.Hittable = true;
+                    }
+                    else if (hitId != 0)
+                    {
+                        obj.Hittable = false;
+                        obj.BlockedBy = hitId;
+                    }
+                    else
+                    {
+                        obj.Hittable = false;
+                    }
+                }
+            }
+            else
+            {
+                // 3D object — project Renderer bounds to screen
+                var renderer = go.GetComponent<Renderer>();
+                if (renderer == null) return;
+
+                var bounds = renderer.bounds;
+                var center = bounds.center;
+                var extents = bounds.extents;
+
+                // Project all 8 AABB corners
+                float minX = float.MaxValue, minY = float.MaxValue;
+                float maxX = float.MinValue, maxY = float.MinValue;
+                bool allBehind = true;
+
+                for (int i = 0; i < 8; i++)
+                {
+                    var corner = center + new Vector3(
+                        (i & 1) == 0 ? -extents.x : extents.x,
+                        (i & 2) == 0 ? -extents.y : extents.y,
+                        (i & 4) == 0 ? -extents.z : extents.z
+                    );
+                    var screenPoint = cam.WorldToScreenPoint(corner);
+                    if (screenPoint.z > 0) allBehind = false;
+                    if (screenPoint.x < minX) minX = screenPoint.x;
+                    if (screenPoint.y < minY) minY = screenPoint.y;
+                    if (screenPoint.x > maxX) maxX = screenPoint.x;
+                    if (screenPoint.y > maxY) maxY = screenPoint.y;
+                }
+
+                if (allBehind) { obj.Visible = false; return; }
+
+                var screenW = maxX - minX;
+                var screenH = maxY - minY;
+                obj.ScreenRect = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "screen({0:F0}, {1:F0}, {2:F0}, {3:F0})", minX, minY, screenW, screenH);
+
+                obj.Visible = minX < Screen.width && maxX > 0 && minY < Screen.height && maxY > 0;
+
+                // Hittability for 3D: raycast from camera through center
+                if (obj.Visible == true)
+                {
+                    var screenCenter = cam.WorldToScreenPoint(bounds.center);
+                    var ray = cam.ScreenPointToRay(new Vector3(screenCenter.x, screenCenter.y, 0));
+                    if (Physics.Raycast(ray, out RaycastHit hit))
+                    {
+                        if (hit.collider.gameObject == go)
+                            obj.Hittable = true;
+                        else
+                        {
+                            obj.Hittable = false;
+                            obj.BlockedBy = hit.collider.gameObject.GetInstanceID();
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns the instance ID of the top UI element at the given screen point, or 0 if nothing.
+        /// Works in both edit and play mode.
+        /// </summary>
+        private static int GetUIHitAtPoint(Vector2 screenPoint, Canvas canvas = null)
+        {
+            // In play mode, use EventSystem if available
+            if (EditorApplication.isPlaying && EventSystem.current != null)
+            {
+                var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
+                var results = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(pointerData, results);
+                if (results.Count > 0)
+                    return results[0].gameObject.GetInstanceID();
+                return 0;
+            }
+
+            // Edit mode (or no EventSystem): manually check all raycast-target Graphics
+            // sorted by depth (highest sibling index = rendered last = on top)
+            if (canvas == null) return 0;
+
+            Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+            var graphics = canvas.GetComponentsInChildren<Graphic>();
+            int topHitId = 0;
+            int topDepth = int.MinValue;
+
+            foreach (var g in graphics)
+            {
+                if (!g.raycastTarget || !g.gameObject.activeInHierarchy) continue;
+                if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, screenPoint, canvasCam)) continue;
+
+                // Use transform hierarchy depth + sibling index as a proxy for render order
+                // (later siblings render on top in Canvas)
+                int depth = GetCanvasRenderOrder(g.transform, canvas.transform);
+                if (depth > topDepth)
+                {
+                    topDepth = depth;
+                    topHitId = g.gameObject.GetInstanceID();
+                }
+            }
+
+            return topHitId;
+        }
+
+        /// <summary>
+        /// Computes a pre-order traversal index for a transform within a Canvas.
+        /// Unity Canvas renders children depth-first in sibling order — later in pre-order = renders on top.
+        /// </summary>
+        private static int GetCanvasRenderOrder(Transform t, Transform canvasRoot)
+        {
+            int index = 0;
+            if (PreOrderFind(canvasRoot, t, ref index))
+                return index;
+            return -1;
+        }
+
+        private static bool PreOrderFind(Transform current, Transform target, ref int index)
+        {
+            if (current == target) return true;
+            for (int i = 0; i < current.childCount; i++)
+            {
+                index++;
+                if (PreOrderFind(current.GetChild(i), target, ref index))
+                    return true;
+            }
+            return false;
+        }
+
+        private object HandleSnapshotQuery(RequestMessage request)
+        {
+            var x = GetIntArgument(request, "x") ?? throw new ArgumentException("x coordinate is required");
+            var y = GetIntArgument(request, "y") ?? throw new ArgumentException("y coordinate is required");
+
+            var screenPoint = new Vector2(x, y);
+            var uiHits = new List<Protocol.SnapshotQueryHit>();
+            var worldHits = new List<Protocol.SnapshotQueryHit>();
+
+            // UI raycast
+            if (EditorApplication.isPlaying && EventSystem.current != null)
+            {
+                var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
+                var results = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(pointerData, results);
+                foreach (var r in results)
+                {
+                    uiHits.Add(new Protocol.SnapshotQueryHit
+                    {
+                        InstanceId = r.gameObject.GetInstanceID(),
+                        Name = r.gameObject.name,
+                        Path = GetHierarchyPath(r.gameObject),
+                        Distance = r.distance,
+                        Text = GetUIText(r.gameObject),
+                        Interactable = GetInteractable(r.gameObject)
+                    });
+                }
+            }
+            else
+            {
+                // Edit mode: manually check all raycast-target Graphics (sorted by render order)
+                foreach (var canvas in UnityEngine.Object.FindObjectsOfType<Canvas>())
+                {
+                    Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+                    var graphics = canvas.GetComponentsInChildren<Graphic>();
+                    var hits = new List<(Graphic g, int depth)>();
+
+                    foreach (var g in graphics)
+                    {
+                        if (!g.raycastTarget || !g.gameObject.activeInHierarchy) continue;
+                        if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, screenPoint, canvasCam)) continue;
+                        hits.Add((g, GetCanvasRenderOrder(g.transform, canvas.transform)));
+                    }
+
+                    // Sort by depth descending (top-most first)
+                    hits.Sort((a, b) => b.depth.CompareTo(a.depth));
+
+                    foreach (var (g, _) in hits)
+                    {
+                        uiHits.Add(new Protocol.SnapshotQueryHit
+                        {
+                            InstanceId = g.gameObject.GetInstanceID(),
+                            Name = g.gameObject.name,
+                            Path = GetHierarchyPath(g.gameObject),
+                            Distance = 0,
+                            Text = GetUIText(g.gameObject),
+                            Interactable = GetInteractable(g.gameObject)
+                        });
+                    }
+                }
+            }
+
+            // 3D raycast (works in both edit and play mode)
+            var cam = Camera.main;
+            if (cam != null)
+            {
+                var ray = cam.ScreenPointToRay(new Vector3(x, y, 0));
+                var hits = Physics.RaycastAll(ray, Mathf.Infinity);
+                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+                foreach (var h in hits)
+                {
+                    worldHits.Add(new Protocol.SnapshotQueryHit
+                    {
+                        InstanceId = h.collider.gameObject.GetInstanceID(),
+                        Name = h.collider.gameObject.name,
+                        Path = GetHierarchyPath(h.collider.gameObject),
+                        Distance = h.distance
+                    });
+                }
+            }
+
+            return new Protocol.SnapshotQueryResult
+            {
+                X = x,
+                Y = y,
+                UiHits = uiHits.Count > 0 ? uiHits.ToArray() : null,
+                WorldHits = worldHits.Count > 0 ? worldHits.ToArray() : null
+            };
+        }
+
+        /// <summary>
+        /// Returns true if the object with the given instance ID is a descendant of parent.
+        /// </summary>
+        private static bool IsDescendantOf(int instanceId, GameObject parent)
+        {
+            var obj = EditorUtility.InstanceIDToObject(instanceId) as GameObject;
+            if (obj == null) return false;
+            var t = obj.transform;
+            while (t != null)
+            {
+                if (t.gameObject == parent) return true;
+                t = t.parent;
+            }
+            return false;
+        }
+
+        private static string GetHierarchyPath(GameObject go)
+        {
+            var parts = new List<string>();
+            var current = go.transform;
+            while (current != null)
+            {
+                parts.Add(current.name);
+                current = current.parent;
+            }
+            parts.Reverse();
+            return string.Join("/", parts);
         }
 
         private static string FormatVector2(Vector2 v) => string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1})", v.x, v.y);

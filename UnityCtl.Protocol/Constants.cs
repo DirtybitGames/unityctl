@@ -40,6 +40,7 @@ public static class UnityCtlCommands
 
     // Snapshot
     public const string Snapshot = "snapshot";
+    public const string SnapshotQuery = "snapshot.query";
 
     // Prefab stage navigation
     public const string PrefabOpen = "prefab.open";

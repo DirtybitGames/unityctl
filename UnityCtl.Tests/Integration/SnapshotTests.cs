@@ -469,4 +469,187 @@ public class SnapshotTests : IAsyncLifetime
         Assert.Null(result["scenes"]); // Not emitted for single scene
         Assert.Equal("MainScene", result["sceneName"]?.ToString());
     }
+
+    // --- UI info always included (merged --interactive/--layout) ---
+
+    [Fact]
+    public async Task Snapshot_UIInfo_AlwaysIncludedByDefault()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.Snapshot, _ => new SnapshotResult
+        {
+            Stage = "scene (editing)",
+            SceneName = "UIScene",
+            ScenePath = "Assets/Scenes/UIScene.unity",
+            IsPlaying = false,
+            RootObjectCount = 1,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 200,
+                    Name = "Button",
+                    Text = "Click Me",
+                    Interactable = true,
+                    Rect = "rect(0, 0, 200, 50)",
+                    Anchors = "anchor(0.5-0.5, 0.5-0.5)",
+                    Pivot = "(0.5, 0.5)"
+                }
+            }
+        });
+
+        // No --interactive or --layout flags needed — UI info is always included
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.Snapshot);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        var obj = (result["objects"] as JArray)?[0] as JObject;
+        Assert.Equal("Click Me", obj?["text"]?.ToString());
+        Assert.True(obj?["interactable"]?.Value<bool>());
+        Assert.Equal("rect(0, 0, 200, 50)", obj?["rect"]?.ToString());
+    }
+
+    // --- Screen-space info ---
+
+    [Fact]
+    public async Task Snapshot_ScreenFlag_IncludesScreenSpaceInfo()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.Snapshot, _ => new SnapshotResult
+        {
+            Stage = "scene (playing)",
+            SceneName = "MainScene",
+            ScenePath = "Assets/Scenes/MainScene.unity",
+            IsPlaying = true,
+            RootObjectCount = 1,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 300,
+                    Name = "Player",
+                    Position = "(5.0, 2.5, 0.0)",
+                    ScreenRect = "screen(640, 400, 120, 180)",
+                    Visible = true,
+                    Hittable = true
+                }
+            }
+        });
+
+        var args = new Dictionary<string, object?> { ["screen"] = true };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.Snapshot, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        var obj = (result["objects"] as JArray)?[0] as JObject;
+        Assert.Equal("screen(640, 400, 120, 180)", obj?["screenRect"]?.ToString());
+        Assert.True(obj?["visible"]?.Value<bool>());
+        Assert.True(obj?["hittable"]?.Value<bool>());
+    }
+
+    [Fact]
+    public async Task Snapshot_ScreenFlag_BlockedByReported()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.Snapshot, _ => new SnapshotResult
+        {
+            Stage = "scene (playing)",
+            SceneName = "MainScene",
+            ScenePath = "Assets/Scenes/MainScene.unity",
+            IsPlaying = true,
+            RootObjectCount = 1,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 210,
+                    Name = "HealthBar",
+                    Rect = "rect(0, 0, 300, 20)",
+                    ScreenRect = "screen(0, 580, 300, 20)",
+                    Visible = true,
+                    Hittable = false,
+                    BlockedBy = 250
+                }
+            }
+        });
+
+        var args = new Dictionary<string, object?> { ["screen"] = true };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.Snapshot, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        var obj = (result["objects"] as JArray)?[0] as JObject;
+        Assert.False(obj?["hittable"]?.Value<bool>());
+        Assert.Equal(250, obj?["blockedBy"]?.Value<int>());
+    }
+
+    // --- Snapshot query ---
+
+    [Fact]
+    public async Task SnapshotQuery_ReturnsHits()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.SnapshotQuery, _ => new SnapshotQueryResult
+        {
+            X = 400,
+            Y = 300,
+            UiHits = new[]
+            {
+                new SnapshotQueryHit
+                {
+                    InstanceId = 200,
+                    Name = "Button",
+                    Path = "Canvas/Panel/Button",
+                    Distance = 0,
+                    Text = "Click Me",
+                    Interactable = true
+                }
+            },
+            WorldHits = new[]
+            {
+                new SnapshotQueryHit
+                {
+                    InstanceId = 500,
+                    Name = "Ground",
+                    Path = "Ground",
+                    Distance = 15.2f
+                }
+            }
+        });
+
+        var args = new Dictionary<string, object?> { ["x"] = 400, ["y"] = 300 };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.SnapshotQuery, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal(400, result["x"]?.Value<int>());
+        Assert.Equal(300, result["y"]?.Value<int>());
+
+        var uiHits = result["uiHits"] as JArray;
+        Assert.NotNull(uiHits);
+        Assert.Single(uiHits!);
+        Assert.Equal("Button", uiHits[0]?["name"]?.ToString());
+        Assert.Equal("Canvas/Panel/Button", uiHits[0]?["path"]?.ToString());
+        Assert.Equal("Click Me", uiHits[0]?["text"]?.ToString());
+
+        var worldHits = result["worldHits"] as JArray;
+        Assert.NotNull(worldHits);
+        Assert.Single(worldHits!);
+        Assert.Equal("Ground", worldHits[0]?["name"]?.ToString());
+    }
+
+    [Fact]
+    public async Task SnapshotQuery_NoHits_ReturnsEmptyArrays()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.SnapshotQuery, _ => new SnapshotQueryResult
+        {
+            X = 0,
+            Y = 0
+            // UiHits and WorldHits are null (no hits)
+        });
+
+        var args = new Dictionary<string, object?> { ["x"] = 0, ["y"] = 0 };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.SnapshotQuery, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Null(result["uiHits"]); // Omitted when no hits
+        Assert.Null(result["worldHits"]);
+    }
 }
