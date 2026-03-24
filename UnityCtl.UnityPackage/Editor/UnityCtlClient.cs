@@ -549,6 +549,10 @@ namespace UnityCtl
                         result = HandleSnapshotQuery(request);
                         break;
 
+                    case UnityCtlCommands.UIClick:
+                        result = HandleUIClick(request);
+                        break;
+
                     case UnityCtlCommands.PrefabOpen:
                         result = HandlePrefabOpen(request);
                         break;
@@ -2268,6 +2272,128 @@ namespace UnityCtl
                 ScreenHeight = Screen.height,
                 UiHits = uiHits.Count > 0 ? uiHits.ToArray() : null
             };
+        }
+
+        private object HandleUIClick(RequestMessage request)
+        {
+            if (!EditorApplication.isPlaying)
+                throw new InvalidOperationException("ui.click requires play mode");
+            if (EventSystem.current == null)
+                throw new InvalidOperationException("No EventSystem found in scene");
+
+            var targetId = GetIntArgument(request, "id");
+            var x = GetIntArgument(request, "x");
+            var y = GetIntArgument(request, "y");
+
+            GameObject target;
+            Vector2 screenPoint;
+
+            if (targetId.HasValue)
+            {
+                // Resolve by instance ID
+                target = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                if (target == null)
+                    throw new ArgumentException($"No GameObject with instance ID {targetId.Value}");
+
+                var rt = target.GetComponent<RectTransform>();
+                if (rt == null)
+                    throw new ArgumentException($"'{target.name}' has no RectTransform — ui.click only works with UI elements");
+
+                // Compute screen-space center
+                screenPoint = GetRectScreenCenter(rt);
+
+                // Check hittability: is this element the top hit at its center?
+                var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
+                var results = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(pointerData, results);
+
+                if (results.Count > 0)
+                {
+                    var topHit = results[0].gameObject;
+                    if (topHit != target && !topHit.transform.IsChildOf(target.transform))
+                    {
+                        throw new InvalidOperationException(
+                            $"'{target.name}' [i:{targetId.Value}] is blocked by '{topHit.name}' [i:{topHit.GetInstanceID()}]");
+                    }
+                }
+            }
+            else if (x.HasValue && y.HasValue)
+            {
+                // Resolve by screen coordinates
+                screenPoint = new Vector2(x.Value, y.Value);
+                var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
+                var results = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(pointerData, results);
+
+                if (results.Count == 0)
+                    throw new ArgumentException($"No UI element at ({x.Value}, {y.Value})");
+
+                target = results[0].gameObject;
+            }
+            else
+            {
+                throw new ArgumentException("Provide either 'id' or 'x'+'y' coordinates");
+            }
+
+            // Check interactable
+            if (GetInteractable(target) == null)
+                throw new ArgumentException($"'{target.name}' is not interactable (no pointer handlers)");
+
+            // Dispatch full pointer event sequence
+            var eventData = new PointerEventData(EventSystem.current)
+            {
+                position = screenPoint,
+                button = PointerEventData.InputButton.Left,
+                clickCount = 1,
+                pointerPress = target
+            };
+
+            ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerEnterHandler);
+            ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerDownHandler);
+            ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerUpHandler);
+            ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerClickHandler);
+
+            return new Protocol.UIClickResult
+            {
+                InstanceId = target.GetInstanceID(),
+                Name = target.name,
+                Path = GetHierarchyPath(target),
+                ScreenPosition = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "({0:F0}, {1:F0})", screenPoint.x, screenPoint.y),
+                Text = GetUIText(target)
+            };
+        }
+
+        /// <summary>
+        /// Returns the screen-space center of a RectTransform.
+        /// </summary>
+        private static Vector2 GetRectScreenCenter(RectTransform rt)
+        {
+            var canvas = rt.GetComponentInParent<Canvas>();
+            var corners = new Vector3[4];
+            rt.GetWorldCorners(corners);
+
+            Camera canvasCam = null;
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                canvasCam = canvas.worldCamera ?? Camera.main;
+
+            float minX = float.MaxValue, minY = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue;
+
+            for (int i = 0; i < 4; i++)
+            {
+                Vector2 sp;
+                if (canvas != null && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+                    sp = corners[i];
+                else
+                    sp = RectTransformUtility.WorldToScreenPoint(canvasCam, corners[i]);
+                if (sp.x < minX) minX = sp.x;
+                if (sp.y < minY) minY = sp.y;
+                if (sp.x > maxX) maxX = sp.x;
+                if (sp.y > maxY) maxY = sp.y;
+            }
+
+            return new Vector2((minX + maxX) / 2f, (minY + maxY) / 2f);
         }
 
         /// <summary>

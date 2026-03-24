@@ -577,6 +577,24 @@ public class SnapshotQueryHit
     public bool? Interactable { get; set; }
 }
 
+public class UIClickResult
+{
+    [JsonProperty("instanceId")]
+    public int InstanceId { get; set; }
+
+    [JsonProperty("name")]
+    public string Name { get; set; } = "";
+
+    [JsonProperty("path")]
+    public string Path { get; set; } = "";
+
+    [JsonProperty("screenPosition")]
+    public string ScreenPosition { get; set; } = "";
+
+    [JsonProperty("text", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Text { get; set; }
+}
+
 /// <summary>
 /// Unified log entry that can come from either editor.log or console (Debug.Log)
 /// </summary>
