@@ -1,3 +1,4 @@
+using Newtonsoft.Json.Linq;
 using UnityCtl.Protocol;
 using UnityCtl.Tests.Helpers;
 using Xunit;
@@ -5,13 +6,37 @@ using Xunit;
 namespace UnityCtl.Tests.Integration;
 
 /// <summary>
-/// Tests for the Bridge /health endpoint.
+/// Tests for the Bridge /health endpoint and related status queries.
 /// </summary>
 public class HealthEndpointTests : IAsyncLifetime
 {
     private readonly BridgeTestFixture _fixture = new();
 
-    public Task InitializeAsync() => _fixture.InitializeAsync();
+    public async Task InitializeAsync()
+    {
+        await _fixture.InitializeAsync();
+
+        // Configure play.status and scene.list handlers for status-related tests
+        _fixture.FakeUnity
+            .OnCommand(UnityCtlCommands.PlayStatus, _ =>
+                new PlayModeResult { State = PlayModeState.Stopped })
+            .OnCommand(UnityCtlCommands.SceneList, req =>
+            {
+                var source = req.Args?["source"]?.ToString() ?? "buildSettings";
+                if (source == "loaded")
+                {
+                    return new SceneListResult
+                    {
+                        Scenes = new[]
+                        {
+                            new SceneInfo { Path = "Assets/Scenes/SampleScene.unity", Name = "SampleScene", IsActive = true }
+                        }
+                    };
+                }
+                return new SceneListResult { Scenes = Array.Empty<SceneInfo>() };
+            });
+    }
+
     public Task DisposeAsync() => _fixture.DisposeAsync();
 
     [Fact]
@@ -51,5 +76,30 @@ public class HealthEndpointTests : IAsyncLifetime
 
         Assert.NotNull(health);
         Assert.False(health.UnityConnected);
+    }
+
+    [Fact]
+    public async Task PlayStatus_ReturnsCurrentState()
+    {
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayStatus);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("stopped", result["state"]?.ToString());
+    }
+
+    [Fact]
+    public async Task SceneListLoaded_ReturnsLoadedScenes()
+    {
+        var args = new Dictionary<string, object?> { ["source"] = "loaded" };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.SceneList, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        var scenes = result["scenes"] as JArray;
+        Assert.NotNull(scenes);
+        Assert.Single(scenes);
+        Assert.Equal("SampleScene", scenes[0]?["name"]?.ToString());
+        Assert.True(scenes[0]?["isActive"]?.Value<bool>());
     }
 }

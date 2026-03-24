@@ -45,8 +45,14 @@ public class SceneInfo
     [JsonProperty("path")]
     public required string Path { get; init; }
 
+    [JsonProperty("name", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Name { get; init; }
+
     [JsonProperty("enabledInBuild")]
     public bool EnabledInBuild { get; init; }
+
+    [JsonProperty("isActive", DefaultValueHandling = DefaultValueHandling.Ignore)]
+    public bool IsActive { get; init; }
 }
 
 public class SceneListResult

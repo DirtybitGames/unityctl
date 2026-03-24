@@ -19,14 +19,29 @@ public class SceneCommandTests : IAsyncLifetime
 
         // Configure FakeUnity command handlers
         _fixture.FakeUnity
-            .OnCommand(UnityCtlCommands.SceneList, _ => new SceneListResult
+            .OnCommand(UnityCtlCommands.SceneList, req =>
             {
-                Scenes = new[]
+                var source = req.Args?["source"]?.ToString() ?? "buildSettings";
+                if (source == "loaded")
                 {
-                    new SceneInfo { Path = "Assets/Scenes/Main.unity", EnabledInBuild = true },
-                    new SceneInfo { Path = "Assets/Scenes/Menu.unity", EnabledInBuild = true },
-                    new SceneInfo { Path = "Assets/Scenes/Debug.unity", EnabledInBuild = false }
+                    return new SceneListResult
+                    {
+                        Scenes = new[]
+                        {
+                            new SceneInfo { Path = "Assets/Scenes/Main.unity", Name = "Main", IsActive = true },
+                            new SceneInfo { Path = "Assets/Scenes/UI.unity", Name = "UI", IsActive = false }
+                        }
+                    };
                 }
+                return new SceneListResult
+                {
+                    Scenes = new[]
+                    {
+                        new SceneInfo { Path = "Assets/Scenes/Main.unity", EnabledInBuild = true },
+                        new SceneInfo { Path = "Assets/Scenes/Menu.unity", EnabledInBuild = true },
+                        new SceneInfo { Path = "Assets/Scenes/Debug.unity", EnabledInBuild = false }
+                    }
+                };
             })
             .OnCommand(UnityCtlCommands.SceneLoad, req =>
             {
@@ -59,6 +74,26 @@ public class SceneCommandTests : IAsyncLifetime
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
         Assert.Equal("Assets/Scenes/Main.unity", result["loadedScenePath"]?.ToString());
+    }
+
+    [Fact]
+    public async Task SceneList_WithSourceLoaded_ReturnsLoadedScenes()
+    {
+        var args = new Dictionary<string, object?> { ["source"] = "loaded" };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.SceneList, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        var scenes = result["scenes"] as JArray;
+        Assert.NotNull(scenes);
+        Assert.Equal(2, scenes.Count);
+
+        Assert.Equal("Main", scenes[0]?["name"]?.ToString());
+        Assert.Equal("Assets/Scenes/Main.unity", scenes[0]?["path"]?.ToString());
+        Assert.True(scenes[0]?["isActive"]?.Value<bool>());
+
+        Assert.Equal("UI", scenes[1]?["name"]?.ToString());
+        Assert.Null(scenes[1]?["isActive"]); // false is omitted by DefaultValueHandling.Ignore
     }
 
     [Fact]

@@ -597,6 +597,23 @@ namespace UnityCtl
                 }
                 return new SceneListResult { Scenes = scenes };
             }
+            else if (source == "loaded")
+            {
+                var count = UnityEngine.SceneManagement.SceneManager.sceneCount;
+                var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                var scenes = new SceneInfo[count];
+                for (int i = 0; i < count; i++)
+                {
+                    var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                    scenes[i] = new SceneInfo
+                    {
+                        Path = scene.path,
+                        Name = scene.name,
+                        IsActive = scene == activeScene
+                    };
+                }
+                return new SceneListResult { Scenes = scenes };
+            }
             else
             {
                 // Find all scenes in the project

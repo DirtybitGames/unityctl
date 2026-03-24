@@ -86,6 +86,40 @@ public static class StatusCommand
                 }
             }
 
+            // Query play mode state and loaded scenes when Unity is connected
+            PlayModeResult? playMode = null;
+            SceneInfo[]? loadedScenes = null;
+            if (unityConnected && bridgeConfig != null)
+            {
+                var rpcClient = new BridgeClient($"http://localhost:{bridgeConfig.Port}");
+                try
+                {
+                    var playTask = rpcClient.SendCommandAsync(UnityCtlCommands.PlayStatus, timeoutSeconds: 5);
+                    var sceneTask = rpcClient.SendCommandAsync(UnityCtlCommands.SceneList,
+                        new Dictionary<string, object?> { ["source"] = "loaded" }, timeoutSeconds: 5);
+                    await Task.WhenAll(playTask, sceneTask);
+
+                    var playResponse = playTask.Result;
+                    if (playResponse?.Status == "ok" && playResponse.Result != null)
+                    {
+                        var playJson = Newtonsoft.Json.JsonConvert.SerializeObject(playResponse.Result, JsonHelper.Settings);
+                        playMode = JsonHelper.Deserialize<PlayModeResult>(playJson);
+                    }
+
+                    var sceneResponse = sceneTask.Result;
+                    if (sceneResponse?.Status == "ok" && sceneResponse.Result != null)
+                    {
+                        var sceneJson = Newtonsoft.Json.JsonConvert.SerializeObject(sceneResponse.Result, JsonHelper.Settings);
+                        var sceneResult = JsonHelper.Deserialize<SceneListResult>(sceneJson);
+                        loadedScenes = sceneResult?.Scenes;
+                    }
+                }
+                catch
+                {
+                    // Non-critical — status still shows other info
+                }
+            }
+
             var result = new ProjectStatusResult
             {
                 ProjectPath = projectRoot,
@@ -145,6 +179,8 @@ public static class StatusCommand
                     result.BridgePort,
                     result.BridgePid,
                     result.UnityConnectedToBridge,
+                    PlayMode = playMode?.State,
+                    LoadedScenes = loadedScenes,
                     Dialogs = detectedDialogs,
                     Versions = new
                     {
@@ -166,7 +202,7 @@ public static class StatusCommand
             }
             else
             {
-                PrintHumanReadableStatus(result, unityStatus.Message, health, detectedDialogs);
+                PrintHumanReadableStatus(result, unityStatus.Message, health, detectedDialogs, playMode, loadedScenes);
 
                 Console.WriteLine();
                 var versionResult = PrintVersionInfo(versionCheck, enforced, health != null, pluginVersionSource);
@@ -181,7 +217,7 @@ public static class StatusCommand
         return statusCommand;
     }
 
-    private static void PrintHumanReadableStatus(ProjectStatusResult status, string? unityStatusMessage, HealthResult? health, DialogInfo[]? dialogs = null)
+    private static void PrintHumanReadableStatus(ProjectStatusResult status, string? unityStatusMessage, HealthResult? health, DialogInfo[]? dialogs = null, PlayModeResult? playMode = null, SceneInfo[]? loadedScenes = null)
     {
         Console.WriteLine("Project Status:");
         Console.WriteLine($"  Path: {status.ProjectPath}");
@@ -245,6 +281,30 @@ public static class StatusCommand
                     Console.WriteLine("  Unity is running but not connected. Ensure UnityCtl package is installed.");
                     Console.WriteLine("  Note: The Unity plugin uses exponential backoff (max 15s) when reconnecting.");
                 }
+            }
+        }
+
+        // Play mode and loaded scenes (only when connected)
+        if (playMode != null)
+        {
+            Console.WriteLine();
+            var isPlaying = playMode.State == "playing" || playMode.State == "paused";
+            var playIcon = isPlaying ? "[>]" : "[-]";
+            Console.ForegroundColor = isPlaying ? ConsoleColor.Cyan : ConsoleColor.Gray;
+            Console.Write($"Play Mode: {playIcon} ");
+            Console.ResetColor();
+            Console.WriteLine(playMode.State);
+        }
+
+        if (loadedScenes != null && loadedScenes.Length > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Loaded Scenes:");
+            foreach (var scene in loadedScenes)
+            {
+                var label = scene.Name ?? System.IO.Path.GetFileNameWithoutExtension(scene.Path);
+                var activeMarker = scene.IsActive ? " (active)" : "";
+                Console.WriteLine($"  {label}{activeMarker}  [{scene.Path}]");
             }
         }
 
