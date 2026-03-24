@@ -188,7 +188,12 @@ public static class SnapshotCommand
         return queryCommand;
     }
 
-    private static void FormatSnapshot(SnapshotResult result, bool components, bool screen, bool isDrillDown)
+    internal static void FormatSnapshot(SnapshotResult result, bool components, bool screen, bool isDrillDown)
+    {
+        Console.Write(BuildSnapshotString(result, components, screen, isDrillDown));
+    }
+
+    internal static string BuildSnapshotString(SnapshotResult result, bool components, bool screen, bool isDrillDown)
     {
         var sb = new StringBuilder();
 
@@ -233,8 +238,7 @@ public static class SnapshotCommand
                     sb.AppendLine();
                 }
 
-                Console.Write(sb.ToString());
-                return;
+                return sb.ToString();
             }
             else
             {
@@ -252,10 +256,10 @@ public static class SnapshotCommand
             FormatObject(sb, obj, 0, components, screen, isDrillDown);
         }
 
-        Console.Write(sb.ToString());
+        return sb.ToString();
     }
 
-    private static void FormatObject(StringBuilder sb, SnapshotObject obj, int indent, bool components, bool screen, bool isDrillDown)
+    internal static void FormatObject(StringBuilder sb, SnapshotObject obj, int indent, bool components, bool screen, bool isDrillDown)
     {
         var prefix = new string(' ', indent * 2);
 
@@ -395,7 +399,12 @@ public static class SnapshotCommand
         // Children are rendered by FormatObject's recursive loop after this method returns
     }
 
-    private static void FormatQueryResult(SnapshotQueryResult result)
+    internal static void FormatQueryResult(SnapshotQueryResult result)
+    {
+        Console.Write(BuildQueryResultString(result));
+    }
+
+    internal static string BuildQueryResultString(SnapshotQueryResult result)
     {
         var sb = new StringBuilder();
         sb.Append($"Hit at ({result.X}, {result.Y})");
@@ -406,8 +415,7 @@ public static class SnapshotCommand
         if (result.UiHits is not { Length: > 0 })
         {
             sb.AppendLine("  (nothing)");
-            Console.Write(sb.ToString());
-            return;
+            return sb.ToString();
         }
 
         sb.AppendLine($"  UI ({result.UiHits.Length} hits):");
@@ -422,7 +430,7 @@ public static class SnapshotCommand
             sb.AppendLine();
         }
 
-        Console.Write(sb.ToString());
+        return sb.ToString();
     }
 
     private static void FormatPropertyValue(StringBuilder sb, string key, object value, string indent)

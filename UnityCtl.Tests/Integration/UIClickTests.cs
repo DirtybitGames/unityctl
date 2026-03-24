@@ -126,4 +126,17 @@ public class UIClickTests : IAsyncLifetime
         Assert.Contains("blocked by", response.Error?.Message);
         Assert.Contains("ModalOverlay", response.Error?.Message);
     }
+
+    [Fact]
+    public async Task UIClick_DisabledElement_ReturnsError()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.UIClick, _ =>
+            throw new ArgumentException("'DisabledButton' is not interactable"));
+
+        var args = new Dictionary<string, object?> { ["id"] = 47070 };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.UIClick, args);
+
+        AssertExtensions.IsError(response);
+        Assert.Contains("not interactable", response.Error?.Message);
+    }
 }
