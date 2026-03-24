@@ -93,6 +93,7 @@ unityctl dialog dismiss --button "OK"  # Click specific button
 
 Use `snapshot` to observe, `ui click` to interact, `eval --id` for custom actions, then `snapshot` to verify.
 UI elements auto-show text content, interactable state, and RectTransform layout.
+`interactable` means the element has pointer event handlers (`Button`, `Toggle`, `Slider`, or custom `IPointerClickHandler`/`IPointerDownHandler`). For standard Selectables it reflects `Selectable.interactable`; custom pointer handlers always report as interactable.
 Use `--screen` to add screen-space bounds and visibility for UI elements. Hittability (blocked-by detection) is only available in play mode.
 Use `snapshot query <x> <y>` to identify what UI element is at a screen coordinate. Response includes a `mode` field: `play` (accurate) or `edit-approximate` (hit ordering may be imprecise).
 Use `ui click --id <instanceId>` to click a UI element (play mode). Reports if the element is blocked by another.

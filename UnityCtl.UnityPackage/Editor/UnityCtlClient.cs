@@ -2101,39 +2101,46 @@ namespace UnityCtl
             return null;
         }
 
-        private static void ComputeScreenSpaceInfo(GameObject go, Protocol.SnapshotObject obj)
+        /// <summary>
+        /// Projects a RectTransform's world corners to screen space and returns the bounding box.
+        /// Returns null if the RectTransform has no parent Canvas.
+        /// </summary>
+        private static (float minX, float minY, float maxX, float maxY)? GetScreenBounds(RectTransform rt)
         {
-            var t = go.transform;
-            if (t is not RectTransform rt) return; // UI only — 3D objects skip screen-space info
+            var canvas = rt.GetComponentInParent<Canvas>();
+            if (canvas == null) return null;
 
-            var canvas = go.GetComponentInParent<Canvas>();
-            if (canvas == null) return;
-
-            var cam = Camera.main;
             var corners = new Vector3[4];
             rt.GetWorldCorners(corners);
 
-            Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera ?? cam;
+            Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay
+                ? null
+                : canvas.worldCamera ?? Camera.main;
 
             float minX = float.MaxValue, minY = float.MaxValue;
             float maxX = float.MinValue, maxY = float.MinValue;
 
             for (int i = 0; i < 4; i++)
             {
-                Vector2 screenPoint;
-                if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
-                {
-                    screenPoint = corners[i];
-                }
-                else
-                {
-                    screenPoint = RectTransformUtility.WorldToScreenPoint(canvasCam, corners[i]);
-                }
-                if (screenPoint.x < minX) minX = screenPoint.x;
-                if (screenPoint.y < minY) minY = screenPoint.y;
-                if (screenPoint.x > maxX) maxX = screenPoint.x;
-                if (screenPoint.y > maxY) maxY = screenPoint.y;
+                Vector2 sp = canvas.renderMode == RenderMode.ScreenSpaceOverlay
+                    ? (Vector2)corners[i]
+                    : RectTransformUtility.WorldToScreenPoint(canvasCam, corners[i]);
+                if (sp.x < minX) minX = sp.x;
+                if (sp.y < minY) minY = sp.y;
+                if (sp.x > maxX) maxX = sp.x;
+                if (sp.y > maxY) maxY = sp.y;
             }
+
+            return (minX, minY, maxX, maxY);
+        }
+
+        private static void ComputeScreenSpaceInfo(GameObject go, Protocol.SnapshotObject obj)
+        {
+            if (go.transform is not RectTransform rt) return;
+
+            var bounds = GetScreenBounds(rt);
+            if (bounds == null) return;
+            var (minX, minY, maxX, maxY) = bounds.Value;
 
             var w = maxX - minX;
             var h = maxY - minY;
@@ -2232,34 +2239,39 @@ namespace UnityCtl
             }
             else
             {
-                // Edit mode: manually check all raycast-target Graphics (sorted by render order)
-                foreach (var canvas in UnityEngine.Object.FindObjectsOfType<Canvas>())
+                // Edit mode: manually check all raycast-target Graphics, sorted across canvases
+                var allHits = new List<(Graphic g, int canvasSortOrder, int renderOrder)>();
+
+                foreach (var canvas in UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
                 {
                     Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
                     var graphics = canvas.GetComponentsInChildren<Graphic>();
-                    var hits = new List<(Graphic g, int depth)>();
 
                     foreach (var g in graphics)
                     {
                         if (!g.raycastTarget || !g.gameObject.activeInHierarchy) continue;
                         if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, screenPoint, canvasCam)) continue;
-                        hits.Add((g, GetCanvasRenderOrder(g.transform, canvas.transform)));
+                        allHits.Add((g, canvas.sortingOrder, GetCanvasRenderOrder(g.transform, canvas.transform)));
                     }
+                }
 
-                    // Sort by depth descending (top-most first)
-                    hits.Sort((a, b) => b.depth.CompareTo(a.depth));
+                // Sort by canvas sorting order descending, then render order descending (top-most first)
+                allHits.Sort((a, b) =>
+                {
+                    int c = b.canvasSortOrder.CompareTo(a.canvasSortOrder);
+                    return c != 0 ? c : b.renderOrder.CompareTo(a.renderOrder);
+                });
 
-                    foreach (var (g, _) in hits)
+                foreach (var (g, _, _) in allHits)
+                {
+                    uiHits.Add(new Protocol.SnapshotQueryHit
                     {
-                        uiHits.Add(new Protocol.SnapshotQueryHit
-                        {
-                            InstanceId = g.gameObject.GetInstanceID(),
-                            Name = g.gameObject.name,
-                            Path = GetHierarchyPath(g.gameObject),
-                            Text = GetUIText(g.gameObject),
-                            Interactable = GetInteractable(g.gameObject)
-                        });
-                    }
+                        InstanceId = g.gameObject.GetInstanceID(),
+                        Name = g.gameObject.name,
+                        Path = GetHierarchyPath(g.gameObject),
+                        Text = GetUIText(g.gameObject),
+                        Interactable = GetInteractable(g.gameObject)
+                    });
                 }
             }
 
@@ -2329,6 +2341,11 @@ namespace UnityCtl
                     throw new ArgumentException($"No UI element at ({x.Value}, {y.Value})");
 
                 target = results[0].gameObject;
+
+                // Walk up to nearest interactable ancestor (e.g., Text child inside Button)
+                var handler = ExecuteEvents.GetEventHandler<IPointerClickHandler>(target);
+                if (handler != null)
+                    target = handler;
             }
             else
             {
@@ -2352,6 +2369,7 @@ namespace UnityCtl
             ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerDownHandler);
             ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerUpHandler);
             ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerClickHandler);
+            ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerExitHandler);
 
             return new Protocol.UIClickResult
             {
@@ -2369,30 +2387,9 @@ namespace UnityCtl
         /// </summary>
         private static Vector2 GetRectScreenCenter(RectTransform rt)
         {
-            var canvas = rt.GetComponentInParent<Canvas>();
-            var corners = new Vector3[4];
-            rt.GetWorldCorners(corners);
-
-            Camera canvasCam = null;
-            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
-                canvasCam = canvas.worldCamera ?? Camera.main;
-
-            float minX = float.MaxValue, minY = float.MaxValue;
-            float maxX = float.MinValue, maxY = float.MinValue;
-
-            for (int i = 0; i < 4; i++)
-            {
-                Vector2 sp;
-                if (canvas != null && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
-                    sp = corners[i];
-                else
-                    sp = RectTransformUtility.WorldToScreenPoint(canvasCam, corners[i]);
-                if (sp.x < minX) minX = sp.x;
-                if (sp.y < minY) minY = sp.y;
-                if (sp.x > maxX) maxX = sp.x;
-                if (sp.y > maxY) maxY = sp.y;
-            }
-
+            var bounds = GetScreenBounds(rt);
+            if (bounds == null) return Vector2.zero;
+            var (minX, minY, maxX, maxY) = bounds.Value;
             return new Vector2((minX + maxX) / 2f, (minY + maxY) / 2f);
         }
 
