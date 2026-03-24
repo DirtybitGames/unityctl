@@ -398,41 +398,28 @@ public static class SnapshotCommand
     private static void FormatQueryResult(SnapshotQueryResult result)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Hit at ({result.X}, {result.Y}):");
+        sb.Append($"Hit at ({result.X}, {result.Y})");
+        if (result.Mode == "edit-approximate")
+            sb.Append(" [edit mode — hit ordering is approximate]");
+        sb.AppendLine(":");
 
-        var hasUi = result.UiHits is { Length: > 0 };
-        var hasWorld = result.WorldHits is { Length: > 0 };
-
-        if (!hasUi && !hasWorld)
+        if (result.UiHits is not { Length: > 0 })
         {
             sb.AppendLine("  (nothing)");
             Console.Write(sb.ToString());
             return;
         }
 
-        if (hasUi)
+        sb.AppendLine($"  UI ({result.UiHits.Length} hits):");
+        for (int i = 0; i < result.UiHits.Length; i++)
         {
-            sb.AppendLine($"  UI ({result.UiHits!.Length} hits):");
-            for (int i = 0; i < result.UiHits.Length; i++)
-            {
-                var hit = result.UiHits[i];
-                sb.Append($"    {i + 1}. {hit.Name} [i:{hit.InstanceId}] — {hit.Path}");
-                if (!string.IsNullOrEmpty(hit.Text))
-                    sb.Append($" \"{hit.Text}\"");
-                if (hit.Interactable == true) sb.Append(" interactable");
-                else if (hit.Interactable == false) sb.Append(" disabled");
-                sb.AppendLine();
-            }
-        }
-
-        if (hasWorld)
-        {
-            sb.AppendLine($"  3D ({result.WorldHits!.Length} hits):");
-            for (int i = 0; i < result.WorldHits.Length; i++)
-            {
-                var hit = result.WorldHits[i];
-                sb.AppendLine($"    {i + 1}. {hit.Name} [i:{hit.InstanceId}] — {hit.Path}  dist:{hit.Distance:F1}");
-            }
+            var hit = result.UiHits[i];
+            sb.Append($"    {i + 1}. {hit.Name} [i:{hit.InstanceId}] — {hit.Path}");
+            if (!string.IsNullOrEmpty(hit.Text))
+                sb.Append($" \"{hit.Text}\"");
+            if (hit.Interactable == true) sb.Append(" interactable");
+            else if (hit.Interactable == false) sb.Append(" disabled");
+            sb.AppendLine();
         }
 
         Console.Write(sb.ToString());

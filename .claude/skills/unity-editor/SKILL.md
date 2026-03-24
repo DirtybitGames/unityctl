@@ -66,11 +66,11 @@ unityctl snapshot                          # Scene hierarchy tree (default depth
 unityctl snapshot --depth 4                # Deeper traversal
 unityctl snapshot --id 14200 --components  # Drill into one object with all properties
 unityctl snapshot --id 14200 --filter "type:Rigidbody"  # Filter drill-down result
-unityctl snapshot --screen                 # Add screen-space bounds, visibility, hittability
+unityctl snapshot --screen                 # Add screen-space bounds and visibility for UI elements
 unityctl snapshot --filter "type:Rigidbody"  # Filter by type:T, name:N*, tag:T
 unityctl snapshot --scene Assets/Scenes/Other.unity      # Snapshot another scene (read-only)
 unityctl snapshot --prefab Assets/Prefabs/Player.prefab  # Snapshot a prefab asset
-unityctl snapshot query 400 300            # What's at screen pixel (400, 300)?
+unityctl snapshot query 400 300            # What UI element is at screen pixel (400, 300)?
 
 # Prefab Editing
 unityctl prefab open Assets/Prefabs/Player.prefab  # Open prefab in isolation mode
@@ -89,13 +89,13 @@ unityctl dialog dismiss --button "OK"  # Click specific button
 
 Use `snapshot` to observe, `eval --id` to act, then `snapshot` to verify.
 UI elements auto-show text content, interactable state, and RectTransform layout.
-Use `--screen` to add screen-space bounds, visibility, and hittability info.
-Use `snapshot query <x> <y>` to identify what's at a screen coordinate (works in edit and play mode).
+Use `--screen` to add screen-space bounds and visibility for UI elements. Hittability (blocked-by detection) is only available in play mode.
+Use `snapshot query <x> <y>` to identify what UI element is at a screen coordinate. Response includes a `mode` field: `play` (accurate) or `edit-approximate` (hit ordering may be imprecise).
 
 ```bash
 unityctl snapshot                          # See the scene, get instance IDs [i:N]
-unityctl snapshot --screen                 # Also see screen bounds and hittability
-unityctl snapshot query 400 300            # What object is at pixel (400, 300)?
+unityctl snapshot --screen                 # Also see UI screen bounds and visibility
+unityctl snapshot query 400 300            # What UI element is at pixel (400, 300)?
 unityctl script eval --id 14200 'target.transform.position = new Vector3(0, 10, 0); return "moved";'
 unityctl snapshot                          # Verify changes
 ```

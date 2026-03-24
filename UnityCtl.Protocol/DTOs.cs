@@ -411,6 +411,12 @@ public class SnapshotResult
 
     [JsonProperty("scenes", NullValueHandling = NullValueHandling.Ignore)]
     public SnapshotSceneInfo[]? Scenes { get; init; }
+
+    [JsonProperty("screenWidth", NullValueHandling = NullValueHandling.Ignore)]
+    public int? ScreenWidth { get; set; }
+
+    [JsonProperty("screenHeight", NullValueHandling = NullValueHandling.Ignore)]
+    public int? ScreenHeight { get; set; }
 }
 
 public class SnapshotSceneInfo
@@ -540,11 +546,17 @@ public class SnapshotQueryResult
     [JsonProperty("y")]
     public int Y { get; set; }
 
+    [JsonProperty("mode")]
+    public string Mode { get; set; } = "";
+
+    [JsonProperty("screenWidth")]
+    public int ScreenWidth { get; set; }
+
+    [JsonProperty("screenHeight")]
+    public int ScreenHeight { get; set; }
+
     [JsonProperty("uiHits", NullValueHandling = NullValueHandling.Ignore)]
     public SnapshotQueryHit[]? UiHits { get; set; }
-
-    [JsonProperty("worldHits", NullValueHandling = NullValueHandling.Ignore)]
-    public SnapshotQueryHit[]? WorldHits { get; set; }
 }
 
 public class SnapshotQueryHit
@@ -557,9 +569,6 @@ public class SnapshotQueryHit
 
     [JsonProperty("path")]
     public string Path { get; set; } = "";
-
-    [JsonProperty("distance")]
-    public float Distance { get; set; }
 
     [JsonProperty("text", NullValueHandling = NullValueHandling.Ignore)]
     public string? Text { get; set; }

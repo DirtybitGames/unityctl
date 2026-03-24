@@ -520,16 +520,19 @@ public class SnapshotTests : IAsyncLifetime
             ScenePath = "Assets/Scenes/MainScene.unity",
             IsPlaying = true,
             RootObjectCount = 1,
+            ScreenWidth = 1920,
+            ScreenHeight = 1080,
             Objects = new[]
             {
                 new SnapshotObject
                 {
                     InstanceId = 300,
-                    Name = "Player",
-                    Position = "(5.0, 2.5, 0.0)",
-                    ScreenRect = "screen(640, 400, 120, 180)",
+                    Name = "PlayButton",
+                    Rect = "rect(-110, -51, 220, 101)",
+                    ScreenRect = "screen(640, 400, 220, 101)",
                     Visible = true,
-                    Hittable = true
+                    Hittable = true,
+                    Interactable = true
                 }
             }
         });
@@ -539,8 +542,10 @@ public class SnapshotTests : IAsyncLifetime
 
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal(1920, result["screenWidth"]?.Value<int>());
+        Assert.Equal(1080, result["screenHeight"]?.Value<int>());
         var obj = (result["objects"] as JArray)?[0] as JObject;
-        Assert.Equal("screen(640, 400, 120, 180)", obj?["screenRect"]?.ToString());
+        Assert.Equal("screen(640, 400, 220, 101)", obj?["screenRect"]?.ToString());
         Assert.True(obj?["visible"]?.Value<bool>());
         Assert.True(obj?["hittable"]?.Value<bool>());
     }
@@ -589,6 +594,9 @@ public class SnapshotTests : IAsyncLifetime
         {
             X = 400,
             Y = 300,
+            Mode = "play",
+            ScreenWidth = 1920,
+            ScreenHeight = 1080,
             UiHits = new[]
             {
                 new SnapshotQueryHit
@@ -596,19 +604,8 @@ public class SnapshotTests : IAsyncLifetime
                     InstanceId = 200,
                     Name = "Button",
                     Path = "Canvas/Panel/Button",
-                    Distance = 0,
                     Text = "Click Me",
                     Interactable = true
-                }
-            },
-            WorldHits = new[]
-            {
-                new SnapshotQueryHit
-                {
-                    InstanceId = 500,
-                    Name = "Ground",
-                    Path = "Ground",
-                    Distance = 15.2f
                 }
             }
         });
@@ -620,6 +617,8 @@ public class SnapshotTests : IAsyncLifetime
         var result = AssertExtensions.GetResultJObject(response);
         Assert.Equal(400, result["x"]?.Value<int>());
         Assert.Equal(300, result["y"]?.Value<int>());
+        Assert.Equal("play", result["mode"]?.ToString());
+        Assert.Equal(1920, result["screenWidth"]?.Value<int>());
 
         var uiHits = result["uiHits"] as JArray;
         Assert.NotNull(uiHits);
@@ -627,21 +626,19 @@ public class SnapshotTests : IAsyncLifetime
         Assert.Equal("Button", uiHits[0]?["name"]?.ToString());
         Assert.Equal("Canvas/Panel/Button", uiHits[0]?["path"]?.ToString());
         Assert.Equal("Click Me", uiHits[0]?["text"]?.ToString());
-
-        var worldHits = result["worldHits"] as JArray;
-        Assert.NotNull(worldHits);
-        Assert.Single(worldHits!);
-        Assert.Equal("Ground", worldHits[0]?["name"]?.ToString());
     }
 
     [Fact]
-    public async Task SnapshotQuery_NoHits_ReturnsEmptyArrays()
+    public async Task SnapshotQuery_NoHits_ReturnsEmpty()
     {
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.SnapshotQuery, _ => new SnapshotQueryResult
         {
             X = 0,
-            Y = 0
-            // UiHits and WorldHits are null (no hits)
+            Y = 0,
+            Mode = "play",
+            ScreenWidth = 1920,
+            ScreenHeight = 1080
+            // UiHits is null (no hits)
         });
 
         var args = new Dictionary<string, object?> { ["x"] = 0, ["y"] = 0 };
@@ -650,6 +647,5 @@ public class SnapshotTests : IAsyncLifetime
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
         Assert.Null(result["uiHits"]); // Omitted when no hits
-        Assert.Null(result["worldHits"]);
     }
 }

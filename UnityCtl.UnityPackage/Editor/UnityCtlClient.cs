@@ -1424,6 +1424,16 @@ namespace UnityCtl
             var scenePath = GetStringArgument(request, "scenePath");
             var prefabPath = GetStringArgument(request, "prefabPath");
 
+            Protocol.SnapshotResult AttachScreenInfo(Protocol.SnapshotResult r)
+            {
+                if (screen)
+                {
+                    r.ScreenWidth = Screen.width;
+                    r.ScreenHeight = Screen.height;
+                }
+                return r;
+            }
+
             // Validate mutual exclusivity
             if (!string.IsNullOrEmpty(scenePath) && !string.IsNullOrEmpty(prefabPath))
                 throw new ArgumentException("Cannot use both --scene and --prefab");
@@ -1450,14 +1460,14 @@ namespace UnityCtl
                 if (!string.IsNullOrEmpty(filter))
                     prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
 
-                return new Protocol.SnapshotResult
+                return AttachScreenInfo(new Protocol.SnapshotResult
                 {
                     Stage = null,
                     PrefabAssetPath = prefabPath,
                     IsPlaying = EditorApplication.isPlaying,
                     RootObjectCount = 1,
                     Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, screen)).ToArray()
-                };
+                });
             }
 
             // Snapshot a specific scene (read-only: unloads if we loaded it)
@@ -1487,7 +1497,7 @@ namespace UnityCtl
                         if (!string.IsNullOrEmpty(filter))
                             sceneIdRoots = sceneIdRoots.Where(g => MatchesFilter(g, filter)).ToArray();
 
-                        return new Protocol.SnapshotResult
+                        return AttachScreenInfo(new Protocol.SnapshotResult
                         {
                             Stage = "scene (editing)",
                             SceneName = scene.name,
@@ -1495,7 +1505,7 @@ namespace UnityCtl
                             IsPlaying = false,
                             RootObjectCount = 1,
                             Objects = sceneIdRoots.Select(g => SerializeGameObject(g, depth, includeComponents, screen)).ToArray()
-                        };
+                        });
                     }
 
                     var roots = scene.GetRootGameObjects();
@@ -1503,7 +1513,7 @@ namespace UnityCtl
                         ? roots
                         : roots.Where(go => MatchesFilter(go, filter)).ToArray();
 
-                    return new Protocol.SnapshotResult
+                    return AttachScreenInfo(new Protocol.SnapshotResult
                     {
                         Stage = "scene (editing)",
                         SceneName = scene.name,
@@ -1513,7 +1523,7 @@ namespace UnityCtl
                         Objects = filteredRoots
                             .Select(go => SerializeGameObject(go, depth, includeComponents, screen))
                             .ToArray()
-                    };
+                    });
                 }
                 finally
                 {
@@ -1532,7 +1542,7 @@ namespace UnityCtl
                 var matches = string.IsNullOrEmpty(filter) || MatchesFilter(go, filter);
                 var stageInfo = GetStageInfo();
                 var goScene = go.scene;
-                return new Protocol.SnapshotResult
+                return AttachScreenInfo(new Protocol.SnapshotResult
                 {
                     Stage = stageInfo.Stage,
                     SceneName = goScene.IsValid() ? goScene.name : null,
@@ -1545,7 +1555,7 @@ namespace UnityCtl
                     Objects = matches
                         ? new[] { SerializeGameObject(go, depth, includeComponents, screen) }
                         : Array.Empty<Protocol.SnapshotObject>()
-                };
+                });
             }
 
             // Default: snapshot current stage (active scene or prefab stage)
@@ -1561,7 +1571,7 @@ namespace UnityCtl
                 if (!string.IsNullOrEmpty(filter))
                     prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
 
-                return new Protocol.SnapshotResult
+                return AttachScreenInfo(new Protocol.SnapshotResult
                 {
                     Stage = currentStage.Stage,
                     PrefabAssetPath = currentStage.PrefabAssetPath,
@@ -1570,7 +1580,7 @@ namespace UnityCtl
                     IsPlaying = false,
                     RootObjectCount = 1,
                     Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, screen)).ToArray()
-                };
+                });
             }
 
             // Normal scene mode — snapshot all loaded scenes
@@ -1609,7 +1619,7 @@ namespace UnityCtl
                 totalRootCount += roots.Length;
             }
 
-            return new Protocol.SnapshotResult
+            return AttachScreenInfo(new Protocol.SnapshotResult
             {
                 Stage = currentStage.Stage,
                 SceneName = activeScene.name,
@@ -1618,7 +1628,7 @@ namespace UnityCtl
                 RootObjectCount = totalRootCount,
                 Objects = allObjects.ToArray(),
                 Scenes = allScenes.Count > 1 ? allScenes.ToArray() : null
-            };
+            });
         }
 
         private static GameObject FindInHierarchy(GameObject root, int instanceId)
@@ -2089,177 +2099,86 @@ namespace UnityCtl
 
         private static void ComputeScreenSpaceInfo(GameObject go, Protocol.SnapshotObject obj)
         {
-            var cam = Camera.main;
-            if (cam == null) return;
-
             var t = go.transform;
+            if (t is not RectTransform rt) return; // UI only — 3D objects skip screen-space info
 
-            if (t is RectTransform rt)
+            var canvas = go.GetComponentInParent<Canvas>();
+            if (canvas == null) return;
+
+            var cam = Camera.main;
+            var corners = new Vector3[4];
+            rt.GetWorldCorners(corners);
+
+            Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera ?? cam;
+
+            float minX = float.MaxValue, minY = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue;
+
+            for (int i = 0; i < 4; i++)
             {
-                // UI element — get screen-space bounds from RectTransform corners
-                var canvas = go.GetComponentInParent<Canvas>();
-                if (canvas == null) return;
-
-                var corners = new Vector3[4];
-                rt.GetWorldCorners(corners);
-
-                Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera ?? cam;
-
-                float minX = float.MaxValue, minY = float.MaxValue;
-                float maxX = float.MinValue, maxY = float.MinValue;
-
-                for (int i = 0; i < 4; i++)
+                Vector2 screenPoint;
+                if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
                 {
-                    Vector2 screenPoint;
-                    if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
-                    {
-                        screenPoint = corners[i];
-                    }
-                    else
-                    {
-                        screenPoint = RectTransformUtility.WorldToScreenPoint(canvasCam, corners[i]);
-                    }
-                    if (screenPoint.x < minX) minX = screenPoint.x;
-                    if (screenPoint.y < minY) minY = screenPoint.y;
-                    if (screenPoint.x > maxX) maxX = screenPoint.x;
-                    if (screenPoint.y > maxY) maxY = screenPoint.y;
+                    screenPoint = corners[i];
                 }
-
-                var w = maxX - minX;
-                var h = maxY - minY;
-                obj.ScreenRect = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "screen({0:F0}, {1:F0}, {2:F0}, {3:F0})", minX, minY, w, h);
-
-                // Visible if on screen
-                obj.Visible = minX < Screen.width && maxX > 0 && minY < Screen.height && maxY > 0;
-
-                // Hittability: raycast at center to check if this element is the top hit
-                if (obj.Visible == true && obj.Interactable != null)
+                else
                 {
-                    var centerX = (minX + maxX) / 2f;
-                    var centerY = (minY + maxY) / 2f;
-                    var hitId = GetUIHitAtPoint(new Vector2(centerX, centerY), canvas);
-                    if (hitId == go.GetInstanceID() || IsDescendantOf(hitId, go))
-                    {
-                        // Hit is self or a child (e.g. button label) — counts as hittable
-                        obj.Hittable = true;
-                    }
-                    else if (hitId != 0)
-                    {
-                        obj.Hittable = false;
-                        obj.BlockedBy = hitId;
-                    }
-                    else
-                    {
-                        obj.Hittable = false;
-                    }
+                    screenPoint = RectTransformUtility.WorldToScreenPoint(canvasCam, corners[i]);
                 }
+                if (screenPoint.x < minX) minX = screenPoint.x;
+                if (screenPoint.y < minY) minY = screenPoint.y;
+                if (screenPoint.x > maxX) maxX = screenPoint.x;
+                if (screenPoint.y > maxY) maxY = screenPoint.y;
             }
-            else
+
+            var w = maxX - minX;
+            var h = maxY - minY;
+            obj.ScreenRect = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "screen({0:F0}, {1:F0}, {2:F0}, {3:F0})", minX, minY, w, h);
+
+            // Visible if on screen
+            obj.Visible = minX < Screen.width && maxX > 0 && minY < Screen.height && maxY > 0;
+
+            // Hittability: play mode only (EventSystem gives ground truth; edit-mode approximation is unreliable)
+            if (obj.Visible == true && obj.Interactable != null && EditorApplication.isPlaying)
             {
-                // 3D object — project Renderer bounds to screen
-                var renderer = go.GetComponent<Renderer>();
-                if (renderer == null) return;
-
-                var bounds = renderer.bounds;
-                var center = bounds.center;
-                var extents = bounds.extents;
-
-                // Project all 8 AABB corners
-                float minX = float.MaxValue, minY = float.MaxValue;
-                float maxX = float.MinValue, maxY = float.MinValue;
-                bool allBehind = true;
-
-                for (int i = 0; i < 8; i++)
+                var centerX = (minX + maxX) / 2f;
+                var centerY = (minY + maxY) / 2f;
+                var hitId = GetUIHitAtPoint(new Vector2(centerX, centerY));
+                if (hitId == go.GetInstanceID() || IsDescendantOf(hitId, go))
                 {
-                    var corner = center + new Vector3(
-                        (i & 1) == 0 ? -extents.x : extents.x,
-                        (i & 2) == 0 ? -extents.y : extents.y,
-                        (i & 4) == 0 ? -extents.z : extents.z
-                    );
-                    var screenPoint = cam.WorldToScreenPoint(corner);
-                    if (screenPoint.z > 0) allBehind = false;
-                    if (screenPoint.x < minX) minX = screenPoint.x;
-                    if (screenPoint.y < minY) minY = screenPoint.y;
-                    if (screenPoint.x > maxX) maxX = screenPoint.x;
-                    if (screenPoint.y > maxY) maxY = screenPoint.y;
+                    obj.Hittable = true;
                 }
-
-                if (allBehind) { obj.Visible = false; return; }
-
-                var screenW = maxX - minX;
-                var screenH = maxY - minY;
-                obj.ScreenRect = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "screen({0:F0}, {1:F0}, {2:F0}, {3:F0})", minX, minY, screenW, screenH);
-
-                obj.Visible = minX < Screen.width && maxX > 0 && minY < Screen.height && maxY > 0;
-
-                // Hittability for 3D: raycast from camera through center
-                if (obj.Visible == true)
+                else if (hitId != 0)
                 {
-                    var screenCenter = cam.WorldToScreenPoint(bounds.center);
-                    var ray = cam.ScreenPointToRay(new Vector3(screenCenter.x, screenCenter.y, 0));
-                    if (Physics.Raycast(ray, out RaycastHit hit))
-                    {
-                        if (hit.collider.gameObject == go)
-                            obj.Hittable = true;
-                        else
-                        {
-                            obj.Hittable = false;
-                            obj.BlockedBy = hit.collider.gameObject.GetInstanceID();
-                        }
-                    }
+                    obj.Hittable = false;
+                    obj.BlockedBy = hitId;
+                }
+                else
+                {
+                    obj.Hittable = false;
                 }
             }
         }
 
         /// <summary>
         /// Returns the instance ID of the top UI element at the given screen point, or 0 if nothing.
-        /// Works in both edit and play mode.
+        /// Requires play mode with an active EventSystem.
         /// </summary>
-        private static int GetUIHitAtPoint(Vector2 screenPoint, Canvas canvas = null)
+        private static int GetUIHitAtPoint(Vector2 screenPoint)
         {
-            // In play mode, use EventSystem if available
-            if (EditorApplication.isPlaying && EventSystem.current != null)
-            {
-                var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
-                var results = new List<RaycastResult>();
-                EventSystem.current.RaycastAll(pointerData, results);
-                if (results.Count > 0)
-                    return results[0].gameObject.GetInstanceID();
-                return 0;
-            }
+            if (EventSystem.current == null) return 0;
 
-            // Edit mode (or no EventSystem): manually check all raycast-target Graphics
-            // sorted by depth (highest sibling index = rendered last = on top)
-            if (canvas == null) return 0;
-
-            Camera canvasCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
-            var graphics = canvas.GetComponentsInChildren<Graphic>();
-            int topHitId = 0;
-            int topDepth = int.MinValue;
-
-            foreach (var g in graphics)
-            {
-                if (!g.raycastTarget || !g.gameObject.activeInHierarchy) continue;
-                if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, screenPoint, canvasCam)) continue;
-
-                // Use transform hierarchy depth + sibling index as a proxy for render order
-                // (later siblings render on top in Canvas)
-                int depth = GetCanvasRenderOrder(g.transform, canvas.transform);
-                if (depth > topDepth)
-                {
-                    topDepth = depth;
-                    topHitId = g.gameObject.GetInstanceID();
-                }
-            }
-
-            return topHitId;
+            var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
+            var results = new List<RaycastResult>();
+            EventSystem.current.RaycastAll(pointerData, results);
+            return results.Count > 0 ? results[0].gameObject.GetInstanceID() : 0;
         }
 
         /// <summary>
         /// Computes a pre-order traversal index for a transform within a Canvas.
         /// Unity Canvas renders children depth-first in sibling order — later in pre-order = renders on top.
+        /// Used by the edit-mode snapshot query path.
         /// </summary>
         private static int GetCanvasRenderOrder(Transform t, Transform canvasRoot)
         {
@@ -2288,7 +2207,6 @@ namespace UnityCtl
 
             var screenPoint = new Vector2(x, y);
             var uiHits = new List<Protocol.SnapshotQueryHit>();
-            var worldHits = new List<Protocol.SnapshotQueryHit>();
 
             // UI raycast
             if (EditorApplication.isPlaying && EventSystem.current != null)
@@ -2303,7 +2221,6 @@ namespace UnityCtl
                         InstanceId = r.gameObject.GetInstanceID(),
                         Name = r.gameObject.name,
                         Path = GetHierarchyPath(r.gameObject),
-                        Distance = r.distance,
                         Text = GetUIText(r.gameObject),
                         Interactable = GetInteractable(r.gameObject)
                     });
@@ -2335,7 +2252,6 @@ namespace UnityCtl
                             InstanceId = g.gameObject.GetInstanceID(),
                             Name = g.gameObject.name,
                             Path = GetHierarchyPath(g.gameObject),
-                            Distance = 0,
                             Text = GetUIText(g.gameObject),
                             Interactable = GetInteractable(g.gameObject)
                         });
@@ -2343,31 +2259,14 @@ namespace UnityCtl
                 }
             }
 
-            // 3D raycast (works in both edit and play mode)
-            var cam = Camera.main;
-            if (cam != null)
-            {
-                var ray = cam.ScreenPointToRay(new Vector3(x, y, 0));
-                var hits = Physics.RaycastAll(ray, Mathf.Infinity);
-                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-                foreach (var h in hits)
-                {
-                    worldHits.Add(new Protocol.SnapshotQueryHit
-                    {
-                        InstanceId = h.collider.gameObject.GetInstanceID(),
-                        Name = h.collider.gameObject.name,
-                        Path = GetHierarchyPath(h.collider.gameObject),
-                        Distance = h.distance
-                    });
-                }
-            }
-
             return new Protocol.SnapshotQueryResult
             {
                 X = x,
                 Y = y,
-                UiHits = uiHits.Count > 0 ? uiHits.ToArray() : null,
-                WorldHits = worldHits.Count > 0 ? worldHits.ToArray() : null
+                Mode = EditorApplication.isPlaying ? "play" : "edit-approximate",
+                ScreenWidth = Screen.width,
+                ScreenHeight = Screen.height,
+                UiHits = uiHits.Count > 0 ? uiHits.ToArray() : null
             };
         }
 
