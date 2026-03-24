@@ -411,6 +411,12 @@ public class SnapshotResult
 
     [JsonProperty("scenes", NullValueHandling = NullValueHandling.Ignore)]
     public SnapshotSceneInfo[]? Scenes { get; init; }
+
+    [JsonProperty("screenWidth", NullValueHandling = NullValueHandling.Ignore)]
+    public int? ScreenWidth { get; set; }
+
+    [JsonProperty("screenHeight", NullValueHandling = NullValueHandling.Ignore)]
+    public int? ScreenHeight { get; set; }
 }
 
 public class SnapshotSceneInfo
@@ -484,6 +490,20 @@ public class SnapshotObject
     [JsonProperty("isPrefabInstanceRoot", NullValueHandling = NullValueHandling.Ignore)]
     public bool? IsPrefabInstanceRoot { get; set; }
 
+    // Screen-space info (populated when --screen is used)
+
+    [JsonProperty("screenRect", NullValueHandling = NullValueHandling.Ignore)]
+    public string? ScreenRect { get; set; }
+
+    [JsonProperty("visible", NullValueHandling = NullValueHandling.Ignore)]
+    public bool? Visible { get; set; }
+
+    [JsonProperty("hittable", NullValueHandling = NullValueHandling.Ignore)]
+    public bool? Hittable { get; set; }
+
+    [JsonProperty("blockedBy", NullValueHandling = NullValueHandling.Ignore)]
+    public int? BlockedBy { get; set; }
+
     [JsonProperty("childCount")]
     public int ChildCount { get; set; }
 
@@ -516,6 +536,63 @@ public class SnapshotComponent
 
     [JsonProperty("properties")]
     public Dictionary<string, object>? Properties { get; set; }
+}
+
+public class SnapshotQueryResult
+{
+    [JsonProperty("x")]
+    public int X { get; set; }
+
+    [JsonProperty("y")]
+    public int Y { get; set; }
+
+    [JsonProperty("mode")]
+    public string Mode { get; set; } = "";
+
+    [JsonProperty("screenWidth")]
+    public int ScreenWidth { get; set; }
+
+    [JsonProperty("screenHeight")]
+    public int ScreenHeight { get; set; }
+
+    [JsonProperty("uiHits", NullValueHandling = NullValueHandling.Ignore)]
+    public SnapshotQueryHit[]? UiHits { get; set; }
+}
+
+public class SnapshotQueryHit
+{
+    [JsonProperty("instanceId")]
+    public int InstanceId { get; set; }
+
+    [JsonProperty("name")]
+    public string Name { get; set; } = "";
+
+    [JsonProperty("path")]
+    public string Path { get; set; } = "";
+
+    [JsonProperty("text", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Text { get; set; }
+
+    [JsonProperty("interactable", NullValueHandling = NullValueHandling.Ignore)]
+    public bool? Interactable { get; set; }
+}
+
+public class UIClickResult
+{
+    [JsonProperty("instanceId")]
+    public int InstanceId { get; set; }
+
+    [JsonProperty("name")]
+    public string Name { get; set; } = "";
+
+    [JsonProperty("path")]
+    public string Path { get; set; } = "";
+
+    [JsonProperty("screenPosition")]
+    public string ScreenPosition { get; set; } = "";
+
+    [JsonProperty("text", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Text { get; set; }
 }
 
 /// <summary>

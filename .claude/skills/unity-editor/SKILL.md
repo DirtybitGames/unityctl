@@ -66,11 +66,15 @@ unityctl snapshot                          # Scene hierarchy tree (default depth
 unityctl snapshot --depth 4                # Deeper traversal
 unityctl snapshot --id 14200 --components  # Drill into one object with all properties
 unityctl snapshot --id 14200 --filter "type:Rigidbody"  # Filter drill-down result
-unityctl snapshot --interactive            # UI focus: text content, button states
-unityctl snapshot --layout                 # RectTransform anchors/sizes
+unityctl snapshot --screen                 # Add screen-space bounds and visibility for UI elements
 unityctl snapshot --filter "type:Rigidbody"  # Filter by type:T, name:N*, tag:T
 unityctl snapshot --scene Assets/Scenes/Other.unity      # Snapshot another scene (read-only)
 unityctl snapshot --prefab Assets/Prefabs/Player.prefab  # Snapshot a prefab asset
+unityctl snapshot query 400 300            # What UI element is at screen pixel (400, 300)?
+
+# UI Interaction (play mode only)
+unityctl ui click --id 14200              # Click UI element by instance ID
+unityctl ui click 400 300                 # Click at screen coordinates
 
 # Prefab Editing
 unityctl prefab open Assets/Prefabs/Player.prefab  # Open prefab in isolation mode
@@ -87,12 +91,19 @@ unityctl dialog dismiss --button "OK"  # Click specific button
 
 ## Scene Observation & Manipulation Workflow
 
-Use `snapshot` to observe, `eval --id` to act, then `snapshot` to verify:
+Use `snapshot` to observe, `ui click` to interact, `eval --id` for custom actions, then `snapshot` to verify.
+UI elements auto-show text content, interactable state, and RectTransform layout.
+`interactable` means the element has pointer event handlers (`Button`, `Toggle`, `Slider`, or custom `IPointerClickHandler`/`IPointerDownHandler`). For standard Selectables it reflects `Selectable.interactable`; custom pointer handlers always report as interactable.
+Use `--screen` to add screen-space bounds and visibility for UI elements. Hittability (blocked-by detection) is only available in play mode.
+Use `snapshot query <x> <y>` to identify what UI element is at a screen coordinate. Response includes a `mode` field: `play` (accurate) or `edit-approximate` (hit ordering may be imprecise).
+Use `ui click --id <instanceId>` to click a UI element (play mode). Reports if the element is blocked by another.
 
 ```bash
-unityctl snapshot                          # See the scene, get instance IDs [i:N]
-unityctl script eval --id 14200 'target.transform.position = new Vector3(0, 10, 0); return "moved";'
-unityctl snapshot                          # Verify changes
+unityctl snapshot --screen                 # See the scene with UI screen bounds
+unityctl ui click --id 14200              # Click a button by instance ID
+unityctl snapshot                          # Verify the result
+unityctl snapshot query 400 300            # What UI element is at pixel (400, 300)?
+unityctl ui click 400 300                 # Click at those coordinates
 ```
 
 Multiple targets with `--id` (uses `targets[]` array):

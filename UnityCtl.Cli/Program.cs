@@ -63,6 +63,7 @@ rootCommand.AddCommand(RecordCommands.CreateCommand());
 rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(SnapshotCommand.CreateCommand());
 rootCommand.AddCommand(PrefabCommand.CreateCommand());
+rootCommand.AddCommand(UICommands.CreateCommand());
 
 // Derive built-in command names dynamically from registered commands
 var registeredNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
