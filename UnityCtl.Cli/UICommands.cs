@@ -18,13 +18,15 @@ public static class UICommands
 
     private static Command CreateClickCommand()
     {
-        var clickCommand = new Command("click", "Click a UI element by instance ID or screen coordinates");
+        var clickCommand = new Command("click", "Click a UI element by instance ID, name, or screen coordinates");
 
         var idOption = new Option<int?>("--id", "Instance ID of the UI element to click");
+        var nameOption = new Option<string?>("--name", "Find and click a GameObject by name (uses GameObject.Find)");
         var xArg = new Argument<int?>("x", () => null, "Screen X coordinate");
         var yArg = new Argument<int?>("y", () => null, "Screen Y coordinate");
 
         clickCommand.AddOption(idOption);
+        clickCommand.AddOption(nameOption);
         clickCommand.AddArgument(xArg);
         clickCommand.AddArgument(yArg);
 
@@ -35,18 +37,20 @@ public static class UICommands
             var json = ContextHelper.GetJson(context);
 
             var id = context.ParseResult.GetValueForOption(idOption);
+            var name = context.ParseResult.GetValueForOption(nameOption);
             var x = context.ParseResult.GetValueForArgument(xArg);
             var y = context.ParseResult.GetValueForArgument(yArg);
 
-            if (id.HasValue && (x.HasValue || y.HasValue))
+            var modeCount = (id.HasValue ? 1 : 0) + (name != null ? 1 : 0) + (x.HasValue || y.HasValue ? 1 : 0);
+            if (modeCount > 1)
             {
-                Console.Error.WriteLine("Error: Use either --id or x y coordinates, not both");
+                Console.Error.WriteLine("Error: Use only one of --id, --name, or x y coordinates");
                 context.ExitCode = 1;
                 return;
             }
-            if (!id.HasValue && (!x.HasValue || !y.HasValue))
+            if (modeCount == 0 || (!id.HasValue && name == null && (!x.HasValue || !y.HasValue)))
             {
-                Console.Error.WriteLine("Error: Provide --id <instanceId> or <x> <y> coordinates");
+                Console.Error.WriteLine("Error: Provide --id <instanceId>, --name <name>, or <x> <y> coordinates");
                 context.ExitCode = 1;
                 return;
             }
@@ -57,6 +61,8 @@ public static class UICommands
             var args = new Dictionary<string, object?>();
             if (id.HasValue)
                 args["id"] = id.Value;
+            else if (name != null)
+                args["name"] = name;
             else
             {
                 args["x"] = x!.Value;

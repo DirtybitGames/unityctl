@@ -73,6 +73,7 @@ unityctl snapshot --prefab Assets/Prefabs/Player.prefab  # Snapshot a prefab ass
 unityctl snapshot query 400 300            # What UI element is at screen pixel (400, 300)?
 
 # UI Interaction (play mode only)
+unityctl ui click --name "StartButton"    # Find by name and click (recommended)
 unityctl ui click --id 14200              # Click UI element by instance ID
 unityctl ui click 400 300                 # Click at screen coordinates
 
@@ -96,11 +97,11 @@ UI elements auto-show text content, interactable state, and RectTransform layout
 `interactable` means the element has pointer event handlers (`Button`, `Toggle`, `Slider`, or custom `IPointerClickHandler`/`IPointerDownHandler`). For standard Selectables it reflects `Selectable.interactable`; custom pointer handlers always report as interactable.
 Use `--screen` to add screen-space bounds and visibility for UI elements. Hittability (blocked-by detection) is only available in play mode.
 Use `snapshot query <x> <y>` to identify what UI element is at a screen coordinate. Response includes a `mode` field: `play` (accurate) or `edit-approximate` (hit ordering may be imprecise).
-Use `ui click --id <instanceId>` to click a UI element (play mode). Reports if the element is blocked by another.
+Use `ui click --name <name>` to find and click a UI element by name in one call (play mode). Uses `GameObject.Find` — supports both simple names (`"StartButton"`) and hierarchy paths (`"/Canvas/Panel/StartButton"`). Prefer `--name` over `--id` since instance IDs are not stable across play mode transitions. Reports if the element is blocked by another.
 
 ```bash
 unityctl snapshot --screen                 # See the scene with UI screen bounds
-unityctl ui click --id 14200              # Click a button by instance ID
+unityctl ui click --name "StartButton"    # Find and click by name (one call)
 unityctl snapshot                          # Verify the result
 unityctl snapshot query 400 300            # What UI element is at pixel (400, 300)?
 unityctl ui click 400 300                 # Click at those coordinates

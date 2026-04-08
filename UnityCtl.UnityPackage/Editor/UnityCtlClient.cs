@@ -2320,6 +2320,7 @@ namespace UnityCtl
                 throw new InvalidOperationException("No EventSystem found in scene");
 
             var targetId = GetIntArgument(request, "id");
+            var targetName = GetStringArgument(request, "name");
             var x = GetIntArgument(request, "x");
             var y = GetIntArgument(request, "y");
 
@@ -2355,6 +2356,34 @@ namespace UnityCtl
                     }
                 }
             }
+            else if (!string.IsNullOrEmpty(targetName))
+            {
+                // Resolve by name using GameObject.Find
+                target = GameObject.Find(targetName);
+                if (target == null)
+                    throw new ArgumentException($"No active GameObject found with name '{targetName}'");
+
+                var rt = target.GetComponent<RectTransform>();
+                if (rt == null)
+                    throw new ArgumentException($"'{target.name}' has no RectTransform — ui.click only works with UI elements");
+
+                screenPoint = GetRectScreenCenter(rt);
+
+                // Check hittability
+                var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
+                var results = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(pointerData, results);
+
+                if (results.Count > 0)
+                {
+                    var topHit = results[0].gameObject;
+                    if (topHit != target && !topHit.transform.IsChildOf(target.transform))
+                    {
+                        throw new InvalidOperationException(
+                            $"'{target.name}' [i:{target.GetInstanceID()}] is blocked by '{topHit.name}' [i:{topHit.GetInstanceID()}]");
+                    }
+                }
+            }
             else if (x.HasValue && y.HasValue)
             {
                 // Resolve by screen coordinates
@@ -2375,7 +2404,7 @@ namespace UnityCtl
             }
             else
             {
-                throw new ArgumentException("Provide either 'id' or 'x'+'y' coordinates");
+                throw new ArgumentException("Provide 'id', 'name', or 'x'+'y' coordinates");
             }
 
             // Check interactable (reject both null=no handler and false=disabled)
