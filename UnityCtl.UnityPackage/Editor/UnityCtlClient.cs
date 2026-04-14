@@ -1486,9 +1486,18 @@ namespace UnityCtl
                 prefab = go;
             }
 
-            var prefabRoots = new[] { prefab };
+            Protocol.SnapshotObject[] objects;
+            int? matchCount = null;
+
             if (!string.IsNullOrEmpty(filter))
-                prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+            {
+                objects = SerializeFilterMatches(new[] { prefab }, filter, depth, includeComponents, screen);
+                matchCount = objects.Length;
+            }
+            else
+            {
+                objects = new[] { SerializeGameObject(prefab, depth, includeComponents, screen) };
+            }
 
             return new Protocol.SnapshotResult
             {
@@ -1496,7 +1505,8 @@ namespace UnityCtl
                 PrefabAssetPath = prefabPath,
                 IsPlaying = EditorApplication.isPlaying,
                 RootObjectCount = 1,
-                Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, screen)).ToArray()
+                MatchCount = matchCount,
+                Objects = objects
             };
         }
 
@@ -1521,9 +1531,18 @@ namespace UnityCtl
                     if (go == null || go.scene != scene)
                         throw new ArgumentException($"No GameObject with instance ID {targetId} in scene {scenePath}");
 
-                    var sceneIdRoots = new[] { go };
+                    Protocol.SnapshotObject[] idObjects;
+                    int? idMatchCount = null;
+
                     if (!string.IsNullOrEmpty(filter))
-                        sceneIdRoots = sceneIdRoots.Where(g => MatchesFilter(g, filter)).ToArray();
+                    {
+                        idObjects = SerializeFilterMatches(new[] { go }, filter, depth, includeComponents, screen);
+                        idMatchCount = idObjects.Length;
+                    }
+                    else
+                    {
+                        idObjects = new[] { SerializeGameObject(go, depth, includeComponents, screen) };
+                    }
 
                     return new Protocol.SnapshotResult
                     {
@@ -1532,14 +1551,26 @@ namespace UnityCtl
                         ScenePath = scene.path,
                         IsPlaying = false,
                         RootObjectCount = 1,
-                        Objects = sceneIdRoots.Select(g => SerializeGameObject(g, depth, includeComponents, screen)).ToArray()
+                        MatchCount = idMatchCount,
+                        Objects = idObjects
                     };
                 }
 
                 var roots = scene.GetRootGameObjects();
-                var filteredRoots = string.IsNullOrEmpty(filter)
-                    ? roots
-                    : roots.Where(go => MatchesFilter(go, filter)).ToArray();
+                Protocol.SnapshotObject[] serialized;
+                int? matchCount = null;
+
+                if (!string.IsNullOrEmpty(filter))
+                {
+                    serialized = SerializeFilterMatches(roots, filter, depth, includeComponents, screen);
+                    matchCount = serialized.Length;
+                }
+                else
+                {
+                    serialized = roots
+                        .Select(go => SerializeGameObject(go, depth, includeComponents, screen))
+                        .ToArray();
+                }
 
                 return new Protocol.SnapshotResult
                 {
@@ -1548,9 +1579,8 @@ namespace UnityCtl
                     ScenePath = scene.path,
                     IsPlaying = false,
                     RootObjectCount = roots.Length,
-                    Objects = filteredRoots
-                        .Select(go => SerializeGameObject(go, depth, includeComponents, screen))
-                        .ToArray()
+                    MatchCount = matchCount,
+                    Objects = serialized
                 };
             }
             finally
@@ -1566,7 +1596,19 @@ namespace UnityCtl
             if (go == null)
                 throw new ArgumentException($"No GameObject with instance ID {targetId}");
 
-            var matches = string.IsNullOrEmpty(filter) || MatchesFilter(go, filter);
+            Protocol.SnapshotObject[] objects;
+            int? matchCount = null;
+
+            if (!string.IsNullOrEmpty(filter))
+            {
+                objects = SerializeFilterMatches(new[] { go }, filter, depth, includeComponents, screen);
+                matchCount = objects.Length;
+            }
+            else
+            {
+                objects = new[] { SerializeGameObject(go, depth, includeComponents, screen) };
+            }
+
             var stageInfo = GetStageInfo();
             var goScene = go.scene;
             return new Protocol.SnapshotResult
@@ -1579,9 +1621,8 @@ namespace UnityCtl
                 OpenedFromInstanceId = stageInfo.OpenedFromInstanceId,
                 IsPlaying = EditorApplication.isPlaying,
                 RootObjectCount = 1,
-                Objects = matches
-                    ? new[] { SerializeGameObject(go, depth, includeComponents, screen) }
-                    : Array.Empty<Protocol.SnapshotObject>()
+                MatchCount = matchCount,
+                Objects = objects
             };
         }
 
@@ -1594,9 +1635,18 @@ namespace UnityCtl
                 var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
                 var root = prefabStage.prefabContentsRoot;
 
-                var prefabRoots = new[] { root };
+                Protocol.SnapshotObject[] prefabObjects;
+                int? prefabMatchCount = null;
+
                 if (!string.IsNullOrEmpty(filter))
-                    prefabRoots = prefabRoots.Where(go => MatchesFilter(go, filter)).ToArray();
+                {
+                    prefabObjects = SerializeFilterMatches(new[] { root }, filter, depth, includeComponents, screen);
+                    prefabMatchCount = prefabObjects.Length;
+                }
+                else
+                {
+                    prefabObjects = new[] { SerializeGameObject(root, depth, includeComponents, screen) };
+                }
 
                 return new Protocol.SnapshotResult
                 {
@@ -1606,7 +1656,8 @@ namespace UnityCtl
                     OpenedFromInstanceId = currentStage.OpenedFromInstanceId,
                     IsPlaying = false,
                     RootObjectCount = 1,
-                    Objects = prefabRoots.Select(go => SerializeGameObject(go, depth, includeComponents, screen)).ToArray()
+                    MatchCount = prefabMatchCount,
+                    Objects = prefabObjects
                 };
             }
 
@@ -1618,6 +1669,8 @@ namespace UnityCtl
             var allScenes = new List<Protocol.SnapshotSceneInfo>();
             var allObjects = new List<Protocol.SnapshotObject>();
             var totalRootCount = 0;
+            var hasFilter = !string.IsNullOrEmpty(filter);
+            int totalMatchCount = 0;
 
             for (int i = 0; i < sceneCount; i++)
             {
@@ -1625,13 +1678,21 @@ namespace UnityCtl
                 if (!scene.isLoaded) continue;
 
                 var roots = scene.GetRootGameObjects();
-                var filteredRoots = string.IsNullOrEmpty(filter)
-                    ? roots
-                    : roots.Where(go => MatchesFilter(go, filter)).ToArray();
+                Protocol.SnapshotObject[] serialized;
+                int? sceneMatchCount = null;
 
-                var serialized = filteredRoots
-                    .Select(go => SerializeGameObject(go, depth, includeComponents, screen))
-                    .ToArray();
+                if (hasFilter)
+                {
+                    serialized = SerializeFilterMatches(roots, filter, depth, includeComponents, screen);
+                    sceneMatchCount = serialized.Length;
+                    totalMatchCount += serialized.Length;
+                }
+                else
+                {
+                    serialized = roots
+                        .Select(go => SerializeGameObject(go, depth, includeComponents, screen))
+                        .ToArray();
+                }
 
                 allScenes.Add(new Protocol.SnapshotSceneInfo
                 {
@@ -1639,7 +1700,8 @@ namespace UnityCtl
                     ScenePath = scene.path,
                     IsActive = scene == activeScene,
                     RootObjectCount = roots.Length,
-                    Objects = serialized
+                    Objects = serialized,
+                    MatchCount = sceneMatchCount
                 });
 
                 allObjects.AddRange(serialized);
@@ -1653,6 +1715,7 @@ namespace UnityCtl
                 ScenePath = activeScene.path,
                 IsPlaying = isPlaying,
                 RootObjectCount = totalRootCount,
+                MatchCount = hasFilter ? totalMatchCount : null,
                 Objects = allObjects.ToArray(),
                 Scenes = allScenes.Count > 1 ? allScenes.ToArray() : null
             };
@@ -1975,7 +2038,10 @@ namespace UnityCtl
             return null;
         }
 
-        private static bool MatchesFilter(GameObject go, string filter)
+        /// <summary>
+        /// Non-recursive filter check — matches only the given object, not descendants.
+        /// </summary>
+        private static bool MatchesSingle(GameObject go, string filter)
         {
             if (string.IsNullOrEmpty(filter)) return true;
 
@@ -1988,45 +2054,56 @@ namespace UnityCtl
             switch (filterType)
             {
                 case "type":
-                    return go.GetComponents<Component>().Any(c => c != null && c.GetType().Name == filterValue)
-                        || CheckChildrenForType(go.transform, filterValue);
+                    return go.GetComponents<Component>().Any(c => c != null && c.GetType().Name == filterValue);
                 case "name":
                     var nameMode = GetNameMatchMode(filterValue, out var namePattern);
-                    return MatchesName(go.name, namePattern, nameMode)
-                        || CheckChildrenForName(go.transform, namePattern, nameMode);
+                    return MatchesName(go.name, namePattern, nameMode);
                 case "tag":
-                    return go.CompareTag(filterValue)
-                        || CheckChildrenForTag(go.transform, filterValue);
+                    return go.CompareTag(filterValue);
                 default:
                     return true;
             }
         }
 
-        private static bool CheckChildrenForType(Transform parent, string typeName)
+        /// <summary>
+        /// Walks the full tree under root and collects all GameObjects that match the filter.
+        /// </summary>
+        private static List<GameObject> FindFilterMatches(GameObject root, string filter)
         {
-            for (int i = 0; i < parent.childCount; i++)
-            {
-                var child = parent.GetChild(i);
-                if (child.GetComponents<Component>().Any(c => c != null && c.GetType().Name == typeName))
-                    return true;
-                if (CheckChildrenForType(child, typeName))
-                    return true;
-            }
-            return false;
+            var matches = new List<GameObject>();
+            FindFilterMatchesRecursive(root, filter, matches);
+            return matches;
         }
 
-        private static bool CheckChildrenForTag(Transform parent, string tag)
+        private static void FindFilterMatchesRecursive(GameObject go, string filter, List<GameObject> matches)
         {
-            for (int i = 0; i < parent.childCount; i++)
-            {
-                var child = parent.GetChild(i);
-                if (child.CompareTag(tag))
-                    return true;
-                if (CheckChildrenForTag(child, tag))
-                    return true;
-            }
-            return false;
+            if (MatchesSingle(go, filter))
+                matches.Add(go);
+
+            for (int i = 0; i < go.transform.childCount; i++)
+                FindFilterMatchesRecursive(go.transform.GetChild(i).gameObject, filter, matches);
         }
+
+        /// <summary>
+        /// Finds all filter matches across the given roots, serializes each match with
+        /// depth relative to the match, and annotates each with its hierarchy path.
+        /// </summary>
+        private static Protocol.SnapshotObject[] SerializeFilterMatches(
+            GameObject[] roots, string filter, int depth, bool includeComponents, bool screen)
+        {
+            var result = new List<Protocol.SnapshotObject>();
+            foreach (var root in roots)
+            {
+                foreach (var match in FindFilterMatches(root, filter))
+                {
+                    var obj = SerializeGameObject(match, depth, includeComponents, screen);
+                    obj.Path = GetHierarchyPath(match);
+                    result.Add(obj);
+                }
+            }
+            return result.ToArray();
+        }
+
 
         private enum NameMatchMode { Exact, Prefix, Suffix, Contains }
 
@@ -2068,18 +2145,6 @@ namespace UnityCtl
             }
         }
 
-        private static bool CheckChildrenForName(Transform parent, string pattern, NameMatchMode mode)
-        {
-            for (int i = 0; i < parent.childCount; i++)
-            {
-                var child = parent.GetChild(i);
-                if (MatchesName(child.name, pattern, mode))
-                    return true;
-                if (CheckChildrenForName(child, pattern, mode))
-                    return true;
-            }
-            return false;
-        }
 
         private static string GetUIText(GameObject go)
         {

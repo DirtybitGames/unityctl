@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -225,20 +226,17 @@ public static class SnapshotCommand
                 // Multi-scene mode
                 var playIndicator = result.IsPlaying ? " (playing)" : "";
                 sb.AppendLine($"{result.Scenes.Length} scenes loaded{playIndicator}");
-                sb.AppendLine($"{result.RootObjectCount} root objects");
+                FormatRootCountLine(sb, result.RootObjectCount, result.MatchCount);
                 sb.AppendLine();
 
                 foreach (var scene in result.Scenes)
                 {
                     var activeMarker = scene.IsActive ? " [active]" : "";
                     sb.AppendLine($"--- {scene.SceneName} ({scene.ScenePath}){activeMarker} ---");
-                    sb.AppendLine($"{scene.RootObjectCount} root objects");
+                    FormatRootCountLine(sb, scene.RootObjectCount, scene.MatchCount);
                     sb.AppendLine();
 
-                    foreach (var obj in scene.Objects)
-                    {
-                        FormatObject(sb, obj, 0, components, screen, isDrillDown);
-                    }
+                    FormatObjects(sb, scene.Objects, components, screen, isDrillDown);
 
                     sb.AppendLine();
                 }
@@ -252,16 +250,49 @@ public static class SnapshotCommand
                 sb.AppendLine($"Scene: {result.SceneName}{playIndicator}");
             }
 
-            sb.AppendLine($"{result.RootObjectCount} root objects");
+            FormatRootCountLine(sb, result.RootObjectCount, result.MatchCount);
             sb.AppendLine();
         }
 
-        foreach (var obj in result.Objects)
-        {
-            FormatObject(sb, obj, 0, components, screen, isDrillDown);
-        }
+        FormatObjects(sb, result.Objects, components, screen, isDrillDown);
 
         return sb.ToString();
+    }
+
+    private static void FormatRootCountLine(StringBuilder sb, int rootObjectCount, int? matchCount)
+    {
+        sb.Append($"{rootObjectCount} root objects");
+        if (matchCount.HasValue)
+            sb.Append($", {matchCount} matched");
+        sb.AppendLine();
+    }
+
+    private static void FormatObjects(StringBuilder sb, SnapshotObject[] objects, bool components, bool screen, bool isDrillDown)
+    {
+        foreach (var obj in objects)
+        {
+            if (!string.IsNullOrEmpty(obj.Path))
+            {
+                // Breadcrumb mode: show ancestor path, then match subtree
+                var pathParts = obj.Path.Split('/');
+                if (pathParts.Length > 1)
+                {
+                    var breadcrumb = string.Join(" / ", pathParts.Take(pathParts.Length - 1)) + " /";
+                    sb.AppendLine(breadcrumb);
+                    FormatObject(sb, obj, 1, components, screen, false);
+                }
+                else
+                {
+                    // Root object matched — no breadcrumb needed
+                    FormatObject(sb, obj, 0, components, screen, false);
+                }
+                sb.AppendLine();
+            }
+            else
+            {
+                FormatObject(sb, obj, 0, components, screen, isDrillDown);
+            }
+        }
     }
 
     internal static void FormatObject(StringBuilder sb, SnapshotObject obj, int indent, bool components, bool screen, bool isDrillDown)
