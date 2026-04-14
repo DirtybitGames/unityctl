@@ -51,8 +51,8 @@ unityctl scene load <path> --additive  # Load additively (without unloading curr
 unityctl test run            # Run edit mode tests
 unityctl test run --mode playmode
 
-# Screenshots
-unityctl screenshot capture  # Capture game view
+# Screenshots (use sparingly — prefer snapshot/logs/eval for verification)
+unityctl screenshot capture  # Capture game view (large context cost, hard to diff)
 
 # Video Recording (requires com.unity.recorder package)
 # Note: record start auto-enters play mode if not already playing
@@ -89,6 +89,23 @@ unityctl dialog list                   # List detected popup dialogs
 unityctl dialog dismiss                # Dismiss first dialog (clicks first button)
 unityctl dialog dismiss --button "OK"  # Click specific button
 ```
+
+## Verifying Changes
+
+Pick the cheapest observation that answers the question — screenshots are expensive (consume context, hard to diff across iterations) and imprecise (pixel details are unreliable). Prefer structured tools:
+
+| What you need to verify | Tool |
+|------------------------|------|
+| Scene hierarchy, components, properties | `snapshot` (with `--components`, `--filter`) |
+| UI layout, visibility, screen positions | `snapshot --screen` |
+| Runtime behavior, errors, warnings | `logs` |
+| Specific value or state | `script eval` (query it directly) |
+| Test correctness | `test run` |
+| Visual appearance (art, shaders, layout polish) | `screenshot capture` (only when visuals are the point) |
+
+**Rule of thumb:** if you can express the expected result as a value or property, verify with `snapshot`, `logs`, or `script eval` — not a screenshot.
+
+When a screenshot is the right tool, crop it to the relevant region before reading it — a focused crop produces far better results than a full-screen capture and uses less context.
 
 ## Scene Observation & Manipulation Workflow
 
@@ -166,12 +183,13 @@ unityctl script eval -t 600 -u UnityEditor 'return BuildPipeline.BuildPlayer(opt
 
 ```bash
 # After editing C# files...
-unityctl asset refresh       # Compile (fix errors if any)
-unityctl snapshot            # Observe scene state
+unityctl asset refresh       # Compile — check for errors
+unityctl snapshot            # Verify scene state (structured, cheap)
 unityctl play enter
 unityctl snapshot            # Check runtime state with instance IDs
-unityctl logs                # Check runtime logs
+unityctl logs                # Check for errors/warnings
 unityctl play exit
+# Only screenshot if you need to judge something visual (art, layout polish)
 ```
 
 ## Troubleshooting
