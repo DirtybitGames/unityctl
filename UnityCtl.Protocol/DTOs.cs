@@ -418,6 +418,9 @@ public class SnapshotResult
     [JsonProperty("scenes", NullValueHandling = NullValueHandling.Ignore)]
     public SnapshotSceneInfo[]? Scenes { get; init; }
 
+    [JsonProperty("matchCount", NullValueHandling = NullValueHandling.Ignore)]
+    public int? MatchCount { get; init; }
+
     [JsonProperty("screenWidth", NullValueHandling = NullValueHandling.Ignore)]
     public int? ScreenWidth { get; set; }
 
@@ -441,6 +444,9 @@ public class SnapshotSceneInfo
 
     [JsonProperty("objects")]
     public SnapshotObject[] Objects { get; set; } = Array.Empty<SnapshotObject>();
+
+    [JsonProperty("matchCount", NullValueHandling = NullValueHandling.Ignore)]
+    public int? MatchCount { get; set; }
 }
 
 public class SnapshotObject
@@ -515,6 +521,9 @@ public class SnapshotObject
 
     [JsonProperty("children")]
     public SnapshotObject[]? Children { get; set; }
+
+    [JsonProperty("path", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Path { get; set; }
 }
 
 public class PrefabOpenResult

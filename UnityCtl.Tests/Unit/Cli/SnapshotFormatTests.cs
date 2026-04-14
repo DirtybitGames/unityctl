@@ -10,6 +10,8 @@ public class SnapshotFormatTests
     private static string Format(SnapshotResult result, bool components = false, bool screen = false, bool isDrillDown = false)
         => SnapshotCommand.BuildSnapshotString(result, components, screen, isDrillDown);
 
+    private static SnapshotComponent C(string typeName) => new() { TypeName = typeName };
+
     private static string FormatQuery(SnapshotQueryResult result)
         => SnapshotCommand.BuildQueryResultString(result);
 
@@ -459,5 +461,190 @@ public class SnapshotFormatTests
         });
 
         Assert.Contains("LockedBtn [i:300] — Canvas/LockedBtn disabled", output);
+    }
+
+    // --- Filter: breadcrumb + match subtree ---
+
+    [Fact]
+    public void Filter_Match_ShowsBreadcrumbAndSubtree()
+    {
+        var result = new SnapshotResult
+        {
+            SceneName = "Clan",
+            IsPlaying = true,
+            RootObjectCount = 4,
+            MatchCount = 1,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 1311, Name = "ActionButton", Active = true,
+                    Path = "UISceneCanvas/IgnoreSafeArea/PopupContainer/ActionButton",
+                    Interactable = true, Layer = "UI",
+                    Text = "Claim",
+                    Rect = "rect(-100, -40, 200, 80)",
+                    ChildCount = 2,
+                    Children = new[]
+                    {
+                        new SnapshotObject { InstanceId = 1312, Name = "ButtonIcon", Layer = "UI" },
+                        new SnapshotObject { InstanceId = 1313, Name = "ButtonLabel", Layer = "UI", Text = "Claim" }
+                    }
+                }
+            }
+        };
+
+        var output = Format(result);
+
+        // Breadcrumb path
+        Assert.Contains("UISceneCanvas / IgnoreSafeArea / PopupContainer /", output);
+        // Match object indented under breadcrumb
+        Assert.Contains("  ActionButton [i:1311]", output);
+        // Children visible
+        Assert.Contains("ButtonIcon", output);
+        Assert.Contains("ButtonLabel", output);
+        // Header shows match count
+        Assert.Contains("4 root objects, 1 matched", output);
+        // Noise from sibling branches is gone — only the match path + subtree
+        Assert.DoesNotContain("MainContent", output);
+        Assert.DoesNotContain("TopBar", output);
+        // Compact output
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.True(lines.Length < 15, $"Expected compact output but got {lines.Length} lines");
+    }
+
+    [Fact]
+    public void Filter_Match_DepthRelativeToMatch()
+    {
+        // With the new behavior, depth is relative to the match.
+        // depth=1 shows ActionButton + one level of children.
+        // The match is always visible regardless of how deep it was in the original tree.
+        var result = new SnapshotResult
+        {
+            SceneName = "Clan",
+            IsPlaying = true,
+            RootObjectCount = 4,
+            MatchCount = 1,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 1311, Name = "ActionButton", Active = true,
+                    Path = "UISceneCanvas/IgnoreSafeArea/PopupContainer/ActionButton",
+                    Layer = "UI", Text = "Claim",
+                    ChildCount = 2,
+                    Children = new[]
+                    {
+                        new SnapshotObject { InstanceId = 1312, Name = "ButtonIcon", ChildCount = 1 },
+                        new SnapshotObject { InstanceId = 1313, Name = "ButtonLabel", Text = "Claim" }
+                    }
+                }
+            }
+        };
+
+        var output = Format(result);
+
+        // Match IS visible (unlike old behavior where depth from root could hide it)
+        Assert.Contains("ActionButton", output);
+        Assert.Contains("ButtonIcon", output);
+        // Truncation marker shows there's more to drill into with --id
+        Assert.Contains("(1 children)", output);
+    }
+
+    [Fact]
+    public void Filter_MultipleMatches_ShowsSeparateBlocks()
+    {
+        var result = new SnapshotResult
+        {
+            SceneName = "Menu",
+            IsPlaying = false,
+            RootObjectCount = 3,
+            MatchCount = 2,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 100, Name = "PlayButton", Active = true,
+                    Path = "Canvas/MainPanel/PlayButton",
+                    Interactable = true, Text = "Play"
+                },
+                new SnapshotObject
+                {
+                    InstanceId = 200, Name = "QuitButton", Active = true,
+                    Path = "Canvas/MainPanel/QuitButton",
+                    Interactable = true, Text = "Quit"
+                }
+            }
+        };
+
+        var output = Format(result);
+
+        Assert.Contains("3 root objects, 2 matched", output);
+        // Each match has its own breadcrumb
+        Assert.Contains("Canvas / MainPanel /", output);
+        Assert.Contains("PlayButton [i:100]", output);
+        Assert.Contains("QuitButton [i:200]", output);
+    }
+
+    [Fact]
+    public void Filter_RootMatch_NoBreadcrumb()
+    {
+        var result = new SnapshotResult
+        {
+            SceneName = "S",
+            IsPlaying = false,
+            RootObjectCount = 3,
+            MatchCount = 1,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 100, Name = "Camera", Active = true,
+                    Path = "Camera" // single segment — root object matched
+                }
+            }
+        };
+
+        var output = Format(result);
+
+        Assert.Contains("Camera [i:100]", output);
+        // No breadcrumb line (no " / " separator)
+        Assert.DoesNotContain(" / ", output);
+        // Not indented — renders at column 0
+        Assert.Contains("\nCamera [i:100]", output);
+    }
+
+    [Fact]
+    public void NoFilter_PathAbsent_UnchangedOutput()
+    {
+        // Regression guard: objects without Path render identically to pre-change behavior
+        var result = new SnapshotResult
+        {
+            SceneName = "S",
+            IsPlaying = false,
+            RootObjectCount = 2,
+            Objects = new[]
+            {
+                new SnapshotObject
+                {
+                    InstanceId = 1, Name = "Camera", Active = true,
+                    ChildCount = 1,
+                    Children = new[]
+                    {
+                        new SnapshotObject { InstanceId = 2, Name = "Lens" }
+                    }
+                },
+                new SnapshotObject { InstanceId = 3, Name = "Light" }
+            }
+        };
+
+        var output = Format(result);
+
+        // Standard format: no breadcrumbs, no match count
+        Assert.Contains("Scene: S", output);
+        Assert.Contains("2 root objects", output);
+        Assert.DoesNotContain("matched", output);
+        Assert.Contains("Camera [i:1]", output);
+        Assert.Contains("  Lens [i:2]", output);
+        Assert.Contains("Light [i:3]", output);
     }
 }
