@@ -647,4 +647,65 @@ public class SnapshotFormatTests
         Assert.Contains("  Lens [i:2]", output);
         Assert.Contains("Light [i:3]", output);
     }
+
+    [Fact]
+    public void Filter_MultiScene_ShowsPerSceneMatchCount()
+    {
+        var result = new SnapshotResult
+        {
+            IsPlaying = true,
+            RootObjectCount = 6,
+            MatchCount = 3,
+            Objects = Array.Empty<SnapshotObject>(),
+            Scenes = new[]
+            {
+                new SnapshotSceneInfo
+                {
+                    SceneName = "UI", ScenePath = "Assets/UI.unity",
+                    IsActive = true, RootObjectCount = 4, MatchCount = 2,
+                    Objects = new[]
+                    {
+                        new SnapshotObject
+                        {
+                            InstanceId = 100, Name = "PlayButton", Active = true,
+                            Path = "Canvas/PlayButton", Interactable = true
+                        },
+                        new SnapshotObject
+                        {
+                            InstanceId = 200, Name = "QuitButton", Active = true,
+                            Path = "Canvas/QuitButton", Interactable = true
+                        }
+                    }
+                },
+                new SnapshotSceneInfo
+                {
+                    SceneName = "HUD", ScenePath = "Assets/HUD.unity",
+                    IsActive = false, RootObjectCount = 2, MatchCount = 1,
+                    Objects = new[]
+                    {
+                        new SnapshotObject
+                        {
+                            InstanceId = 300, Name = "SettingsButton", Active = true,
+                            Path = "Overlay/SettingsButton", Interactable = true
+                        }
+                    }
+                }
+            }
+        };
+
+        var output = Format(result);
+
+        // Global header
+        Assert.Contains("6 root objects, 3 matched", output);
+        // Per-scene counts
+        Assert.Contains("4 root objects, 2 matched", output);
+        Assert.Contains("2 root objects, 1 matched", output);
+        // Breadcrumbs
+        Assert.Contains("Canvas /", output);
+        Assert.Contains("Overlay /", output);
+        // Match objects
+        Assert.Contains("PlayButton [i:100]", output);
+        Assert.Contains("QuitButton [i:200]", output);
+        Assert.Contains("SettingsButton [i:300]", output);
+    }
 }
