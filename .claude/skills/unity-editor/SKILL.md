@@ -67,7 +67,7 @@ unityctl snapshot --depth 4                # Deeper traversal
 unityctl snapshot --id 14200 --components  # Drill into one object with all properties
 unityctl snapshot --id 14200 --filter "type:Rigidbody"  # Filter drill-down result
 unityctl snapshot --screen                 # Add screen-space bounds and visibility for UI elements
-unityctl snapshot --filter "type:Rigidbody"  # Filter by type:T, name:N*, tag:T
+unityctl snapshot --filter "type:Rigidbody"  # Filter: type:T, name:N* (glob, not regex), tag:T
 unityctl snapshot --scene Assets/Scenes/Other.unity      # Snapshot another scene (read-only)
 unityctl snapshot --prefab Assets/Prefabs/Player.prefab  # Snapshot a prefab asset
 unityctl snapshot query 400 300            # What UI element is at screen pixel (400, 300)?

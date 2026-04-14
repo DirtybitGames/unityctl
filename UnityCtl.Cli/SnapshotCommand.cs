@@ -118,6 +118,11 @@ public static class SnapshotCommand
                 if (result != null)
                 {
                     FormatSnapshot(result, components, screen, id.HasValue);
+
+                    if (!string.IsNullOrEmpty(filter) && IsEmpty(result))
+                    {
+                        Console.Error.WriteLine($"No objects matched filter \"{filter}\". Hint: --filter uses glob wildcards (* only), not regex. Example: name:*Button*, type:Text, tag:Player");
+                    }
                 }
             }
         });
@@ -473,5 +478,12 @@ public static class SnapshotCommand
         {
             sb.AppendLine($"{indent}{key}: {value}");
         }
+    }
+
+    private static bool IsEmpty(SnapshotResult result)
+    {
+        if (result.Scenes is { Length: > 0 })
+            return Array.TrueForAll(result.Scenes, s => s.Objects.Length == 0);
+        return result.Objects.Length == 0;
     }
 }
