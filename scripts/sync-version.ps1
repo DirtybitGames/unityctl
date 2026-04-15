@@ -8,4 +8,6 @@ param(
 
 $content = Get-Content $PackageJsonPath -Raw
 $updated = $content -replace '("version"\s*:\s*)"[^"]*"', "`$1`"$Version`""
-Set-Content -Path $PackageJsonPath -Value $updated -NoNewline
+if ($updated -ne $content) {
+    Set-Content -Path $PackageJsonPath -Value $updated -NoNewline
+}
