@@ -1,6 +1,6 @@
 {
   "name": "com.dirtybit.unityctl",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "displayName": "UnityCtl",
   "description": "Remote control plugin for Unity Editor",
   "unity": "2022.3",
