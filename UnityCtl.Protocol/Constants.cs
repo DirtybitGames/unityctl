@@ -65,6 +65,7 @@ public static class UnityCtlEvents
     public const string TestStarted = "test.started";
     public const string TestFinished = "test.finished";
     public const string DomainReloadStarting = "domain.reloadStarting";
+    public const string DomainReloadStartingAck = "domain.reloadStartingAck";
     public const string RecordFinished = "record.finished";
 }
 

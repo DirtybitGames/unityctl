@@ -81,6 +81,10 @@ namespace UnityCtl
         private readonly object _bufferLock = new object();
         private readonly object _connectionLock = new object();
 
+        // Domain reload ack handshake — see SendDomainReloadStartingAndWait
+        private TaskCompletionSource<bool> _reloadAckTcs;
+        private readonly object _reloadAckLock = new object();
+
         public void TryConnectIfBridgePresent()
         {
             try
@@ -339,6 +343,16 @@ namespace UnityCtl
                 {
                     // Bridge responded to our hello
                     DebugLog("[UnityCtl] Handshake complete");
+                }
+                else if (messageType == "event")
+                {
+                    var evt = JsonHelper.Deserialize<EventMessage>(json);
+                    if (evt != null && evt.Event == UnityCtlEvents.DomainReloadStartingAck)
+                    {
+                        TaskCompletionSource<bool> tcs;
+                        lock (_reloadAckLock) { tcs = _reloadAckTcs; }
+                        tcs?.TrySetResult(true);
+                    }
                 }
             }
             catch (Exception ex)
@@ -2902,9 +2916,18 @@ namespace UnityCtl
             _ = SendMessageAsync(eventMessage);
         }
 
-        public void SendDomainReloadStartingEvent()
+        public void SendDomainReloadStartingAndWait(TimeSpan timeout)
         {
             if (!IsConnected) return;
+
+            TaskCompletionSource<bool> tcs;
+            lock (_reloadAckLock)
+            {
+                // Any previous in-flight handshake is now stale — cancel it.
+                _reloadAckTcs?.TrySetCanceled();
+                tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _reloadAckTcs = tcs;
+            }
 
             var eventMessage = new EventMessage
             {
@@ -2915,14 +2938,30 @@ namespace UnityCtl
 
             try
             {
-                // Use synchronous wait to ensure delivery before domain unloads
-                // This is critical - the callback is synchronous so Unity waits for us
-                SendMessageAsync(eventMessage).Wait(100);
+                // Hop to the thread pool first so awaited continuations don't try
+                // to marshal back to Unity's main-thread SynchronizationContext,
+                // which would deadlock the .Wait() below.
+                Task.Run(async () =>
+                {
+                    await SendMessageAsync(eventMessage);
+                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeout));
+                    if (completed != tcs.Task)
+                        throw new TimeoutException("Bridge did not ack domain.reloadStarting");
+                }).Wait(timeout + TimeSpan.FromMilliseconds(100));
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                // Log but don't throw - domain reload will happen anyway
-                DebugLogWarning($"[UnityCtl] Failed to send domain reload event: {ex.Message}");
+                // Timeout or send error — proceed with reload regardless. Old bridges
+                // without ack support will hit this path and fall back to the
+                // disconnect-based grace period. Log but don't throw.
+                DebugLogWarning($"[UnityCtl] reload ack wait failed: {ex.GetBaseException().Message}");
+            }
+            finally
+            {
+                lock (_reloadAckLock)
+                {
+                    if (_reloadAckTcs == tcs) _reloadAckTcs = null;
+                }
             }
         }
 

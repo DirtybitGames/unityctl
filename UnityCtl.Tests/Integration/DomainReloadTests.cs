@@ -169,6 +169,38 @@ public class DomainReloadTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DomainReloadStarting_BridgeSendsAck()
+    {
+        // Send the reload-starting event and expect the bridge to ack back
+        // over the same WebSocket within a short window.
+        await _fixture.FakeUnity.SendEventAsync(
+            UnityCtlEvents.DomainReloadStarting, new { });
+
+        var ack = await _fixture.FakeUnity.WaitForEventAsync(
+            UnityCtlEvents.DomainReloadStartingAck,
+            TimeSpan.FromMilliseconds(500));
+
+        Assert.Equal(UnityCtlEvents.DomainReloadStartingAck, ack.EventName);
+    }
+
+    [Fact]
+    public async Task DomainReloadStarting_AckSentAfterFlagIsFlipped()
+    {
+        // The plugin's contract is: once the ack arrives, the bridge's
+        // IsDomainReloadInProgress flag is already set. Verify the order.
+        await _fixture.FakeUnity.SendEventAsync(
+            UnityCtlEvents.DomainReloadStarting, new { });
+
+        await _fixture.FakeUnity.WaitForEventAsync(
+            UnityCtlEvents.DomainReloadStartingAck,
+            TimeSpan.FromMilliseconds(500));
+
+        // By the time the ack is visible on the Unity side, the bridge must
+        // already consider the grace period active.
+        Assert.True(_fixture.BridgeState.IsDomainReloadInProgress);
+    }
+
+    [Fact]
     public async Task PlayModeChanged_EnteredPlayMode_AutoClearsLogs()
     {
         // Add some logs
