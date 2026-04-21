@@ -52,7 +52,10 @@ unityctl test run            # Run edit mode tests
 unityctl test run --mode playmode
 
 # Screenshots (use sparingly — prefer snapshot/logs/eval for verification)
-unityctl screenshot capture  # Capture game view (large context cost, hard to diff)
+unityctl screenshot capture              # Capture game view (large context cost, hard to diff)
+unityctl screenshot list-windows         # List open editor windows (type, title, size, docked)
+unityctl screenshot window <window>      # Capture specific editor window by type or title
+unityctl screenshot window SceneView out.png  # e.g. capture Scene view to out.png
 
 # Video Recording (requires com.unity.recorder package)
 # Note: record start auto-enters play mode if not already playing
