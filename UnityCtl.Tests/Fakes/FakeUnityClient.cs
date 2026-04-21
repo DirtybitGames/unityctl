@@ -21,6 +21,8 @@ public class FakeUnityClient : IAsyncDisposable
     private readonly ConcurrentQueue<Action<FakeUnityClient>> _postResponseActions = new();
     private readonly ConcurrentQueue<ReceivedRequest> _receivedRequests = new();
     private readonly SemaphoreSlim _requestReceived = new(0);
+    private readonly ConcurrentQueue<ReceivedEvent> _receivedEvents = new();
+    private readonly SemaphoreSlim _eventReceived = new(0);
 
     private string _projectId = "proj-test1234";
     private string _unityVersion = "6000.0.0f1";
@@ -34,6 +36,12 @@ public class FakeUnityClient : IAsyncDisposable
     /// </summary>
     public IReadOnlyCollection<ReceivedRequest> ReceivedRequests =>
         _receivedRequests.ToArray();
+
+    /// <summary>
+    /// All events received from the bridge, in order.
+    /// </summary>
+    public IReadOnlyCollection<ReceivedEvent> ReceivedEvents =>
+        _receivedEvents.ToArray();
 
     public FakeUnityClient WithProjectId(string projectId)
     {
@@ -199,6 +207,41 @@ public class FakeUnityClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Wait until an event with the given name is received from the bridge.
+    /// Events that arrived before this call is made are also considered.
+    /// </summary>
+    public async Task<ReceivedEvent> WaitForEventAsync(string eventName,
+        TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (var evt in _receivedEvents)
+            {
+                if (evt.EventName == eventName && !evt.Claimed)
+                {
+                    evt.Claimed = true;
+                    return evt;
+                }
+            }
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(deadline - DateTime.UtcNow);
+            try
+            {
+                await _eventReceived.WaitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        throw new TimeoutException($"Timed out waiting for event '{eventName}'");
+    }
+
+    /// <summary>
     /// Wait until a request with the given command is received.
     /// </summary>
     public async Task<ReceivedRequest> WaitForRequestAsync(string command,
@@ -306,6 +349,19 @@ public class FakeUnityClient : IAsyncDisposable
             _requestReceived.Release();
 
             await HandleCommandAsync(request, ct);
+        }
+        else if (type == "event")
+        {
+            var evt = JsonHelper.Deserialize<EventMessage>(json);
+            if (evt == null) return;
+
+            _receivedEvents.Enqueue(new ReceivedEvent
+            {
+                EventName = evt.Event,
+                Payload = evt.Payload,
+                ReceivedAt = DateTime.UtcNow
+            });
+            _eventReceived.Release();
         }
         // Ignore response messages (hello response from bridge)
     }
@@ -442,6 +498,17 @@ public class ReceivedRequest
     public required string Command { get; init; }
     public string? AgentId { get; init; }
     public Dictionary<string, object?>? Args { get; init; }
+    public DateTime ReceivedAt { get; init; }
+    internal bool Claimed { get; set; }
+}
+
+/// <summary>
+/// Record of an event received by the fake Unity client (sent by the bridge).
+/// </summary>
+public class ReceivedEvent
+{
+    public required string EventName { get; init; }
+    public object? Payload { get; init; }
     public DateTime ReceivedAt { get; init; }
     internal bool Claimed { get; set; }
 }

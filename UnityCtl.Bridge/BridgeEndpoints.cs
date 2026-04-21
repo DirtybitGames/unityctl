@@ -1168,7 +1168,7 @@ public static class BridgeEndpoints
                     break;
 
                 case "event":
-                    HandleEvent(json, state);
+                    await HandleEventAsync(json, state, webSocket, cancellationToken);
                     break;
 
                 default:
@@ -1236,7 +1236,7 @@ public static class BridgeEndpoints
         }
     }
 
-    private static void HandleEvent(string json, BridgeState state)
+    private static async Task HandleEventAsync(string json, BridgeState state, WebSocket webSocket, CancellationToken cancellationToken)
     {
         var eventMessage = JsonHelper.Deserialize<EventMessage>(json);
         if (eventMessage == null) return;
@@ -1295,12 +1295,39 @@ public static class BridgeEndpoints
 
             case UnityCtlEvents.DomainReloadStarting:
                 Console.WriteLine($"[Event] Domain reload starting");
+                // Flag must flip BEFORE the ack is sent — the plugin's contract
+                // is "once acked, the flag is set."
                 state.OnDomainReloadStarting();
+                await SendReloadStartingAckAsync(webSocket, cancellationToken);
                 break;
         }
 
         // Notify waiters after state changes are applied
         state.ProcessEvent(eventMessage);
+    }
+
+    private static async Task SendReloadStartingAckAsync(WebSocket webSocket, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var ack = new EventMessage
+            {
+                Origin = MessageOrigin.Bridge,
+                Event = UnityCtlEvents.DomainReloadStartingAck,
+                Payload = new { }
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonHelper.Serialize(ack));
+            await webSocket.SendAsync(
+                new ArraySegment<byte>(bytes),
+                WebSocketMessageType.Text,
+                true,
+                cancellationToken
+            );
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Warning] Failed to send domain.reloadStartingAck: {ex.Message}");
+        }
     }
 }
 

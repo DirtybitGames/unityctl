@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Callbacks;
@@ -88,8 +89,11 @@ namespace UnityCtl
 
         private static void OnBeforeAssemblyReload()
         {
-            // This fires RIGHT BEFORE domain reload - send notification to bridge
-            UnityCtlClient.Instance.SendDomainReloadStartingEvent();
+            // This fires RIGHT BEFORE domain reload. Block until the bridge acks
+            // (≤ 500 ms) so its grace-period flag is guaranteed to be set before
+            // our WebSocket dies — otherwise an in-flight RPC would be cancelled
+            // by the disconnect path instead of held for reconnect.
+            UnityCtlClient.Instance.SendDomainReloadStartingAndWait(TimeSpan.FromMilliseconds(500));
         }
     }
 }
