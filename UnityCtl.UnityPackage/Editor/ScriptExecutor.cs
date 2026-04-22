@@ -1,5 +1,7 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -15,6 +17,45 @@ namespace UnityCtl.Editor
     /// </summary>
     public static class ScriptExecutor
     {
+        static List<MetadataReference>? s_References;
+        static readonly object s_ReferencesLock = new object();
+        static bool s_InvalidationHooked;
+
+        static List<MetadataReference> GetReferences()
+        {
+            var cached = s_References;
+            if (cached != null) return cached;
+
+            lock (s_ReferencesLock)
+            {
+                if (s_References != null) return s_References;
+
+                if (!s_InvalidationHooked)
+                {
+                    AppDomain.CurrentDomain.AssemblyLoad += (_, args) =>
+                    {
+                        // Only invalidate for on-disk assemblies we'd actually include in the reference
+                        // list. Ignore in-memory assemblies like our own Assembly.Load(byte[]) output —
+                        // otherwise every script execution would invalidate the cache it just built.
+                        var loaded = args.LoadedAssembly;
+                        if (!loaded.IsDynamic && !string.IsNullOrEmpty(loaded.Location))
+                            s_References = null;
+                    };
+                    s_InvalidationHooked = true;
+                }
+
+                var refs = new List<MetadataReference>();
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (asm.IsDynamic) continue;
+                    if (string.IsNullOrEmpty(asm.Location)) continue;
+                    refs.Add(MetadataReference.CreateFromFile(asm.Location));
+                }
+                s_References = refs;
+                return s_References;
+            }
+        }
+
         public static ScriptExecuteResult Execute(string code, string className, string methodName, string[]? scriptArgs = null)
         {
             if (string.IsNullOrEmpty(code))
@@ -44,17 +85,20 @@ namespace UnityCtl.Editor
                 };
             }
 
+            var profile = Environment.GetEnvironmentVariable("UNITYCTL_SCRIPT_PROFILE") == "1";
+            var refSw = profile ? Stopwatch.StartNew() : null;
+            var compileSw = profile ? new Stopwatch() : null;
+
             try
             {
                 // Parse the code
                 var syntaxTree = CSharpSyntaxTree.ParseText(code);
 
-                // Get references from all loaded assemblies
-                var references = AppDomain.CurrentDomain.GetAssemblies()
-                    .Where(a => !a.IsDynamic)
-                    .Where(a => !string.IsNullOrEmpty(a.Location))
-                    .Select(a => MetadataReference.CreateFromFile(a.Location))
-                    .ToArray();
+                // Get references from all loaded assemblies (cached across calls; invalidated on AssemblyLoad).
+                var references = GetReferences();
+
+                if (refSw != null) refSw.Stop();
+                compileSw?.Start();
 
                 // Create compilation
                 var compilation = CSharpCompilation.Create(
@@ -67,6 +111,12 @@ namespace UnityCtl.Editor
                 // Emit to memory
                 using var ms = new MemoryStream();
                 var emitResult = compilation.Emit(ms);
+
+                if (compileSw != null)
+                {
+                    compileSw.Stop();
+                    UnityEngine.Debug.Log($"[unityctl.script] refs={refSw!.ElapsedMilliseconds}ms compile={compileSw.ElapsedMilliseconds}ms");
+                }
 
                 if (!emitResult.Success)
                 {
