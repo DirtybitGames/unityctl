@@ -1458,16 +1458,21 @@ namespace UnityCtl
             };
         }
 
+        private static int ClampLimit(int? requested, int defaultValue, int max)
+        {
+            var v = requested ?? defaultValue;
+            if (v < 1) return 1;
+            if (v > max) return max;
+            return v;
+        }
+
         private object HandleScriptLookupType(RequestMessage request)
         {
             var name = GetStringArgument(request, "name");
             if (string.IsNullOrWhiteSpace(name))
                 throw new ArgumentException("name is required");
 
-            var limitRaw = GetIntArgument(request, "limit");
-            var limit = limitRaw ?? 10;
-            if (limit < 1) limit = 1;
-            if (limit > 100) limit = 100;
+            var limit = ClampLimit(GetIntArgument(request, "limit"), defaultValue: 10, max: 100);
 
             var matches = Editor.TypeResolver.Find(name!, limit + 1);
             var truncated = matches.Count > limit;
@@ -1489,10 +1494,7 @@ namespace UnityCtl
 
             var filter = GetStringArgument(request, "filter");
             var staticOnly = GetBoolArgument(request, "staticOnly");
-            var limitRaw = GetIntArgument(request, "limit");
-            var limit = limitRaw ?? 50;
-            if (limit < 1) limit = 1;
-            if (limit > 500) limit = 500;
+            var limit = ClampLimit(GetIntArgument(request, "limit"), defaultValue: 50, max: 500);
 
             var type = Editor.TypeResolver.ResolveTypeForDiagnostic(name!);
             if (type == null)

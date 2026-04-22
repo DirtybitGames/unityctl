@@ -380,25 +380,22 @@ public static class ScriptCommands
         }
     }
 
-    private static int KindSortOrder(string kind) => kind switch
+    // Display order + section title for each member kind. Single source of truth
+    // so adding a new kind updates sorting and heading in one place.
+    private static readonly Dictionary<string, (int Order, string Title)> MemberKindDisplay = new()
     {
-        "property" => 0,
-        "field" => 1,
-        "method" => 2,
-        "event" => 3,
-        "nested-type" => 4,
-        _ => 5
+        ["property"] = (0, "Properties"),
+        ["field"] = (1, "Fields"),
+        ["method"] = (2, "Methods"),
+        ["event"] = (3, "Events"),
+        ["nested-type"] = (4, "Nested types"),
     };
 
-    private static string CapitalizeKind(string kind) => kind switch
-    {
-        "property" => "Properties",
-        "field" => "Fields",
-        "method" => "Methods",
-        "event" => "Events",
-        "nested-type" => "Nested types",
-        _ => kind
-    };
+    private static int KindSortOrder(string kind) =>
+        MemberKindDisplay.TryGetValue(kind, out var info) ? info.Order : int.MaxValue;
+
+    private static string CapitalizeKind(string kind) =>
+        MemberKindDisplay.TryGetValue(kind, out var info) ? info.Title : kind;
 
     internal static void DisplayLookupTypeResult(InvocationContext context, ResponseMessage response, bool json)
     {

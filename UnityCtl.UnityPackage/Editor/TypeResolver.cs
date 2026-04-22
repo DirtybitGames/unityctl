@@ -23,12 +23,23 @@ namespace UnityCtl.Editor
         /// </summary>
         public static List<ScriptLookupTypeMatch> Find(string name, int limit = 10)
         {
-            if (string.IsNullOrWhiteSpace(name)) return new List<ScriptLookupTypeMatch>();
+            return FindTypesRanked(name)
+                .Select(x => ToMatch(x.Type, x.Assembly))
+                .Take(limit)
+                .ToList();
+        }
+
+        // Single assembly-walk implementation shared by Find (metadata) and
+        // ResolveTypeForDiagnostic (needs the actual Type). Returns ranked
+        // (Type, Assembly) tuples in the same order Find publishes.
+        private static IEnumerable<(Type Type, Assembly Assembly)> FindTypesRanked(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return Enumerable.Empty<(Type, Assembly)>();
 
             // Accept both "Foo" and "Some.Namespace.Foo"; compare by short name.
             var shortName = name.Contains('.') ? name.Substring(name.LastIndexOf('.') + 1) : name;
 
-            var matches = new List<(ScriptLookupTypeMatch match, int rank)>();
+            var matches = new List<(Type Type, Assembly Assembly, int Rank)>();
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (asm.IsDynamic) continue;
@@ -53,26 +64,26 @@ namespace UnityCtl.Editor
                     // Otherwise `UnityEngine.RuleTile+...+Transform` (nested enum) would
                     // outrank `UnityEngine.Transform` alphabetically.
                     var rank = RankAssembly(asmName, t.Namespace) + (t.IsNested ? 5 : 0);
-                    matches.Add((new ScriptLookupTypeMatch
-                    {
-                        FullName = t.FullName ?? t.Name,
-                        Namespace = t.Namespace,
-                        Assembly = asmName,
-                        Kind = ClassifyKind(t),
-                        IsStatic = t.IsClass && t.IsAbstract && t.IsSealed
-                    }, rank));
+                    matches.Add((t, asm, rank));
                 }
             }
 
             return matches
-                .OrderBy(m => m.rank)
-                .ThenBy(m => (m.match.Namespace ?? "").Length)
-                .ThenBy(m => m.match.FullName.Length)
-                .ThenBy(m => m.match.FullName, StringComparer.Ordinal)
-                .Select(m => m.match)
-                .Take(limit)
-                .ToList();
+                .OrderBy(m => m.Rank)
+                .ThenBy(m => (m.Type.Namespace ?? "").Length)
+                .ThenBy(m => (m.Type.FullName ?? m.Type.Name).Length)
+                .ThenBy(m => m.Type.FullName ?? m.Type.Name, StringComparer.Ordinal)
+                .Select(m => (m.Type, m.Assembly));
         }
+
+        private static ScriptLookupTypeMatch ToMatch(Type t, Assembly asm) => new()
+        {
+            FullName = t.FullName ?? t.Name,
+            Namespace = t.Namespace,
+            Assembly = asm.GetName().Name ?? "",
+            Kind = ClassifyKind(t),
+            IsStatic = t.IsClass && t.IsAbstract && t.IsSealed
+        };
 
         private static string ClassifyKind(Type t)
         {
@@ -171,13 +182,17 @@ namespace UnityCtl.Editor
             }
         }
 
+        // When an unknown type name matches multiple candidates, show up to this
+        // many before collapsing to a "pick one and fully qualify" prompt.
+        private const int MaxTypeSuggestionsPerDiagnostic = 3;
+
         /// <summary>
         /// Build hint strings from a diagnostic list. Produces hints for:
         ///   - unknown type names (CS0103/CS0234/CS0246) → suggest FQN
         ///   - unknown members (CS0117/CS1061) → suggest close-named members of the type
         /// Returns empty array if no hints applicable.
         /// </summary>
-        public static string[] BuildHints(IEnumerable<string> diagnostics, int perNameLimit = 3)
+        public static string[] BuildHints(IEnumerable<string> diagnostics)
         {
             // Materialize once so we can iterate twice.
             var diagList = diagnostics as IReadOnlyList<string> ?? new List<string>(diagnostics);
@@ -186,7 +201,7 @@ namespace UnityCtl.Editor
 
             foreach (var name in ExtractUnknownNames(diagList))
             {
-                var matches = Find(name, perNameLimit);
+                var matches = Find(name, MaxTypeSuggestionsPerDiagnostic);
                 if (matches.Count == 0) continue;
 
                 if (matches.Count == 1)
@@ -255,26 +270,7 @@ namespace UnityCtl.Editor
             var lt = bareName.IndexOf('<');
             if (lt > 0) bareName = bareName.Substring(0, lt);
 
-            var matches = Find(bareName, 1);
-            if (matches.Count == 0) return null;
-
-            // Re-find the actual Type object (Find returns metadata only).
-            var target = matches[0];
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (asm.IsDynamic) continue;
-                if ((asm.GetName().Name ?? "") != target.Assembly) continue;
-                Type[] types;
-                try { types = asm.GetTypes(); }
-                catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray()!; }
-                catch { continue; }
-                foreach (var t in types)
-                {
-                    if (t != null && (t.FullName ?? t.Name) == target.FullName)
-                        return t;
-                }
-            }
-            return null;
+            return FindTypesRanked(bareName).Select(x => x.Type).FirstOrDefault();
         }
 
         /// <summary>
