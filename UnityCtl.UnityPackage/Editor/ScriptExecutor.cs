@@ -21,6 +21,9 @@ namespace UnityCtl.Editor
         static readonly object s_ReferencesLock = new object();
         static bool s_InvalidationHooked;
 
+        static bool IsReferenceable(Assembly asm) =>
+            !asm.IsDynamic && !string.IsNullOrEmpty(asm.Location);
+
         static List<MetadataReference> GetReferences()
         {
             var cached = s_References;
@@ -28,31 +31,30 @@ namespace UnityCtl.Editor
 
             lock (s_ReferencesLock)
             {
-                if (s_References != null) return s_References;
+                cached = s_References;
+                if (cached != null) return cached;
 
                 if (!s_InvalidationHooked)
                 {
+                    // Ignore in-memory assemblies (e.g., our own Assembly.Load(byte[]) output) —
+                    // otherwise every script execution would invalidate the cache it just built.
                     AppDomain.CurrentDomain.AssemblyLoad += (_, args) =>
                     {
-                        // Only invalidate for on-disk assemblies we'd actually include in the reference
-                        // list. Ignore in-memory assemblies like our own Assembly.Load(byte[]) output —
-                        // otherwise every script execution would invalidate the cache it just built.
-                        var loaded = args.LoadedAssembly;
-                        if (!loaded.IsDynamic && !string.IsNullOrEmpty(loaded.Location))
+                        if (IsReferenceable(args.LoadedAssembly))
                             s_References = null;
                     };
                     s_InvalidationHooked = true;
                 }
 
-                var refs = new List<MetadataReference>();
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                var refs = new List<MetadataReference>(assemblies.Length);
+                foreach (var asm in assemblies)
                 {
-                    if (asm.IsDynamic) continue;
-                    if (string.IsNullOrEmpty(asm.Location)) continue;
+                    if (!IsReferenceable(asm)) continue;
                     refs.Add(MetadataReference.CreateFromFile(asm.Location));
                 }
                 s_References = refs;
-                return s_References;
+                return refs;
             }
         }
 
