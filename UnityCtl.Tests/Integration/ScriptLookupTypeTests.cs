@@ -167,4 +167,96 @@ public class ScriptLookupTypeTests : IAsyncLifetime
         // Null or missing is acceptable; just make sure an empty array doesn't sneak in
         Assert.True(hints == null || hints.Type == JTokenType.Null);
     }
+
+    // ---------------- script.members ----------------
+
+    [Fact]
+    public async Task ScriptMembers_WithMembers_ReturnsGroupedInfo()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.ScriptMembers, req =>
+        {
+            var query = req.Args?["name"]?.ToString() ?? "";
+            return new ScriptMembersResult
+            {
+                Query = query,
+                ResolvedType = "UnityEngine.Transform",
+                Assembly = "UnityEngine.CoreModule",
+                Members = new[]
+                {
+                    new ScriptMemberDto { Name = "position", Kind = "property",
+                        Signature = "position : Vector3 { get; set; }", IsStatic = false,
+                        DeclaringType = "UnityEngine.Transform" },
+                    new ScriptMemberDto { Name = "Translate", Kind = "method",
+                        Signature = "Translate(Vector3 translation) : void", IsStatic = false,
+                        DeclaringType = "UnityEngine.Transform" }
+                },
+                Truncated = false
+            };
+        });
+
+        var args = new Dictionary<string, object?> { ["name"] = "Transform", ["limit"] = 50 };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.ScriptMembers, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("UnityEngine.Transform", result["resolvedType"]?.ToString());
+        Assert.Equal("UnityEngine.CoreModule", result["assembly"]?.ToString());
+        var members = result["members"] as JArray;
+        Assert.NotNull(members);
+        Assert.Equal(2, members!.Count);
+        Assert.Equal("position", members[0]["name"]?.ToString());
+        Assert.Equal("property", members[0]["kind"]?.ToString());
+    }
+
+    [Fact]
+    public async Task ScriptMembers_UnresolvedType_ReturnsNullResolvedType()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.ScriptMembers, _ =>
+            new ScriptMembersResult
+            {
+                Query = "Nope",
+                ResolvedType = null,
+                Assembly = null,
+                Members = Array.Empty<ScriptMemberDto>(),
+                Truncated = false
+            });
+
+        var args = new Dictionary<string, object?> { ["name"] = "Nope", ["limit"] = 50 };
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.ScriptMembers, args);
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.True(result["resolvedType"] == null || result["resolvedType"]!.Type == JTokenType.Null);
+        var members = result["members"] as JArray;
+        Assert.NotNull(members);
+        Assert.Empty(members!);
+    }
+
+    [Fact]
+    public async Task ScriptMembers_ForwardsFilterAndStaticOnlyToUnity()
+    {
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.ScriptMembers, _ =>
+            new ScriptMembersResult
+            {
+                Query = "anything",
+                ResolvedType = "X",
+                Assembly = "Y",
+                Members = Array.Empty<ScriptMemberDto>(),
+                Truncated = false
+            });
+
+        var args = new Dictionary<string, object?>
+        {
+            ["name"] = "TMP_Text",
+            ["filter"] = "Font",
+            ["staticOnly"] = true,
+            ["limit"] = 30
+        };
+        await _fixture.SendRpcAndParseAsync(UnityCtlCommands.ScriptMembers, args);
+
+        var received = await _fixture.FakeUnity.WaitForRequestAsync(UnityCtlCommands.ScriptMembers);
+        Assert.Equal("TMP_Text", received.Args?["name"]?.ToString());
+        Assert.Equal("Font", received.Args?["filter"]?.ToString());
+        Assert.Equal(true, received.Args?["staticOnly"]);
+    }
 }

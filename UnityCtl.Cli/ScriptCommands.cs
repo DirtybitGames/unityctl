@@ -270,8 +270,135 @@ public static class ScriptCommands
 
         scriptCommand.AddCommand(lookupCommand);
 
+        // script members
+        var membersCommand = new Command("members", "List public members of a type (properties, methods, fields, events)");
+        var membersNameArg = new Argument<string>(
+            name: "type",
+            description: "Type name — short (e.g. 'Transform') or fully-qualified ('UnityEngine.Transform')"
+        );
+        var membersFilterOption = new Option<string?>(
+            aliases: ["--filter", "-f"],
+            description: "Case-insensitive substring filter on member names"
+        );
+        var membersStaticOption = new Option<bool>(
+            aliases: ["--static", "-s"],
+            description: "Only static members"
+        );
+        var membersLimitOption = new Option<int>(
+            aliases: ["--limit", "-n"],
+            getDefaultValue: () => 50,
+            description: "Maximum members to return (1–500)"
+        );
+        membersCommand.AddArgument(membersNameArg);
+        membersCommand.AddOption(membersFilterOption);
+        membersCommand.AddOption(membersStaticOption);
+        membersCommand.AddOption(membersLimitOption);
+        membersCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
+            var name = context.ParseResult.GetValueForArgument(membersNameArg);
+            var filter = context.ParseResult.GetValueForOption(membersFilterOption);
+            var staticOnly = context.ParseResult.GetValueForOption(membersStaticOption);
+            var limit = context.ParseResult.GetValueForOption(membersLimitOption);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) { context.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
+            {
+                { "name", name },
+                { "filter", filter },
+                { "staticOnly", staticOnly },
+                { "limit", limit }
+            };
+
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptMembers, args, timeout);
+            if (response == null) { context.ExitCode = 1; return; }
+
+            if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
+                return;
+            }
+
+            DisplayMembersResult(context, response, json);
+        });
+
+        scriptCommand.AddCommand(membersCommand);
+
         return scriptCommand;
     }
+
+    internal static void DisplayMembersResult(InvocationContext context, ResponseMessage response, bool json)
+    {
+        var result = JsonConvert.DeserializeObject<ScriptMembersResult>(
+            JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+            JsonHelper.Settings
+        );
+
+        if (json)
+        {
+            Console.WriteLine(JsonHelper.Serialize(response.Result));
+            return;
+        }
+
+        if (result == null || string.IsNullOrEmpty(result.ResolvedType))
+        {
+            Console.WriteLine($"No loaded type matches '{result?.Query ?? "?"}'. Try `unityctl script lookup-type <name>` to find the full name.");
+            context.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine($"{result.ResolvedType} (assembly: {result.Assembly}):");
+
+        var byKind = result.Members
+            .GroupBy(m => m.Kind)
+            .OrderBy(g => KindSortOrder(g.Key));
+
+        foreach (var group in byKind)
+        {
+            Console.WriteLine($"  {CapitalizeKind(group.Key)}:");
+            foreach (var m in group.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                var staticTag = m.IsStatic ? " [static]" : "";
+                Console.WriteLine($"    {m.Signature}{staticTag}");
+            }
+        }
+
+        if (result.Members.Length == 0)
+        {
+            Console.WriteLine("  (no public members matched)");
+        }
+        if (result.Truncated)
+        {
+            Console.WriteLine($"  ... (more members — raise --limit or add --filter)");
+        }
+    }
+
+    private static int KindSortOrder(string kind) => kind switch
+    {
+        "property" => 0,
+        "field" => 1,
+        "method" => 2,
+        "event" => 3,
+        "nested-type" => 4,
+        _ => 5
+    };
+
+    private static string CapitalizeKind(string kind) => kind switch
+    {
+        "property" => "Properties",
+        "field" => "Fields",
+        "method" => "Methods",
+        "event" => "Events",
+        "nested-type" => "Nested types",
+        _ => kind
+    };
 
     internal static void DisplayLookupTypeResult(InvocationContext context, ResponseMessage response, bool json)
     {

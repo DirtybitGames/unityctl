@@ -317,6 +317,42 @@ public class ScriptLookupTypeResult
     public bool Truncated { get; init; }
 }
 
+public class ScriptMemberDto
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("kind")]
+    public required string Kind { get; init; } // property|method|field|event|nested-type
+
+    [JsonProperty("signature")]
+    public required string Signature { get; init; }
+
+    [JsonProperty("isStatic")]
+    public bool IsStatic { get; init; }
+
+    [JsonProperty("declaringType")]
+    public string? DeclaringType { get; init; }
+}
+
+public class ScriptMembersResult
+{
+    [JsonProperty("query")]
+    public required string Query { get; init; }
+
+    [JsonProperty("resolvedType")]
+    public string? ResolvedType { get; init; }
+
+    [JsonProperty("assembly")]
+    public string? Assembly { get; init; }
+
+    [JsonProperty("members")]
+    public required ScriptMemberDto[] Members { get; init; }
+
+    [JsonProperty("truncated")]
+    public bool Truncated { get; init; }
+}
+
 public class RecordStartResult
 {
     [JsonProperty("recordingId")]

@@ -547,6 +547,10 @@ namespace UnityCtl
                         result = HandleScriptLookupType(request);
                         break;
 
+                    case UnityCtlCommands.ScriptMembers:
+                        result = HandleScriptMembers(request);
+                        break;
+
                     case UnityCtlCommands.RecordStart:
                         result = HandleRecordStart(request);
                         break;
@@ -1473,6 +1477,55 @@ namespace UnityCtl
             {
                 Query = name!,
                 Matches = matches.ToArray(),
+                Truncated = truncated
+            };
+        }
+
+        private object HandleScriptMembers(RequestMessage request)
+        {
+            var name = GetStringArgument(request, "name");
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("name is required");
+
+            var filter = GetStringArgument(request, "filter");
+            var staticOnly = GetBoolArgument(request, "staticOnly");
+            var limitRaw = GetIntArgument(request, "limit");
+            var limit = limitRaw ?? 50;
+            if (limit < 1) limit = 1;
+            if (limit > 500) limit = 500;
+
+            var type = Editor.TypeResolver.ResolveTypeForDiagnostic(name!);
+            if (type == null)
+            {
+                return new Protocol.ScriptMembersResult
+                {
+                    Query = name!,
+                    ResolvedType = null,
+                    Assembly = null,
+                    Members = Array.Empty<Protocol.ScriptMemberDto>(),
+                    Truncated = false
+                };
+            }
+
+            var members = Editor.TypeResolver.GetMembers(type, filter, staticOnly, limit + 1);
+            var truncated = members.Count > limit;
+            if (truncated) members.RemoveAt(members.Count - 1);
+
+            var dto = members.Select(m => new Protocol.ScriptMemberDto
+            {
+                Name = m.Name,
+                Kind = m.Kind,
+                Signature = m.Signature,
+                IsStatic = m.IsStatic,
+                DeclaringType = m.DeclaringType
+            }).ToArray();
+
+            return new Protocol.ScriptMembersResult
+            {
+                Query = name!,
+                ResolvedType = type.FullName ?? type.Name,
+                Assembly = type.Assembly.GetName().Name,
+                Members = dto,
                 Truncated = truncated
             };
         }

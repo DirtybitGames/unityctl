@@ -33,6 +33,7 @@ public static class UnityCtlCommands
     // Script execution
     public const string ScriptExecute = "script.execute";
     public const string ScriptLookupType = "script.lookupType";
+    public const string ScriptMembers = "script.members";
 
     // Recording
     public const string RecordStart = "record.start";
