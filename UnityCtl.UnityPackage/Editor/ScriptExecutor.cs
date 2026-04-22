@@ -127,11 +127,14 @@ namespace UnityCtl.Editor
                         .Select(d => d.ToString())
                         .ToArray();
 
+                    var hints = TypeResolver.BuildHints(diagnostics);
+
                     return new ScriptExecuteResult
                     {
                         Success = false,
                         Error = "Compilation failed.",
-                        Diagnostics = diagnostics
+                        Diagnostics = diagnostics,
+                        Hints = hints.Length > 0 ? hints : null
                     };
                 }
 
@@ -240,5 +243,6 @@ namespace UnityCtl.Editor
         public string? Result { get; set; }
         public string? Error { get; set; }
         public string[]? Diagnostics { get; set; }
+        public string[]? Hints { get; set; }
     }
 }

@@ -543,6 +543,10 @@ namespace UnityCtl
                         result = HandleScriptExecute(request);
                         break;
 
+                    case UnityCtlCommands.ScriptLookupType:
+                        result = HandleScriptLookupType(request);
+                        break;
+
                     case UnityCtlCommands.RecordStart:
                         result = HandleRecordStart(request);
                         break;
@@ -1445,7 +1449,31 @@ namespace UnityCtl
                 Success = result.Success,
                 Result = result.Result,
                 Error = result.Error,
-                Diagnostics = result.Diagnostics
+                Diagnostics = result.Diagnostics,
+                Hints = result.Hints
+            };
+        }
+
+        private object HandleScriptLookupType(RequestMessage request)
+        {
+            var name = GetStringArgument(request, "name");
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("name is required");
+
+            var limitRaw = GetIntArgument(request, "limit");
+            var limit = limitRaw ?? 10;
+            if (limit < 1) limit = 1;
+            if (limit > 100) limit = 100;
+
+            var matches = Editor.TypeResolver.Find(name!, limit + 1);
+            var truncated = matches.Count > limit;
+            if (truncated) matches.RemoveAt(matches.Count - 1);
+
+            return new Protocol.ScriptLookupTypeResult
+            {
+                Query = name!,
+                Matches = matches.ToArray(),
+                Truncated = truncated
             };
         }
 

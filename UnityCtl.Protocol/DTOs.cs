@@ -282,6 +282,39 @@ public class ScriptExecuteResult
 
     [JsonProperty("diagnostics")]
     public string[]? Diagnostics { get; init; }
+
+    [JsonProperty("hints")]
+    public string[]? Hints { get; init; }
+}
+
+public class ScriptLookupTypeMatch
+{
+    [JsonProperty("fullName")]
+    public required string FullName { get; init; }
+
+    [JsonProperty("namespace")]
+    public string? Namespace { get; init; }
+
+    [JsonProperty("assembly")]
+    public required string Assembly { get; init; }
+
+    [JsonProperty("kind")]
+    public required string Kind { get; init; } // "class", "struct", "interface", "enum", "delegate"
+
+    [JsonProperty("isStatic")]
+    public bool IsStatic { get; init; }
+}
+
+public class ScriptLookupTypeResult
+{
+    [JsonProperty("query")]
+    public required string Query { get; init; }
+
+    [JsonProperty("matches")]
+    public required ScriptLookupTypeMatch[] Matches { get; init; }
+
+    [JsonProperty("truncated")]
+    public bool Truncated { get; init; }
 }
 
 public class RecordStartResult

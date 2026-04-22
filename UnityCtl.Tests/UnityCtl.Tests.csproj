@@ -28,4 +28,9 @@
     <ProjectReference Include="..\UnityCtl.Cli\UnityCtl.Cli.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Link the Unity-side TypeResolver so we can unit-test its pure logic outside Unity. -->
+    <Compile Include="..\UnityCtl.UnityPackage\Editor\TypeResolver.cs" Link="LinkedFromUnityPackage\TypeResolver.cs" />
+  </ItemGroup>
+
 </Project>

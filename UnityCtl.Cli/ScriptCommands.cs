@@ -223,7 +223,87 @@ public static class ScriptCommands
 
         scriptCommand.AddCommand(evalCommand);
 
+        // script lookup-type
+        var lookupCommand = new Command("lookup-type", "Find loaded types by short name (returns FullName, namespace, assembly)");
+        var lookupNameArg = new Argument<string>(
+            name: "name",
+            description: "Short or partial type name (e.g. 'Storage', 'ClanFeedOSA')"
+        );
+        var lookupLimitOption = new Option<int>(
+            aliases: ["--limit", "-n"],
+            getDefaultValue: () => 10,
+            description: "Maximum matches to return (1–100)"
+        );
+        lookupCommand.AddArgument(lookupNameArg);
+        lookupCommand.AddOption(lookupLimitOption);
+        lookupCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var projectPath = ContextHelper.GetProjectPath(context);
+            var agentId = ContextHelper.GetAgentId(context);
+            var json = ContextHelper.GetJson(context);
+
+            var name = context.ParseResult.GetValueForArgument(lookupNameArg);
+            var limit = context.ParseResult.GetValueForOption(lookupLimitOption);
+
+            var client = BridgeClient.TryCreateFromProject(projectPath, agentId);
+            if (client == null) { context.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
+            {
+                { "name", name },
+                { "limit", limit }
+            };
+
+            var timeout = ContextHelper.GetTimeout(context);
+            var response = await client.SendCommandAsync(UnityCtlCommands.ScriptLookupType, args, timeout);
+            if (response == null) { context.ExitCode = 1; return; }
+
+            if (response.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {response.Error?.Message}");
+                context.ExitCode = 1;
+                return;
+            }
+
+            DisplayLookupTypeResult(context, response, json);
+        });
+
+        scriptCommand.AddCommand(lookupCommand);
+
         return scriptCommand;
+    }
+
+    internal static void DisplayLookupTypeResult(InvocationContext context, ResponseMessage response, bool json)
+    {
+        var result = JsonConvert.DeserializeObject<ScriptLookupTypeResult>(
+            JsonConvert.SerializeObject(response.Result, JsonHelper.Settings),
+            JsonHelper.Settings
+        );
+
+        if (json)
+        {
+            Console.WriteLine(JsonHelper.Serialize(response.Result));
+            return;
+        }
+
+        if (result == null || result.Matches.Length == 0)
+        {
+            Console.WriteLine($"No loaded type matches '{result?.Query ?? "?"}'.");
+            context.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine($"Matches for '{result.Query}' ({result.Matches.Length}{(result.Truncated ? "+" : "")}):");
+        foreach (var m in result.Matches)
+        {
+            var ns = string.IsNullOrEmpty(m.Namespace) ? "(global)" : m.Namespace;
+            var staticTag = m.IsStatic ? " static" : "";
+            Console.WriteLine($"  {m.FullName} [{m.Kind}{staticTag}]  assembly={m.Assembly}  ns={ns}");
+        }
+        if (result.Truncated)
+        {
+            Console.WriteLine($"  ... (more results — raise --limit to see them)");
+        }
     }
 
     internal static (FileInfo? file, string[] scriptArgs) ResolvePositionalFile(FileInfo? file, string[] scriptArgs)
@@ -353,6 +433,15 @@ public static class ScriptCommands
                             {
                                 Console.Error.WriteLine($"  {i + 1,3}| {lines[i].TrimEnd('\r')}");
                             }
+                        }
+                    }
+
+                    if (result.Hints != null && result.Hints.Length > 0)
+                    {
+                        Console.Error.WriteLine();
+                        foreach (var hint in result.Hints)
+                        {
+                            Console.Error.WriteLine(hint);
                         }
                     }
 

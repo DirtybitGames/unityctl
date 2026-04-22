@@ -182,6 +182,10 @@ Use `-t <seconds>` on `script eval`/`script execute` for long-running operations
 unityctl script eval -t 600 -u UnityEditor 'return BuildPipeline.BuildPlayer(opts).summary.result.ToString();'
 ```
 
+### Unknown type names
+
+Compile errors for unknown types (CS0103/CS0234/CS0246) include a `Hint:` with the fully-qualified name when the type is loaded — read it and add `-u <namespace>` or fully qualify. Fallback when no hint is emitted: `unityctl script lookup-type <Name>`.
+
 ## Typical Workflow
 
 ```bash
