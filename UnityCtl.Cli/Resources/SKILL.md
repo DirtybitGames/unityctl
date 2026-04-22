@@ -184,17 +184,7 @@ unityctl script eval -t 600 -u UnityEditor 'return BuildPipeline.BuildPlayer(opt
 
 ### Unknown type or member names
 
-Compile errors from `script eval`/`execute` carry `Hint:` lines when possible:
-
-- Unknown type (CS0103/CS0234/CS0246) → suggests the fully-qualified name. Read and add `-u <namespace>` or fully qualify.
-- Unknown member (CS0117/CS1061) → suggests close-named members on that type (Levenshtein), or a sample if no near match exists.
-
-Fallback commands when no hint is emitted or when exploring a type up-front:
-
-```bash
-unityctl script lookup-type <Name>              # find where a type lives
-unityctl script members <Type> [--filter X] [--static]  # list public members of a type
-```
+Compile errors include a `Hint:` line when the type or member exists somewhere loaded — read it and fix. Fallbacks: `unityctl script lookup-type <Name>` and `unityctl script members <Type> [--filter X] [--static]`.
 
 ## Typical Workflow
 
