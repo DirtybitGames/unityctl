@@ -177,4 +177,15 @@ public class EvalCodeGeneratorTests
         var count = lines.Count(l => l.Trim() == "using System;");
         Assert.Equal(1, count);
     }
+
+    [Fact]
+    public void ObjectAlias_EmittedToDisambiguate()
+    {
+        // Without this alias, bare `Object` is ambiguous between UnityEngine.Object
+        // and System.Object because both `using System;` and `using UnityEngine;` are
+        // in the default set. See log-analysis for recurring CS0104 failures.
+        var code = ScriptCommands.BuildEvalCode("Object.FindFirstObjectByType<Camera>()", [], hasArgs: false);
+
+        Assert.Contains("using Object = UnityEngine.Object;", code);
+    }
 }

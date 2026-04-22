@@ -250,6 +250,9 @@ public static class ScriptCommands
         }
 
         var usingBlock = string.Join("\n", usings.Select(u => $"using {u};"));
+        // Alias `Object` to UnityEngine.Object so bare `Object.FindFirstObjectByType<T>()`
+        // compiles — otherwise it's ambiguous between UnityEngine.Object and System.Object.
+        usingBlock += "\nusing Object = UnityEngine.Object;";
         var signature = hasArgs ? "public static object Main(string[] args)" : "public static object Main()";
         var isBodyMode = expression.TrimEnd().EndsWith(';');
         var body = isBodyMode ? expression : $"return {expression};";

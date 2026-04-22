@@ -134,7 +134,7 @@ unityctl script eval --id 14200,14210 'targets[0].transform.SetParent(targets[1]
 
 ## Script Execution
 
-Evaluate C# expressions directly (common usings like UnityEngine, UnityEditor, System auto-included):
+Evaluate C# expressions directly (common usings like UnityEngine, UnityEditor, System auto-included; `Object` is aliased to `UnityEngine.Object`):
 
 ```bash
 unityctl script eval 'Application.version'
