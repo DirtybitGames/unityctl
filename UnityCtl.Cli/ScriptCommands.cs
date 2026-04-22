@@ -456,13 +456,19 @@ public static class ScriptCommands
             }
         }
 
+        // Lift leading `using X.Y;` lines out of the expression and into the
+        // generated using block. Agents routinely prepend these to eval
+        // expressions; without extraction they end up inside Main() as
+        // using-statements and fail to compile.
+        expression = ExtractLeadingUsingDirectives(expression, usings);
+
         var usingBlock = string.Join("\n", usings.Select(u => $"using {u};"));
         // Alias `Object` to UnityEngine.Object so bare `Object.FindFirstObjectByType<T>()`
         // compiles — otherwise it's ambiguous between UnityEngine.Object and System.Object.
         usingBlock += "\nusing Object = UnityEngine.Object;";
         var signature = hasArgs ? "public static object Main(string[] args)" : "public static object Main()";
-        var isBodyMode = expression.TrimEnd().EndsWith(';');
-        var body = isBodyMode ? expression : $"return {expression};";
+
+        var body = BuildEvalBody(expression);
 
         var preamble = "";
         if (!string.IsNullOrWhiteSpace(instanceIds))
@@ -472,6 +478,137 @@ public static class ScriptCommands
         }
 
         return usingBlock + "\n\npublic class Script\n{\n    " + signature + "\n    {\n        " + preamble + body + "\n    }\n}\n";
+    }
+
+    /// <summary>
+    /// Decide whether to auto-wrap an eval expression as <c>return &lt;expr&gt;;</c>
+    /// or inline it as a statement body. The rules, in priority order:
+    ///   1. If it starts with `return ` — already explicit, inline as body and
+    ///      ensure a trailing `;`. Prevents `return return ...;` when the agent
+    ///      writes an explicit return without a trailing semicolon.
+    ///   2. If it contains any `;` in code context (not inside a string or char
+    ///      literal or line comment) — treat as a multi-statement body. Inline
+    ///      and ensure a trailing `;`. Catches `var p = X; try { ... }` and
+    ///      similar mixes that the old "ends-with-;" heuristic missed.
+    ///   3. Otherwise it's a single expression — wrap as `return &lt;expr&gt;;`.
+    /// </summary>
+    internal static string BuildEvalBody(string expression)
+    {
+        var trimmedStart = expression.TrimStart();
+
+        // Rule 1: agent already wrote `return ...`
+        if (StartsWithReturnKeyword(trimmedStart))
+        {
+            return EnsureTrailingSemicolon(expression);
+        }
+
+        // Rule 2: any semicolon in code context → body mode
+        if (ContainsCodeSemicolon(expression))
+        {
+            return EnsureTrailingSemicolon(expression);
+        }
+
+        // Rule 3: single expression
+        return "return " + expression + ";";
+    }
+
+    private static bool StartsWithReturnKeyword(string trimmedStart)
+    {
+        const string kw = "return";
+        if (trimmedStart.Length < kw.Length) return false;
+        if (!trimmedStart.StartsWith(kw, StringComparison.Ordinal)) return false;
+        // Must be followed by whitespace, '(', or end-of-string — otherwise
+        // `returnValue` (an identifier that happens to start with "return")
+        // would match.
+        if (trimmedStart.Length == kw.Length) return true;
+        var next = trimmedStart[kw.Length];
+        return char.IsWhiteSpace(next) || next == '(';
+    }
+
+    private static string EnsureTrailingSemicolon(string expression)
+    {
+        var trimmed = expression.TrimEnd();
+        if (trimmed.EndsWith(";", StringComparison.Ordinal)) return expression;
+        return trimmed + ";";
+    }
+
+    /// <summary>
+    /// Scan <paramref name="expression"/> for a `;` in code context, ignoring
+    /// semicolons inside string literals (regular, verbatim, interpolated),
+    /// char literals, and line comments. Used to distinguish a single
+    /// expression (no code-context `;`) from a multi-statement body.
+    /// </summary>
+    internal static bool ContainsCodeSemicolon(string expression)
+    {
+        // State machine over the characters. Modes:
+        //   N  — normal code
+        //   S  — regular string "..."
+        //   V  — verbatim string @"..."
+        //   C  — char literal '...'
+        //   L  — line comment //...
+        // Interpolated strings ($ and $@) are tokenised like their
+        // non-interpolated counterparts — sub-expressions inside {…} are
+        // rare in eval, and anything there wouldn't legally contain `;`
+        // anyway.
+        const char N = 'N', S = 'S', V = 'V', C = 'C', L = 'L';
+        var mode = N;
+        for (var i = 0; i < expression.Length; i++)
+        {
+            var ch = expression[i];
+            var next = i + 1 < expression.Length ? expression[i + 1] : '\0';
+            switch (mode)
+            {
+                case N:
+                    if (ch == ';') return true;
+                    if (ch == '"') mode = S;
+                    else if (ch == '@' && next == '"') { mode = V; i++; }
+                    else if (ch == '$' && next == '"') { mode = S; i++; }
+                    else if (ch == '$' && next == '@' && i + 2 < expression.Length && expression[i + 2] == '"') { mode = V; i += 2; }
+                    else if (ch == '\'') mode = C;
+                    else if (ch == '/' && next == '/') { mode = L; i++; }
+                    break;
+                case S:
+                    if (ch == '\\' && next != '\0') i++; // skip escape
+                    else if (ch == '"') mode = N;
+                    break;
+                case V:
+                    if (ch == '"' && next == '"') i++; // escaped quote in verbatim
+                    else if (ch == '"') mode = N;
+                    break;
+                case C:
+                    if (ch == '\\' && next != '\0') i++;
+                    else if (ch == '\'') mode = N;
+                    break;
+                case L:
+                    if (ch == '\n') mode = N;
+                    break;
+            }
+        }
+        return false;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex LeadingUsingLine =
+        new(@"^\s*using\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*;",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Extract leading <c>using X.Y;</c> directives from <paramref name="expression"/>
+    /// and append them to <paramref name="usings"/>. Aliased usings
+    /// (<c>using X = Y;</c>), using-statements for disposables
+    /// (<c>using (var x = ...)</c>), and any other forms are left in place.
+    /// Returns the expression with the extracted lines removed.
+    /// </summary>
+    internal static string ExtractLeadingUsingDirectives(string expression, List<string> usings)
+    {
+        while (true)
+        {
+            var m = LeadingUsingLine.Match(expression);
+            if (!m.Success) break;
+            var ns = m.Groups[1].Value;
+            if (!usings.Contains(ns)) usings.Add(ns);
+            expression = expression.Substring(m.Length);
+        }
+        return expression;
     }
 
     internal static int[] ParseInstanceIds(string idArg)
