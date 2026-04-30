@@ -410,6 +410,186 @@ public class RecordFinishedPayload
     public required int FrameCount { get; init; }
 }
 
+public class ProfileStatInfo
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("category")]
+    public required string Category { get; init; }
+
+    [JsonProperty("unit")]
+    public required string Unit { get; init; }
+
+    [JsonProperty("dataType")]
+    public required string DataType { get; init; }
+}
+
+public class ProfileListStatsResult
+{
+    [JsonProperty("count")]
+    public required int Count { get; init; }
+
+    [JsonProperty("stats")]
+    public required ProfileStatInfo[] Stats { get; init; }
+}
+
+public class ProfileStartResult
+{
+    [JsonProperty("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonProperty("stats")]
+    public required string[] Stats { get; init; }
+
+    [JsonProperty("startedAt")]
+    public required string StartedAt { get; init; }
+
+    [JsonProperty("maxDurationSeconds")]
+    public double? MaxDurationSeconds { get; init; }
+
+    [JsonProperty("target")]
+    public string? Target { get; init; }
+
+    [JsonProperty("targetIsRemote")]
+    public bool TargetIsRemote { get; init; }
+
+    [JsonProperty("savePath", NullValueHandling = NullValueHandling.Ignore)]
+    public string? SavePath { get; init; }
+}
+
+public class ProfileStatSummary
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("unit")]
+    public required string Unit { get; init; }
+
+    [JsonProperty("frames")]
+    public required int Frames { get; init; }
+
+    [JsonProperty("avg")]
+    public required double Avg { get; init; }
+
+    [JsonProperty("min")]
+    public required double Min { get; init; }
+
+    [JsonProperty("max")]
+    public required double Max { get; init; }
+
+    [JsonProperty("p50")]
+    public required double P50 { get; init; }
+
+    [JsonProperty("p95")]
+    public required double P95 { get; init; }
+
+    [JsonProperty("p99")]
+    public required double P99 { get; init; }
+
+    [JsonProperty("samples", NullValueHandling = NullValueHandling.Ignore)]
+    public double[]? Samples { get; init; }
+}
+
+public class ProfileHitch
+{
+    [JsonProperty("frameIndex")]
+    public required int FrameIndex { get; init; }
+
+    [JsonProperty("frameTimeMs")]
+    public required double FrameTimeMs { get; init; }
+}
+
+public class ProfileStopResult
+{
+    [JsonProperty("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonProperty("durationSeconds")]
+    public required double DurationSeconds { get; init; }
+
+    [JsonProperty("frames")]
+    public required int Frames { get; init; }
+
+    [JsonProperty("summaries")]
+    public required ProfileStatSummary[] Summaries { get; init; }
+
+    [JsonProperty("hitches", NullValueHandling = NullValueHandling.Ignore)]
+    public ProfileHitch[]? Hitches { get; init; }
+
+    [JsonProperty("savedPath", NullValueHandling = NullValueHandling.Ignore)]
+    public string? SavedPath { get; init; }
+
+    [JsonProperty("target", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Target { get; init; }
+
+    [JsonProperty("targetIsRemote")]
+    public bool TargetIsRemote { get; init; }
+}
+
+public class ProfileStatusEntry
+{
+    [JsonProperty("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonProperty("startedAt")]
+    public required string StartedAt { get; init; }
+
+    [JsonProperty("elapsedSeconds")]
+    public required double ElapsedSeconds { get; init; }
+
+    [JsonProperty("frames")]
+    public required int Frames { get; init; }
+
+    [JsonProperty("stats")]
+    public required string[] Stats { get; init; }
+
+    [JsonProperty("maxDurationSeconds")]
+    public double? MaxDurationSeconds { get; init; }
+
+    [JsonProperty("target", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Target { get; init; }
+
+    [JsonProperty("targetIsRemote")]
+    public bool TargetIsRemote { get; init; }
+}
+
+public class ProfileStatusResult
+{
+    [JsonProperty("sessions")]
+    public required ProfileStatusEntry[] Sessions { get; init; }
+}
+
+public class ProfileSnapshotResult
+{
+    [JsonProperty("path")]
+    public required string Path { get; init; }
+
+    [JsonProperty("sizeBytes")]
+    public long SizeBytes { get; init; }
+}
+
+public class ProfileTargetInfo
+{
+    [JsonProperty("id")]
+    public required string Id { get; init; }
+
+    [JsonProperty("displayName")]
+    public required string DisplayName { get; init; }
+
+    [JsonProperty("kind")]
+    public required string Kind { get; init; } // "editor" | "player"
+
+    [JsonProperty("isCurrent")]
+    public bool IsCurrent { get; init; }
+}
+
+public class ProfileTargetsResult
+{
+    [JsonProperty("targets")]
+    public required ProfileTargetInfo[] Targets { get; init; }
+}
+
 public class ProjectStatusResult
 {
     [JsonProperty("projectPath")]

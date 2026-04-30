@@ -40,6 +40,15 @@ public static class UnityCtlCommands
     public const string RecordStop = "record.stop";
     public const string RecordStatus = "record.status";
 
+    // Profiling
+    public const string ProfileListStats = "profile.listStats";
+    public const string ProfileStart = "profile.start";
+    public const string ProfileStop = "profile.stop";
+    public const string ProfileStatus = "profile.status";
+    public const string ProfileSnapshot = "profile.snapshot";
+    public const string ProfileTargets = "profile.targets";
+    public const string ProfileConnect = "profile.connect";
+
     // Snapshot
     public const string Snapshot = "snapshot";
     public const string SnapshotQuery = "snapshot.query";

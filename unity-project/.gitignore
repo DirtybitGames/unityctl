@@ -62,10 +62,14 @@ ExportedObj/
 sysinfo.txt
 
 # Builds
+[Bb]uilds/
 *.apk
 *.aab
 *.unitypackage
 *.app
+
+# UnityCtl test artifacts
+.utmp/
 
 # Crashlytics generated file
 crashlytics-build.properties

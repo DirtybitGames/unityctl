@@ -57,6 +57,22 @@ unityctl screenshot list-windows         # List open editor windows (type, title
 unityctl screenshot window <window>      # Capture specific editor window by type or title
 unityctl screenshot window SceneView out.png  # e.g. capture Scene view to out.png
 
+# Profiling (frame stats, hitches, regression gates)
+# Sessions: start → run scenario via other commands → stop returns summary JSON
+unityctl profile vitals --duration 3        # Curated 5-number report: avg/p99 frame, GC alloc, draw calls, GPU
+unityctl profile capture --duration 5       # One-shot start+wait+stop, prints summary
+unityctl profile capture --duration 5 --save run.data  # Also save .data for the Profiler window
+unityctl profile start --stats main,gpu,drawcalls,gc-alloc --max-duration 30  # Returns sessionId
+unityctl profile stop <sessionId>           # Returns summary JSON: avg/p50/p95/p99/max + hitches
+unityctl profile assert --p99-frame-ms 33 --gc-alloc-per-frame 1024  # CI gate, exit 1 on fail
+unityctl profile list-stats --category Render  # Enumerate built-in counters
+unityctl profile snapshot --output mem.snap     # Memory snapshot (requires com.unity.memoryprofiler)
+unityctl profile targets                        # List editor + connected players
+unityctl profile connect 127.0.0.1:54999        # Direct-URL connect (Android via adb forward)
+# Stat aliases: main, render, gpu, drawcalls, gc-alloc, system-memory, total-frame, batches, triangles
+# Default vitals stats: CPU Main/Render Thread Frame Time, GPU Frame Time, Draw Calls, GC Alloc, System Memory
+# Profile in play mode for meaningful frame data; edit-mode samples editor update ticks (very fast).
+
 # Video Recording (requires com.unity.recorder package)
 # Note: record start auto-enters play mode if not already playing
 unityctl record start                  # Start recording (manual stop)

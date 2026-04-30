@@ -2,9 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Globalization;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityCtl.Cli;
+
+// Use invariant culture for argument parsing and output. Avoids locale-specific
+// decimal separators (e.g. "0,5" vs "0.5") that break --duration / threshold flags.
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
 
 var rootCommand = new RootCommand("UnityCtl - CLI tool for controlling Unity Editor");
 
@@ -60,6 +69,7 @@ rootCommand.AddCommand(MenuCommands.CreateCommand());
 rootCommand.AddCommand(TestCommands.CreateCommand());
 rootCommand.AddCommand(ScreenshotCommands.CreateCommand());
 rootCommand.AddCommand(RecordCommands.CreateCommand());
+rootCommand.AddCommand(ProfileCommands.CreateCommand());
 rootCommand.AddCommand(ScriptCommands.CreateCommand());
 rootCommand.AddCommand(SnapshotCommand.CreateCommand());
 rootCommand.AddCommand(PrefabCommand.CreateCommand());

@@ -587,6 +587,40 @@ namespace UnityCtl
                         result = new { status = "pong" };
                         break;
 
+                    case UnityCtlCommands.ProfileListStats:
+                        result = HandleProfileListStats(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileStart:
+                        result = HandleProfileStart(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileStop:
+                        result = HandleProfileStop(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileStatus:
+                        result = Editor.ProfilingManager.Instance.Status();
+                        break;
+
+                    case UnityCtlCommands.ProfileSnapshot:
+                        result = HandleProfileMemorySnapshot(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileTargets:
+                        result = Editor.ProfilingManager.Instance.Targets();
+                        break;
+
+                    case UnityCtlCommands.ProfileConnect:
+                        {
+                            var url = GetStringArgument(request, "url");
+                            if (string.IsNullOrEmpty(url))
+                                throw new InvalidOperationException("'url' argument is required");
+                            var connected = Editor.ProfilingManager.Instance.DirectConnect(url);
+                            result = new { url = connected };
+                        }
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
@@ -2647,6 +2681,91 @@ namespace UnityCtl
         {
             var euler = q.eulerAngles;
             return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1})", euler.x, euler.y, euler.z);
+        }
+
+        private object HandleProfileListStats(RequestMessage request)
+        {
+            var category = GetStringArgument(request, "category");
+            return Editor.ProfilingManager.Instance.ListStats(category);
+        }
+
+        private object HandleProfileStart(RequestMessage request)
+        {
+            string[] stats;
+            try
+            {
+                stats = GetStringArrayArgument(request, "stats") ?? Array.Empty<string>();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Invalid 'stats' argument: {ex.Message}");
+            }
+            if (stats.Length == 0)
+            {
+                // Sensible default vitals: frame time, render thread, GPU, draw calls, gc-alloc, system memory.
+                stats = new[]
+                {
+                    "CPU Main Thread Frame Time", "CPU Render Thread Frame Time", "GPU Frame Time",
+                    "Draw Calls Count", "GC Allocated In Frame", "System Used Memory"
+                };
+            }
+
+            var maxDuration = GetDoubleArgument(request, "maxDurationSeconds");
+            var target = GetStringArgument(request, "target");
+            var savePath = GetStringArgument(request, "savePath");
+            var driveProfiler = !string.IsNullOrEmpty(savePath);
+
+            // Optional: route to a connected target (e.g., Android player) by id.
+            // If no --target was passed, infer remote-ness from the current connection
+            // (autoconnect-profiler builds will already have switched to the device).
+            if (!string.IsNullOrEmpty(target) && target != "editor")
+            {
+                if (int.TryParse(target, out var targetId))
+                    Editor.ProfilingManager.Instance.SelectTarget(targetId);
+            }
+            // Editor sentinel is -1 in Unity 6 (other versions: 0). Anything else = remote.
+            var currentConn = UnityEditorInternal.ProfilerDriver.connectedProfiler;
+            bool targetIsRemote = currentConn != -1 && currentConn != 0;
+            if (targetIsRemote)
+            {
+                // Resolve display name for the connected player so the response carries it.
+                var connName = UnityEditorInternal.ProfilerDriver.GetConnectionIdentifier(currentConn);
+                if (!string.IsNullOrEmpty(connName)) target = connName;
+            }
+
+            return Editor.ProfilingManager.Instance.Start(
+                stats, maxDuration, target, targetIsRemote, savePath, driveProfiler);
+        }
+
+        private object HandleProfileStop(RequestMessage request)
+        {
+            var sessionId = GetStringArgument(request, "sessionId");
+            if (string.IsNullOrEmpty(sessionId))
+                throw new InvalidOperationException("'sessionId' argument is required for profile.stop");
+
+            var includeSamples = GetBoolArgument(request, "includeSamples");
+            var hitchMultiplier = GetDoubleArgument(request, "hitchMultiplier") ?? 2.0;
+            var hitchAbsoluteMs = GetDoubleArgument(request, "hitchAbsoluteMs");
+
+            // If the session was auto-stopped due to maxDuration, return the cached result.
+            if (Editor.ProfilingManager.Instance.ConsumeAutoStopped(sessionId, out var cached))
+                return cached;
+
+            return Editor.ProfilingManager.Instance.Stop(sessionId, includeSamples, hitchMultiplier, hitchAbsoluteMs);
+        }
+
+        private object HandleProfileMemorySnapshot(RequestMessage request)
+        {
+            var output = GetStringArgument(request, "output");
+            if (string.IsNullOrEmpty(output))
+            {
+                var name = $"memory-{DateTime.UtcNow:yyyyMMdd-HHmmss}.snap";
+                output = System.IO.Path.Combine("MemoryCaptures", name);
+            }
+            // Resolve relative to project root (parent of Assets folder).
+            if (!System.IO.Path.IsPathRooted(output))
+                output = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), output);
+            return Editor.ProfilingManager.Instance.MemorySnapshot(output);
         }
 
         private object HandleRecordStart(RequestMessage request)
