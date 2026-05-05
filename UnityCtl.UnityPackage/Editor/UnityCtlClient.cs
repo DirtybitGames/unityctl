@@ -587,6 +587,56 @@ namespace UnityCtl
                         result = new { status = "pong" };
                         break;
 
+                    case UnityCtlCommands.ProfileListStats:
+                        result = HandleProfileListStats(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileStart:
+                        result = HandleProfileStart(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileStop:
+                        result = HandleProfileStop(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileStatus:
+                        result = Editor.ProfilingManager.Instance.Status();
+                        break;
+
+                    case UnityCtlCommands.ProfileSnapshot:
+                        result = HandleProfileMemorySnapshot(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileTargets:
+                        result = Editor.ProfilingManager.Instance.Targets();
+                        break;
+
+                    case UnityCtlCommands.ProfileConnect:
+                        {
+                            var url = GetStringArgument(request, "url");
+                            if (string.IsNullOrEmpty(url))
+                                throw new InvalidOperationException("'url' argument is required");
+                            var connected = Editor.ProfilingManager.Instance.DirectConnect(url);
+                            result = new { url = connected };
+                        }
+                        break;
+
+                    case UnityCtlCommands.ProfileExplain:
+                        result = HandleProfileExplain(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileHotspots:
+                        result = HandleProfileHotspots(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileFrame:
+                        result = HandleProfileFrame(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileMark:
+                        result = HandleProfileMark(request);
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
@@ -2647,6 +2697,134 @@ namespace UnityCtl
         {
             var euler = q.eulerAngles;
             return string.Format(System.Globalization.CultureInfo.InvariantCulture, "({0:F1}, {1:F1}, {2:F1})", euler.x, euler.y, euler.z);
+        }
+
+        private object HandleProfileListStats(RequestMessage request)
+        {
+            var category = GetStringArgument(request, "category");
+            return Editor.ProfilingManager.Instance.ListStats(category);
+        }
+
+        private object HandleProfileStart(RequestMessage request)
+        {
+            string[] stats;
+            try
+            {
+                stats = GetStringArrayArgument(request, "stats") ?? Array.Empty<string>();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Invalid 'stats' argument: {ex.Message}");
+            }
+            if (stats.Length == 0)
+            {
+                // Sensible default vitals: frame time, render thread, GPU, draw calls, gc-alloc, system memory.
+                stats = new[]
+                {
+                    "CPU Main Thread Frame Time", "CPU Render Thread Frame Time", "GPU Frame Time",
+                    "Draw Calls Count", "GC Allocated In Frame", "System Used Memory"
+                };
+            }
+
+            var maxDuration = GetDoubleArgument(request, "maxDurationSeconds");
+            var target = GetStringArgument(request, "target");
+            var savePath = GetStringArgument(request, "savePath");
+            var driveProfiler = !string.IsNullOrEmpty(savePath);
+
+            // Optional: route to a connected target (e.g., Android player) by id.
+            // If no --target was passed, infer remote-ness from the current connection
+            // (autoconnect-profiler builds will already have switched to the device).
+            if (!string.IsNullOrEmpty(target) && target != "editor")
+            {
+                if (int.TryParse(target, out var targetId))
+                    Editor.ProfilingManager.Instance.SelectTarget(targetId);
+            }
+            // Editor sentinel is -1 in Unity 6 (other versions: 0). Anything else = remote.
+            var currentConn = UnityEditorInternal.ProfilerDriver.connectedProfiler;
+            bool targetIsRemote = currentConn != -1 && currentConn != 0;
+            if (targetIsRemote)
+            {
+                // Resolve display name for the connected player so the response carries it.
+                var connName = UnityEditorInternal.ProfilerDriver.GetConnectionIdentifier(currentConn);
+                if (!string.IsNullOrEmpty(connName)) target = connName;
+            }
+
+            return Editor.ProfilingManager.Instance.Start(
+                stats, maxDuration, target, targetIsRemote, savePath, driveProfiler);
+        }
+
+        private object HandleProfileStop(RequestMessage request)
+        {
+            var sessionId = GetStringArgument(request, "sessionId");
+            if (string.IsNullOrEmpty(sessionId))
+                throw new InvalidOperationException("'sessionId' argument is required for profile.stop");
+
+            var includeSamples = GetBoolArgument(request, "includeSamples");
+            var hitchMultiplier = GetDoubleArgument(request, "hitchMultiplier") ?? 2.0;
+            var hitchAbsoluteMs = GetDoubleArgument(request, "hitchAbsoluteMs");
+
+            // If the session was auto-stopped due to maxDuration, return the cached result.
+            if (Editor.ProfilingManager.Instance.ConsumeAutoStopped(sessionId, out var cached))
+                return cached;
+
+            return Editor.ProfilingManager.Instance.Stop(sessionId, includeSamples, hitchMultiplier, hitchAbsoluteMs);
+        }
+
+        private object HandleProfileMemorySnapshot(RequestMessage request)
+        {
+            var output = GetStringArgument(request, "output");
+            if (string.IsNullOrEmpty(output))
+            {
+                var name = $"memory-{DateTime.UtcNow:yyyyMMdd-HHmmss}.snap";
+                output = System.IO.Path.Combine("MemoryCaptures", name);
+            }
+            // Resolve relative to project root (parent of Assets folder).
+            if (!System.IO.Path.IsPathRooted(output))
+                output = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), output);
+            return Editor.ProfilingManager.Instance.MemorySnapshot(output);
+        }
+
+        private object HandleProfileExplain(RequestMessage request)
+        {
+            var frameIndex = GetIntArgument(request, "frameIndex");
+            if (!frameIndex.HasValue)
+                throw new InvalidOperationException("'frameIndex' argument is required for profile.explain");
+            var threadIndex = GetIntArgument(request, "threadIndex") ?? 0;
+            var topN = GetIntArgument(request, "topN") ?? 20;
+            return Editor.ProfilingManager.Instance.Explain(frameIndex.Value, threadIndex, topN);
+        }
+
+        private object HandleProfileHotspots(RequestMessage request)
+        {
+            var startFrame = GetIntArgument(request, "startFrame");
+            var endFrame = GetIntArgument(request, "endFrame");
+            var threadIndex = GetIntArgument(request, "threadIndex") ?? 0;
+            var topN = GetIntArgument(request, "topN") ?? 20;
+            var rootMarker = GetStringArgument(request, "rootMarker");
+            return Editor.ProfilingManager.Instance.Hotspots(startFrame, endFrame, threadIndex, topN, rootMarker);
+        }
+
+        private object HandleProfileFrame(RequestMessage request)
+        {
+            var frameIndex = GetIntArgument(request, "frameIndex");
+            if (!frameIndex.HasValue)
+                throw new InvalidOperationException("'frameIndex' argument is required for profile.frame");
+            var threadIndex = GetIntArgument(request, "threadIndex") ?? 0;
+            var depth = GetIntArgument(request, "depth") ?? 3;
+            var thresholdMs = GetDoubleArgument(request, "thresholdMs") ?? 0.2;
+            var topPerNode = GetIntArgument(request, "topPerNode") ?? 8;
+            var rootMarker = GetStringArgument(request, "rootMarker");
+            return Editor.ProfilingManager.Instance.Frame(frameIndex.Value, threadIndex, depth, thresholdMs, topPerNode, rootMarker);
+        }
+
+        private object HandleProfileMark(RequestMessage request)
+        {
+            var expression = GetStringArgument(request, "expression");
+            if (string.IsNullOrEmpty(expression))
+                throw new InvalidOperationException("'expression' argument is required for profile.mark");
+            var name = GetStringArgument(request, "name");
+            var repeat = GetIntArgument(request, "repeat") ?? 1;
+            return Editor.ProfilingManager.Instance.Mark(expression, name ?? "unityctl.mark", repeat);
         }
 
         private object HandleRecordStart(RequestMessage request)

@@ -57,6 +57,13 @@ unityctl screenshot list-windows         # List open editor windows (type, title
 unityctl screenshot window <window>      # Capture specific editor window by type or title
 unityctl screenshot window SceneView out.png  # e.g. capture Scene view to out.png
 
+# Profiling (frame stats, spikes, hierarchy drill, microbench, regression gates)
+# Read .claude/skills/unity-editor/profiling.md for the full surface and workflows.
+# Quick reference: `unityctl profile vitals --duration 3` (5-number report),
+# `unityctl profile capture --duration 10 -t 120` (full summary with topFrames + drivers),
+# `unityctl profile mark "<expr>" --repeat N` (microbench an expression).
+unityctl profile --help                     # List subcommands
+
 # Video Recording (requires com.unity.recorder package)
 # Note: record start auto-enters play mode if not already playing
 unityctl record start                  # Start recording (manual stop)
