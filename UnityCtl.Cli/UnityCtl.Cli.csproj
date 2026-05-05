@@ -28,6 +28,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\SKILL.md" LogicalName="UnityCtl.Cli.Resources.SKILL.md" />
     <EmbeddedResource Include="Resources\SKILL.plugins.md" LogicalName="UnityCtl.Cli.Resources.SKILL.plugins.md" />
+    <EmbeddedResource Include="Resources\profiling.md" LogicalName="UnityCtl.Cli.Resources.profiling.md" />
   </ItemGroup>
 
 </Project>

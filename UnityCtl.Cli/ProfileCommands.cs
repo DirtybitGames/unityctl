@@ -27,6 +27,10 @@ public static class ProfileCommands
         profileCommand.AddCommand(BuildSnapshotCommand());
         profileCommand.AddCommand(BuildTargetsCommand());
         profileCommand.AddCommand(BuildConnectCommand());
+        profileCommand.AddCommand(BuildExplainCommand());
+        profileCommand.AddCommand(BuildHotspotsCommand());
+        profileCommand.AddCommand(BuildFrameCommand());
+        profileCommand.AddCommand(BuildMarkCommand());
 
         return profileCommand;
     }
@@ -607,6 +611,197 @@ public static class ProfileCommands
         return cmd;
     }
 
+    // ---------- explain ----------
+
+    private static Command BuildExplainCommand()
+    {
+        var cmd = new Command("explain", "Top-N markers by self time on a specific frame (use a hitch's absoluteFrameIndex)");
+        var frameArg = new Argument<int>("frame", "Absolute frame index (from a hitch's absoluteFrameIndex, or from a recent capture)");
+        var threadIndex = new Option<int>("--thread", () => 0, "Thread index (0 = main thread)");
+        var topN = new Option<int>("--top", () => 15, "Number of markers to return");
+        cmd.AddArgument(frameArg);
+        cmd.AddOption(threadIndex);
+        cmd.AddOption(topN);
+
+        cmd.SetHandler(async (InvocationContext ctx) =>
+        {
+            var client = MakeClient(ctx);
+            if (client == null) { ctx.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
+            {
+                { "frameIndex", ctx.ParseResult.GetValueForArgument(frameArg) },
+                { "threadIndex", ctx.ParseResult.GetValueForOption(threadIndex) },
+                { "topN", ctx.ParseResult.GetValueForOption(topN) }
+            };
+            var resp = await client.SendCommandAsync(UnityCtlCommands.ProfileExplain, args, ContextHelper.GetTimeout(ctx));
+            if (resp == null) { ctx.ExitCode = 1; return; }
+            if (resp.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {resp.Error?.Message}");
+                ctx.ExitCode = 1; return;
+            }
+
+            if (ContextHelper.GetJson(ctx))
+            {
+                Console.WriteLine(JsonHelper.Serialize(resp.Result));
+                return;
+            }
+
+            var result = Deser<ProfileExplainResult>(resp.Result);
+            if (result == null) return;
+            PrintExplainHuman(result);
+        });
+        return cmd;
+    }
+
+    // ---------- hotspots ----------
+
+    private static Command BuildHotspotsCommand()
+    {
+        var cmd = new Command("hotspots", "Aggregate top-N markers by self time across a range of recently-captured frames");
+        var startFrame = new Option<int?>("--start", "First frame in range (default: oldest in buffer)");
+        var endFrame = new Option<int?>("--end", "Last frame in range (default: newest in buffer)");
+        var threadIndex = new Option<int>("--thread", () => 0, "Thread index (0 = main thread)");
+        var topN = new Option<int>("--top", () => 20, "Number of markers to return");
+        var root = new Option<string?>("--root", "Restrict accumulation to a named subtree of the frame hierarchy (e.g. PlayerLoop to exclude editor IMGUI)");
+        cmd.AddOption(startFrame);
+        cmd.AddOption(endFrame);
+        cmd.AddOption(threadIndex);
+        cmd.AddOption(topN);
+        cmd.AddOption(root);
+
+        cmd.SetHandler(async (InvocationContext ctx) =>
+        {
+            var client = MakeClient(ctx);
+            if (client == null) { ctx.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
+            {
+                { "startFrame", ctx.ParseResult.GetValueForOption(startFrame) },
+                { "endFrame", ctx.ParseResult.GetValueForOption(endFrame) },
+                { "threadIndex", ctx.ParseResult.GetValueForOption(threadIndex) },
+                { "topN", ctx.ParseResult.GetValueForOption(topN) },
+                { "rootMarker", ctx.ParseResult.GetValueForOption(root) }
+            };
+            var resp = await client.SendCommandAsync(UnityCtlCommands.ProfileHotspots, args, ContextHelper.GetTimeout(ctx));
+            if (resp == null) { ctx.ExitCode = 1; return; }
+            if (resp.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {resp.Error?.Message}");
+                ctx.ExitCode = 1; return;
+            }
+
+            if (ContextHelper.GetJson(ctx))
+            {
+                Console.WriteLine(JsonHelper.Serialize(resp.Result));
+                return;
+            }
+
+            var result = Deser<ProfileHotspotsResult>(resp.Result);
+            if (result == null) return;
+            PrintHotspotsHuman(result);
+        });
+        return cmd;
+    }
+
+    // ---------- frame (hierarchy drill-down) ----------
+
+    private static Command BuildFrameCommand()
+    {
+        var cmd = new Command("frame", "Hierarchy tree drill-down for one frame (use a hitch's absoluteFrameIndex)");
+        var frameArg = new Argument<int>("frame", "Absolute frame index (from a hitch, or any frame in the profiler buffer)");
+        var threadIndex = new Option<int>("--thread", () => 0, "Thread index (0 = main thread)");
+        var depth = new Option<int>("--depth", () => 3, "Max tree depth");
+        var thresholdMs = new Option<double>("--threshold-ms", () => 0.2, "Prune nodes whose totalMs is below this");
+        var topPerNode = new Option<int>("--top", () => 8, "Keep at most this many children per node");
+        var root = new Option<string?>("--root", "Start the tree at a named subtree instead of the frame root (e.g. PlayerLoop to skip past EditorLoop in editor+play captures)");
+        cmd.AddArgument(frameArg);
+        cmd.AddOption(threadIndex);
+        cmd.AddOption(depth);
+        cmd.AddOption(thresholdMs);
+        cmd.AddOption(topPerNode);
+        cmd.AddOption(root);
+
+        cmd.SetHandler(async (InvocationContext ctx) =>
+        {
+            var client = MakeClient(ctx);
+            if (client == null) { ctx.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
+            {
+                { "frameIndex", ctx.ParseResult.GetValueForArgument(frameArg) },
+                { "threadIndex", ctx.ParseResult.GetValueForOption(threadIndex) },
+                { "depth", ctx.ParseResult.GetValueForOption(depth) },
+                { "thresholdMs", ctx.ParseResult.GetValueForOption(thresholdMs) },
+                { "topPerNode", ctx.ParseResult.GetValueForOption(topPerNode) },
+                { "rootMarker", ctx.ParseResult.GetValueForOption(root) }
+            };
+            var resp = await client.SendCommandAsync(UnityCtlCommands.ProfileFrame, args, ContextHelper.GetTimeout(ctx));
+            if (resp == null) { ctx.ExitCode = 1; return; }
+            if (resp.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {resp.Error?.Message}");
+                ctx.ExitCode = 1; return;
+            }
+
+            if (ContextHelper.GetJson(ctx))
+            {
+                Console.WriteLine(JsonHelper.Serialize(resp.Result));
+                return;
+            }
+
+            var result = Deser<ProfileFrameResult>(resp.Result);
+            if (result == null) return;
+            PrintFrameHuman(result);
+        });
+        return cmd;
+    }
+
+    // ---------- mark (microbenchmark) ----------
+
+    private static Command BuildMarkCommand()
+    {
+        var cmd = new Command("mark", "Run a C# expression wrapped in a ProfilerMarker; report timing + GC alloc per call");
+        var exprArg = new Argument<string>("expression", "C# expression to time (must be reachable in editor context, e.g. \"GameObject.FindObjectsByType<Camera>(FindObjectsSortMode.None)\")");
+        var name = new Option<string?>("--name", () => null, "Marker name (default: unityctl.mark)");
+        var repeat = new Option<int>("--repeat", () => 1, "Run N times, return per-call percentiles");
+        cmd.AddArgument(exprArg);
+        cmd.AddOption(name);
+        cmd.AddOption(repeat);
+
+        cmd.SetHandler(async (InvocationContext ctx) =>
+        {
+            var client = MakeClient(ctx);
+            if (client == null) { ctx.ExitCode = 1; return; }
+
+            var args = new Dictionary<string, object?>
+            {
+                { "expression", ctx.ParseResult.GetValueForArgument(exprArg) },
+                { "name", ctx.ParseResult.GetValueForOption(name) },
+                { "repeat", ctx.ParseResult.GetValueForOption(repeat) }
+            };
+            var resp = await client.SendCommandAsync(UnityCtlCommands.ProfileMark, args, ContextHelper.GetTimeout(ctx));
+            if (resp == null) { ctx.ExitCode = 1; return; }
+            if (resp.Status == ResponseStatus.Error)
+            {
+                Console.Error.WriteLine($"Error: {resp.Error?.Message}");
+                ctx.ExitCode = 1; return;
+            }
+
+            if (ContextHelper.GetJson(ctx))
+            {
+                Console.WriteLine(JsonHelper.Serialize(resp.Result));
+                return;
+            }
+
+            var result = Deser<ProfileMarkResult>(resp.Result);
+            if (result == null) return;
+            PrintMarkHuman(result);
+        });
+        return cmd;
+    }
+
     // ---------- helpers ----------
 
     private static BridgeClient? MakeClient(InvocationContext ctx)
@@ -646,10 +841,38 @@ public static class ProfileCommands
         {
             Console.WriteLine($"  {s.Name,-30} {Fmt(s.Avg),10} {Fmt(s.P50),10} {Fmt(s.P95),10} {Fmt(s.P99),10} {Fmt(s.Max),10}  {s.Unit}");
         }
+
+        if (result.TopFrames != null && result.TopFrames.Length > 0)
+        {
+            bool ranksPlayerLoop = result.TopFrames.Any(t => t.PlayerLoopMs.HasValue);
+            Console.WriteLine();
+            Console.WriteLine(ranksPlayerLoop
+                ? $"  Top {result.TopFrames.Length} frames by PlayerLoop time (gameplay-only ranking):"
+                : $"  Top {result.TopFrames.Length} frames by CPU main thread:");
+            foreach (var t in result.TopFrames)
+            {
+                var playerPart = t.PlayerLoopMs.HasValue ? $"  player {Fmt(t.PlayerLoopMs.Value),6}ms" : "";
+                if (t.Drivers.Length == 0)
+                {
+                    Console.WriteLine($"    frame {t.AbsoluteFrameIndex,8}  cpu {Fmt(t.CpuMainMs),7}ms{playerPart}  → (no hierarchy)");
+                    continue;
+                }
+                Console.WriteLine($"    frame {t.AbsoluteFrameIndex,8}  cpu {Fmt(t.CpuMainMs),7}ms{playerPart}");
+                foreach (var d in t.Drivers.Take(3))
+                {
+                    var hotPart = d.Hot != null
+                        ? $"   → {Truncate(d.Hot.Name, 38)} {Fmt(d.Hot.SelfMs)}ms self"
+                        : "";
+                    Console.WriteLine($"        {Truncate(d.Name, 32),-32} {Fmt(d.TotalMs),7}ms total{hotPart}");
+                }
+            }
+            Console.WriteLine($"    (drill in: profile frame <absoluteFrameIndex>)");
+        }
+
         if (result.Hitches != null && result.Hitches.Length > 0)
         {
             Console.WriteLine();
-            Console.WriteLine($"  {result.Hitches.Length} hitch(es) detected:");
+            Console.WriteLine($"  {result.Hitches.Length} hitch(es) over total-frame-time threshold:");
             foreach (var h in result.Hitches.Take(10))
                 Console.WriteLine($"    frame {h.FrameIndex}: {h.FrameTimeMs:F2}ms");
             if (result.Hitches.Length > 10) Console.WriteLine($"    ... and {result.Hitches.Length - 10} more");
@@ -675,6 +898,18 @@ public static class ProfileCommands
         if (gc != null) Console.WriteLine($"  GC alloc/frame:  avg {Fmt(gc.Avg)} bytes   max {Fmt(gc.Max)} bytes");
         if (sysmem != null) Console.WriteLine($"  System memory:   {sysmem.Avg / 1024.0 / 1024.0:F1} MB");
 
+        if (r.TopFrames != null && r.TopFrames.Length > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"  Worst frames (CPU main thread):");
+            foreach (var t in r.TopFrames.Take(3))
+            {
+                var top = t.Drivers.FirstOrDefault();
+                var driver = top != null ? $" ({Truncate(top.Name, 30)})" : "";
+                Console.WriteLine($"    frame {t.AbsoluteFrameIndex}: cpu {Fmt(t.CpuMainMs)}ms{driver}");
+            }
+        }
+
         if (r.Hitches != null && r.Hitches.Length > 0)
         {
             var hitchThresh = 33.3;
@@ -688,5 +923,72 @@ public static class ProfileCommands
         if (Math.Abs(v) >= 10000) return v.ToString("F0");
         if (Math.Abs(v) >= 100) return v.ToString("F1");
         return v.ToString("F2");
+    }
+
+    private static void PrintExplainHuman(ProfileExplainResult r)
+    {
+        Console.WriteLine($"Frame {r.FrameIndex}  thread={r.ThreadIndex} ({r.ThreadName})  frame_time={Fmt(r.FrameTimeMs)} ms");
+        Console.WriteLine();
+        Console.WriteLine($"  {"Marker",-50} {"Self ms",10} {"Calls",8}  GC alloc");
+        foreach (var m in r.TopMarkers)
+        {
+            var gc = m.GcAllocBytes.HasValue ? $"{m.GcAllocBytes.Value} B" : "";
+            Console.WriteLine($"  {Truncate(m.Name, 50),-50} {Fmt(m.SelfTimeMs),10} {m.Calls,8}  {gc}");
+        }
+    }
+
+    private static void PrintHotspotsHuman(ProfileHotspotsResult r)
+    {
+        Console.WriteLine($"Hotspots  frames=[{r.StartFrame}..{r.EndFrame}] processed={r.FrameCount}  thread={r.ThreadIndex} ({r.ThreadName})");
+        Console.WriteLine();
+        Console.WriteLine($"  {"Marker",-50} {"Self ms",12} {"Calls",10}  GC alloc");
+        foreach (var m in r.TopMarkers)
+        {
+            var gc = m.GcAllocBytes.HasValue ? $"{m.GcAllocBytes.Value} B" : "";
+            Console.WriteLine($"  {Truncate(m.Name, 50),-50} {Fmt(m.SelfTimeMs),12} {m.Calls,10}  {gc}");
+        }
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s.Substring(0, max - 1) + "…";
+
+    private static void PrintFrameHuman(ProfileFrameResult r)
+    {
+        Console.WriteLine($"Frame {r.FrameIndex}  thread={r.ThreadIndex} ({r.ThreadName})  frame_time={Fmt(r.FrameTimeMs)} ms");
+        Console.WriteLine($"  depth={r.Depth}  threshold={Fmt(r.ThresholdMs)}ms  pruned={r.PrunedNodes}");
+        Console.WriteLine();
+        if (r.Tree.Length == 0)
+        {
+            Console.WriteLine("  (no nodes above threshold)");
+            return;
+        }
+        foreach (var n in r.Tree) PrintFrameNode(n, 0);
+    }
+
+    private static void PrintFrameNode(ProfileFrameNode n, int indent)
+    {
+        var pad = new string(' ', 2 + indent * 2);
+        var gc = n.GcKb.HasValue ? $"  gc={n.GcKb.Value:F2}KB" : "";
+        Console.WriteLine($"{pad}{Truncate(n.Name, 60),-60} self={Fmt(n.SelfMs),8}ms  total={Fmt(n.TotalMs),8}ms  calls={n.Calls,4}{gc}");
+        if (n.Children == null) return;
+        foreach (var c in n.Children) PrintFrameNode(c, indent + 1);
+    }
+
+    private static void PrintMarkHuman(ProfileMarkResult r)
+    {
+        Console.WriteLine($"{r.Name}  ({r.Repeat} call{(r.Repeat == 1 ? "" : "s")})");
+        if (r.Repeat == 1)
+        {
+            Console.WriteLine($"  time:    {r.MeanMs:F4} ms");
+        }
+        else
+        {
+            Console.WriteLine($"  mean:    {r.MeanMs:F4} ms");
+            Console.WriteLine($"  p50/p95: {r.P50Ms:F4} / {r.P95Ms:F4} ms");
+            Console.WriteLine($"  min/max: {r.MinMs:F4} / {r.MaxMs:F4} ms");
+        }
+        Console.WriteLine($"  gc:      {r.GcBytesPerCall} bytes/call ({r.GcBytes} total)");
+        if (!string.IsNullOrEmpty(r.Result))
+            Console.WriteLine($"  result:  {Truncate(r.Result, 120)}");
     }
 }

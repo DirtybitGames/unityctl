@@ -498,6 +498,95 @@ public class ProfileHitch
 
     [JsonProperty("frameTimeMs")]
     public required double FrameTimeMs { get; init; }
+
+    /// <summary>
+    /// Frame index in the profiler buffer (usable with `profile explain`).
+    /// Null for remote captures or when the profiler buffer wasn't driven for this session.
+    /// </summary>
+    [JsonProperty("absoluteFrameIndex", NullValueHandling = NullValueHandling.Ignore)]
+    public int? AbsoluteFrameIndex { get; init; }
+}
+
+/// <summary>
+/// Descendant of a driver where the wall-clock is actually spent. The driver itself is usually
+/// an intermediate node (selfMs ~ 0); `hot` points at the marker inside its subtree with the
+/// highest selfMs — the "what's slow" answer for the agent without a separate `profile frame` call.
+/// </summary>
+public class ProfileFrameHotLeaf
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("selfMs")]
+    public required double SelfMs { get; init; }
+
+    [JsonProperty("totalMs")]
+    public required double TotalMs { get; init; }
+}
+
+/// <summary>
+/// Top-level system marker driving a frame. "Drivers" are descendants of the hierarchy root past
+/// dominant-single-child levels, ranked by total time — answers "which subsystem is responsible
+/// for this frame's cost", not "which leaf has the highest self-time".
+/// </summary>
+public class ProfileFrameDriver
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("totalMs")]
+    public required double TotalMs { get; init; }
+
+    [JsonProperty("selfMs")]
+    public required double SelfMs { get; init; }
+
+    [JsonProperty("calls")]
+    public required int Calls { get; init; }
+
+    [JsonProperty("gcKb", NullValueHandling = NullValueHandling.Ignore)]
+    public double? GcKb { get; init; }
+
+    /// <summary>
+    /// Hottest descendant by self time inside this driver's subtree. Null when the driver itself
+    /// is the leaf or no descendant has meaningful self time.
+    /// </summary>
+    [JsonProperty("hot", NullValueHandling = NullValueHandling.Ignore)]
+    public ProfileFrameHotLeaf? Hot { get; init; }
+}
+
+/// <summary>
+/// One of the worst frames in a capture. Carries both the relative index (into samples arrays)
+/// and the absolute index (into the profiler buffer, usable with `profile frame` / `profile explain`).
+///
+/// Ranking metric depends on what's available: when the capture was taken in play mode (PlayerLoop
+/// is in the hierarchy), frames are ranked by `playerLoopMs` — the time spent in actual game work.
+/// Otherwise ranked by `cpuMainMs` (full main thread including editor IMGUI). Both fields are
+/// always populated when available so consumers can see both signals.
+/// </summary>
+public class ProfileTopFrame
+{
+    [JsonProperty("frameIndex")]
+    public required int FrameIndex { get; init; }
+
+    [JsonProperty("absoluteFrameIndex")]
+    public required int AbsoluteFrameIndex { get; init; }
+
+    [JsonProperty("cpuMainMs")]
+    public required double CpuMainMs { get; init; }
+
+    [JsonProperty("frameTimeMs")]
+    public required double FrameTimeMs { get; init; }
+
+    /// <summary>
+    /// Time spent in PlayerLoop on this frame (gameplay-only, excluding editor IMGUI/repaint).
+    /// Null when PlayerLoop isn't in the hierarchy (editor mode without play, or top-level
+    /// remote captures where the hierarchy is rooted differently).
+    /// </summary>
+    [JsonProperty("playerLoopMs", NullValueHandling = NullValueHandling.Ignore)]
+    public double? PlayerLoopMs { get; init; }
+
+    [JsonProperty("drivers")]
+    public required ProfileFrameDriver[] Drivers { get; init; }
 }
 
 public class ProfileStopResult
@@ -516,6 +605,15 @@ public class ProfileStopResult
 
     [JsonProperty("hitches", NullValueHandling = NullValueHandling.Ignore)]
     public ProfileHitch[]? Hitches { get; init; }
+
+    /// <summary>
+    /// Top frames by CPU main thread time, with the top-3 driver markers attached. Always
+    /// populated for non-empty captures so agents can see spikes without dumping samples.
+    /// Distinct from `hitches` (which gates against an absolute threshold and uses total
+    /// frame time — useful for CI but vsync-blind).
+    /// </summary>
+    [JsonProperty("topFrames", NullValueHandling = NullValueHandling.Ignore)]
+    public ProfileTopFrame[]? TopFrames { get; init; }
 
     [JsonProperty("savedPath", NullValueHandling = NullValueHandling.Ignore)]
     public string? SavedPath { get; init; }
@@ -588,6 +686,141 @@ public class ProfileTargetsResult
 {
     [JsonProperty("targets")]
     public required ProfileTargetInfo[] Targets { get; init; }
+}
+
+public class ProfileMarkerEntry
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("selfTimeMs")]
+    public required double SelfTimeMs { get; init; }
+
+    [JsonProperty("calls")]
+    public required int Calls { get; init; }
+
+    [JsonProperty("gcAllocBytes", NullValueHandling = NullValueHandling.Ignore)]
+    public long? GcAllocBytes { get; init; }
+}
+
+public class ProfileExplainResult
+{
+    [JsonProperty("frameIndex")]
+    public required int FrameIndex { get; init; }
+
+    [JsonProperty("threadIndex")]
+    public required int ThreadIndex { get; init; }
+
+    [JsonProperty("threadName")]
+    public required string ThreadName { get; init; }
+
+    [JsonProperty("frameTimeMs")]
+    public required double FrameTimeMs { get; init; }
+
+    [JsonProperty("topMarkers")]
+    public required ProfileMarkerEntry[] TopMarkers { get; init; }
+}
+
+public class ProfileHotspotsResult
+{
+    [JsonProperty("startFrame")]
+    public required int StartFrame { get; init; }
+
+    [JsonProperty("endFrame")]
+    public required int EndFrame { get; init; }
+
+    [JsonProperty("frameCount")]
+    public required int FrameCount { get; init; }
+
+    [JsonProperty("threadIndex")]
+    public required int ThreadIndex { get; init; }
+
+    [JsonProperty("threadName")]
+    public required string ThreadName { get; init; }
+
+    [JsonProperty("topMarkers")]
+    public required ProfileMarkerEntry[] TopMarkers { get; init; }
+}
+
+public class ProfileFrameNode
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("selfMs")]
+    public required double SelfMs { get; init; }
+
+    [JsonProperty("totalMs")]
+    public required double TotalMs { get; init; }
+
+    [JsonProperty("calls")]
+    public required int Calls { get; init; }
+
+    [JsonProperty("gcKb", NullValueHandling = NullValueHandling.Ignore)]
+    public double? GcKb { get; init; }
+
+    [JsonProperty("children", NullValueHandling = NullValueHandling.Ignore)]
+    public ProfileFrameNode[]? Children { get; init; }
+}
+
+public class ProfileFrameResult
+{
+    [JsonProperty("frameIndex")]
+    public required int FrameIndex { get; init; }
+
+    [JsonProperty("threadIndex")]
+    public required int ThreadIndex { get; init; }
+
+    [JsonProperty("threadName")]
+    public required string ThreadName { get; init; }
+
+    [JsonProperty("frameTimeMs")]
+    public required double FrameTimeMs { get; init; }
+
+    [JsonProperty("depth")]
+    public required int Depth { get; init; }
+
+    [JsonProperty("thresholdMs")]
+    public required double ThresholdMs { get; init; }
+
+    [JsonProperty("prunedNodes")]
+    public required int PrunedNodes { get; init; }
+
+    [JsonProperty("tree")]
+    public required ProfileFrameNode[] Tree { get; init; }
+}
+
+public class ProfileMarkResult
+{
+    [JsonProperty("name")]
+    public required string Name { get; init; }
+
+    [JsonProperty("repeat")]
+    public required int Repeat { get; init; }
+
+    [JsonProperty("meanMs")]
+    public required double MeanMs { get; init; }
+
+    [JsonProperty("minMs")]
+    public required double MinMs { get; init; }
+
+    [JsonProperty("maxMs")]
+    public required double MaxMs { get; init; }
+
+    [JsonProperty("p50Ms")]
+    public required double P50Ms { get; init; }
+
+    [JsonProperty("p95Ms")]
+    public required double P95Ms { get; init; }
+
+    [JsonProperty("gcBytes")]
+    public required long GcBytes { get; init; }
+
+    [JsonProperty("gcBytesPerCall")]
+    public required long GcBytesPerCall { get; init; }
+
+    [JsonProperty("result", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Result { get; init; }
 }
 
 public class ProjectStatusResult

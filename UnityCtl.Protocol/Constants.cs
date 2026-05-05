@@ -48,6 +48,10 @@ public static class UnityCtlCommands
     public const string ProfileSnapshot = "profile.snapshot";
     public const string ProfileTargets = "profile.targets";
     public const string ProfileConnect = "profile.connect";
+    public const string ProfileExplain = "profile.explain";
+    public const string ProfileHotspots = "profile.hotspots";
+    public const string ProfileFrame = "profile.frame";
+    public const string ProfileMark = "profile.mark";
 
     // Snapshot
     public const string Snapshot = "snapshot";

@@ -13,9 +13,15 @@ using UnityCtl.Protocol;
 namespace UnityCtl.Editor
 {
     /// <summary>
-    /// Per-session profiling state. Owns a set of ProfilerRecorders sampling Unity's built-in
-    /// counters once per editor frame; collects per-frame samples for statistical summary on stop.
-    /// Optionally drives the Editor's profiler buffer (for ProfilerDriver.SaveProfile).
+    /// Per-session profiling state. The session enables ProfilerDriver, snapshots the start
+    /// frame index, and on Stop() walks the profiler buffer with RawFrameDataView, reading
+    /// counter values per actual rendered frame. Same code path for editor and remote players —
+    /// the only difference is ProfilerDriver.profileEditor.
+    ///
+    /// Why post-hoc buffer reads, not per-tick ProfilerRecorder sampling: EditorApplication.update
+    /// ticks at editor framerate (often throttled, especially when unfocused), which mismatches
+    /// the actual rendered frame rate. Reading from the profiler buffer gives one record per real
+    /// frame — matches what the user sees in the Profiler window.
     /// </summary>
     internal sealed class ProfilingSession
     {
@@ -28,22 +34,17 @@ namespace UnityCtl.Editor
         public string? SavePath { get; }
         public bool DriveEditorProfiler { get; }
 
-        // Local-mode state (ProfilerRecorder per stat).
-        private readonly List<(ProfilerRecorder Recorder, string Name, ProfilerMarkerDataUnit Unit)> _recorders;
-        private readonly List<List<double>> _samples;
-        private int _frameCount;
-
-        // Remote-mode state (read after stop from ProfilerDriver buffer).
-        private readonly bool _isRemoteMode;
-        private int _remoteStartFrame = -1;
+        // Built-in counter names share units across editor and player. Resolve once at start
+        // from the local Editor's ProfilerRecorderHandle catalog.
         private readonly Dictionary<string, ProfilerMarkerDataUnit> _statNameToUnit = new();
 
-        // Frame-time tracking for hitch detection (always sampled). Local only.
-        private readonly ProfilerRecorder _frameTimeRecorder;
-        private readonly List<double> _frameTimesMs = new();
-
-        public int FrameCount => _frameCount;
+        public int AbsoluteStartFrame { get; private set; } = -1;
         public bool IsActive { get; private set; }
+
+        public int CurrentFrameCount =>
+            IsActive && AbsoluteStartFrame >= 0
+                ? Math.Max(0, ProfilerDriver.lastFrameIndex - AbsoluteStartFrame + 1)
+                : 0;
 
         public ProfilingSession(
             string id,
@@ -62,55 +63,11 @@ namespace UnityCtl.Editor
             SavePath = savePath;
             DriveEditorProfiler = driveEditorProfiler;
             StartedAtUtc = DateTime.UtcNow;
-            _isRemoteMode = targetIsRemote;
 
-            _recorders = new List<(ProfilerRecorder, string, ProfilerMarkerDataUnit)>(statNames.Length);
-            _samples = new List<List<double>>(statNames.Length);
-            for (int i = 0; i < statNames.Length; i++)
-            {
-                _samples.Add(new List<double>(1024));
-            }
-
-            // Pre-compute the unit for every requested stat from the LOCAL Editor's known counters
-            // (built-in counters share names + units across local and remote). Used to convert
-            // raw counter values (e.g. ns → ms) consistently for both local and remote modes.
             for (int i = 0; i < statNames.Length; i++)
             {
                 var (_, unit, _) = FindHandleByName(statNames[i]);
                 _statNameToUnit[statNames[i]] = unit;
-            }
-
-            if (_isRemoteMode)
-            {
-                // Remote mode: don't sample per-frame via ProfilerRecorder (local-only).
-                // Instead, drive the Editor profiler buffer to capture remote frames; at Stop()
-                // we'll walk frames with RawFrameDataView and pull counter values per stat.
-                ProfilerDriver.profileEditor = false;
-                ProfilerDriver.ClearAllFrames();
-                ProfilerDriver.enabled = true;
-                _remoteStartFrame = ProfilerDriver.lastFrameIndex + 1;
-            }
-            else
-            {
-                // Local mode: ProfilerRecorder per stat, sampled each editor tick.
-                for (int i = 0; i < statNames.Length; i++)
-                {
-                    var name = statNames[i];
-                    var (handle, unit, category) = FindHandleByName(name);
-                    if (!handle.Valid)
-                    {
-                        _recorders.Add((default, name, ProfilerMarkerDataUnit.Undefined));
-                        continue;
-                    }
-                    var rec = ProfilerRecorder.StartNew(category, name, capacity: 1);
-                    _recorders.Add((rec, name, unit));
-                }
-
-                // Always-on frame time for hitches (local only — remote uses RawFrameDataView).
-                var (ftHandle, _, ftCategory) = FindHandleByName("Main Thread");
-                _frameTimeRecorder = ftHandle.Valid
-                    ? ProfilerRecorder.StartNew(ftCategory, "Main Thread", capacity: 1)
-                    : default;
             }
 
             IsActive = true;
@@ -118,111 +75,72 @@ namespace UnityCtl.Editor
 
         public void StartEditorProfilerCapture()
         {
-            // Remote mode already enabled the driver in the constructor. Local mode only enables
-            // the driver when --save was requested (drives the editor's profiler buffer alongside
-            // ProfilerRecorder sampling so SaveProfile has data).
-            if (_isRemoteMode || !DriveEditorProfiler) return;
+            TryBumpBufferSize();
+            // Local: profile the editor itself. Remote: leave profileEditor false so the streamed
+            // remote frames populate the buffer.
+            ProfilerDriver.profileEditor = !TargetIsRemote;
             ProfilerDriver.ClearAllFrames();
-            ProfilerDriver.profileEditor = true;
             ProfilerDriver.enabled = true;
+            AbsoluteStartFrame = ProfilerDriver.lastFrameIndex + 1;
         }
 
-        public void TickFrame()
+        // ProfilerUserSettings.frameCount is internal (Unity 6) — default 300 frames evicts frames
+        // mid-capture for any session longer than ~1.5 s at 200 FPS. Bump to 2000 for the duration
+        // of a session so `profile explain` against early hitches still works after stop. Restored
+        // at session stop via RestoreBufferSize().
+        private static int? _originalFrameCount;
+        private static void TryBumpBufferSize()
         {
-            if (!IsActive) return;
-            _frameCount++;
-
-            // Remote mode reads frames at Stop() — nothing to sample per editor tick.
-            if (_isRemoteMode) return;
-
-            for (int i = 0; i < _recorders.Count; i++)
+            const int Target = 2000;
+            try
             {
-                var rec = _recorders[i].Recorder;
-                if (!rec.Valid) { _samples[i].Add(double.NaN); continue; }
-                _samples[i].Add(rec.LastValue);
+                var t = Type.GetType("UnityEditor.Profiling.ProfilerUserSettings, UnityEditor");
+                if (t == null) return;
+                var prop = t.GetProperty("frameCount", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (prop == null) return;
+                if (!_originalFrameCount.HasValue)
+                    _originalFrameCount = (int)prop.GetValue(null);
+                var current = (int)prop.GetValue(null);
+                if (current < Target) prop.SetValue(null, Target);
             }
-
-            if (_frameTimeRecorder.Valid)
+            catch (Exception ex)
             {
-                _frameTimesMs.Add(_frameTimeRecorder.LastValue / 1_000_000.0);
+                Debug.LogWarning($"[UnityCtl] Failed to bump profiler frame buffer: {ex.Message}");
             }
+        }
+        private static void RestoreBufferSize()
+        {
+            if (!_originalFrameCount.HasValue) return;
+            try
+            {
+                var t = Type.GetType("UnityEditor.Profiling.ProfilerUserSettings, UnityEditor");
+                var prop = t?.GetProperty("frameCount", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                prop?.SetValue(null, _originalFrameCount.Value);
+            }
+            catch { }
+            _originalFrameCount = null;
         }
 
         public ProfileStopResult Stop(bool includeSamples, double hitchMultiplier, double? hitchAbsoluteMs)
         {
             IsActive = false;
 
-            if (_isRemoteMode)
-                return StopRemote(includeSamples, hitchMultiplier, hitchAbsoluteMs);
-
-            return StopLocal(includeSamples, hitchMultiplier, hitchAbsoluteMs);
-        }
-
-        private ProfileStopResult StopLocal(bool includeSamples, double hitchMultiplier, double? hitchAbsoluteMs)
-        {
-            if (DriveEditorProfiler)
-            {
-                ProfilerDriver.enabled = false;
-                TrySaveProfile();
-            }
-
-            var summaries = new List<ProfileStatSummary>(_recorders.Count);
-            for (int i = 0; i < _recorders.Count; i++)
-            {
-                var entry = _recorders[i];
-                var samples = _samples[i];
-                var converted = new double[samples.Count];
-                for (int j = 0; j < samples.Count; j++)
-                {
-                    converted[j] = ConvertSample(samples[j], entry.Unit);
-                }
-                summaries.Add(BuildSummary(entry.Name, UnitDisplay(entry.Unit), converted, includeSamples));
-                if (entry.Recorder.Valid) entry.Recorder.Dispose();
-            }
-
-            var threshold = ComputeHitchThreshold(_frameTimesMs, hitchMultiplier, hitchAbsoluteMs);
-            var hitches = new List<ProfileHitch>();
-            for (int i = 0; i < _frameTimesMs.Count; i++)
-            {
-                if (_frameTimesMs[i] > threshold)
-                    hitches.Add(new ProfileHitch { FrameIndex = i, FrameTimeMs = _frameTimesMs[i] });
-            }
-
-            if (_frameTimeRecorder.Valid) _frameTimeRecorder.Dispose();
-
-            return new ProfileStopResult
-            {
-                SessionId = Id,
-                DurationSeconds = (DateTime.UtcNow - StartedAtUtc).TotalSeconds,
-                Frames = _frameCount,
-                Summaries = summaries.ToArray(),
-                Hitches = hitches.Count > 0 ? hitches.ToArray() : null,
-                SavedPath = !string.IsNullOrEmpty(SavePath) ? SavePath : null,
-                Target = Target,
-                TargetIsRemote = TargetIsRemote
-            };
-        }
-
-        private ProfileStopResult StopRemote(bool includeSamples, double hitchMultiplier, double? hitchAbsoluteMs)
-        {
             // Snapshot the end frame before disabling the driver so frames received in the same
             // editor tick aren't dropped.
             int endFrame = ProfilerDriver.lastFrameIndex;
             ProfilerDriver.enabled = false;
 
-            // Save .data first if requested — buffer still has all the remote frames.
+            // Save .data first while the buffer still holds the frames. We leave the buffered
+            // frames in place (driver is just paused) so a follow-up `profile explain` /
+            // `hotspots` / `frame` can walk them. Next session's start clears the buffer.
             TrySaveProfile();
 
-            int startFrame = Math.Max(_remoteStartFrame, ProfilerDriver.firstFrameIndex);
+            int startFrame = Math.Max(AbsoluteStartFrame, ProfilerDriver.firstFrameIndex);
             int totalFrames = endFrame >= startFrame ? endFrame - startFrame + 1 : 0;
 
             var perStat = new double[StatNames.Length][];
             for (int i = 0; i < StatNames.Length; i++) perStat[i] = new double[totalFrames];
             var frameTimesMs = new double[totalFrames];
-
-            // Resolve "Main Thread" frame-time stat name. CPU Main Thread Frame Time is reported
-            // in ns; remote players expose it the same way.
-            const string FrameTimeStat = "CPU Main Thread Frame Time";
 
             for (int idx = 0; idx < totalFrames; idx++)
             {
@@ -239,11 +157,13 @@ namespace UnityCtl.Editor
                 {
                     perStat[i][idx] = ReadCounter(view, StatNames[i]);
                 }
-                var ftRaw = ReadCounter(view, FrameTimeStat);
-                frameTimesMs[idx] = double.IsNaN(ftRaw) ? double.NaN : ftRaw / 1_000_000.0;
+
+                // Use the view's own frame time — actual wall-clock for this frame, which is what
+                // determines perceived FPS. More accurate than the CPU Main Thread Frame Time
+                // counter (which excludes GPU stalls) and immune to editor tick rate.
+                frameTimesMs[idx] = view.frameTimeNs / 1_000_000.0;
             }
 
-            // Convert per-stat values according to local-known units.
             var summaries = new List<ProfileStatSummary>(StatNames.Length);
             for (int i = 0; i < StatNames.Length; i++)
             {
@@ -254,16 +174,25 @@ namespace UnityCtl.Editor
                 summaries.Add(BuildSummary(StatNames[i], UnitDisplay(unit), converted, includeSamples));
             }
 
-            // Hitch detection over the converted (ms) frame-time series.
             var ftList = new List<double>(frameTimesMs.Length);
-            foreach (var v in frameTimesMs) if (!double.IsNaN(v)) ftList.Add(v);
+            foreach (var v in frameTimesMs) if (!double.IsNaN(v) && v > 0) ftList.Add(v);
             var threshold = ComputeHitchThreshold(ftList, hitchMultiplier, hitchAbsoluteMs);
             var hitches = new List<ProfileHitch>();
             for (int i = 0; i < frameTimesMs.Length; i++)
             {
                 if (!double.IsNaN(frameTimesMs[i]) && frameTimesMs[i] > threshold)
-                    hitches.Add(new ProfileHitch { FrameIndex = i, FrameTimeMs = frameTimesMs[i] });
+                    hitches.Add(new ProfileHitch
+                    {
+                        FrameIndex = i,
+                        FrameTimeMs = frameTimesMs[i],
+                        AbsoluteFrameIndex = startFrame + i
+                    });
             }
+
+            // topFrames: the worst frames by CPU main thread time. This is the spike axis agents
+            // actually want — total frame time is vsync-capped (16/33ms) on most platforms and
+            // hides CPU variance. We always populate this regardless of hitch threshold.
+            var topFrames = ComputeTopFrames(StatNames, perStat, frameTimesMs, startFrame, _statNameToUnit, topN: 5, driversPerFrame: 3);
 
             return new ProfileStopResult
             {
@@ -272,9 +201,286 @@ namespace UnityCtl.Editor
                 Frames = totalFrames,
                 Summaries = summaries.ToArray(),
                 Hitches = hitches.Count > 0 ? hitches.ToArray() : null,
+                TopFrames = topFrames,
                 SavedPath = !string.IsNullOrEmpty(SavePath) ? SavePath : null,
                 Target = Target,
                 TargetIsRemote = TargetIsRemote
+            };
+        }
+
+        private static ProfileTopFrame[]? ComputeTopFrames(
+            string[] statNames,
+            double[][] perStat,
+            double[] frameTimesMs,
+            int startFrame,
+            Dictionary<string, ProfilerMarkerDataUnit> unitMap,
+            int topN,
+            int driversPerFrame)
+        {
+            int total = frameTimesMs.Length;
+            if (total == 0) return null;
+
+            // Find a CPU main thread stat. Prefer the precise counter; fall back to the broader
+            // "Main Thread" if the precise one wasn't requested.
+            int cpuStatIdx = -1;
+            foreach (var preferred in new[] { "CPU Main Thread Frame Time", "Main Thread" })
+            {
+                for (int i = 0; i < statNames.Length; i++)
+                    if (statNames[i] == preferred) { cpuStatIdx = i; break; }
+                if (cpuStatIdx >= 0) break;
+            }
+
+            var candidates = new List<(int idx, double cpuMs, double ftMs)>(total);
+            for (int i = 0; i < total; i++)
+            {
+                double cpuMs;
+                if (cpuStatIdx >= 0)
+                {
+                    var raw = perStat[cpuStatIdx][i];
+                    cpuMs = double.IsNaN(raw) ? double.NaN : raw / 1_000_000.0;
+                }
+                else
+                {
+                    cpuMs = frameTimesMs[i];
+                }
+                if (double.IsNaN(cpuMs)) continue;
+                candidates.Add((i, cpuMs, frameTimesMs[i]));
+            }
+            if (candidates.Count == 0) return null;
+
+            // First pass by CPU main thread to find the candidate pool. We over-pick (3x topN)
+            // so that re-ranking by PlayerLoop time has enough room to surface a different set.
+            // Per-frame hierarchy walks are ~1ms each; 3*topN keeps it bounded.
+            candidates.Sort((a, b) => b.cpuMs.CompareTo(a.cpuMs));
+            int poolSize = Math.Min(candidates.Count, Math.Max(topN * 3, topN));
+            var pool = candidates.GetRange(0, poolSize);
+
+            // For each candidate, walk the hierarchy once to collect:
+            //   1. PlayerLoop nodeId + totalMs (gameplay-only signal)
+            //   2. Top-N drivers — descended from inside PlayerLoop when present (so attribution
+            //      reflects gameplay variance), otherwise descended from the frame root.
+            var enriched = new List<(int idx, double cpuMs, double ftMs, double? playerLoopMs, int? playerLoopId, ProfileFrameDriver[] driversFromRoot, ProfileFrameDriver[] driversFromPlayerLoop)>(pool.Count);
+            foreach (var p in pool)
+            {
+                int absFrame = startFrame + p.idx;
+                using var hv = ProfilerDriver.GetHierarchyFrameDataView(
+                    absFrame, 0,
+                    HierarchyFrameDataView.ViewModes.MergeSamplesWithTheSameName,
+                    HierarchyFrameDataView.columnTotalTime,
+                    sortAscending: false);
+                double? playerLoopMs = null;
+                int? playerLoopId = null;
+                ProfileFrameDriver[] driversFromRoot = Array.Empty<ProfileFrameDriver>();
+                ProfileFrameDriver[] driversFromPlayerLoop = Array.Empty<ProfileFrameDriver>();
+                if (hv != null && hv.valid)
+                {
+                    playerLoopId = FindDescendantIdByName(hv, hv.GetRootItemID(), "PlayerLoop");
+                    if (playerLoopId.HasValue)
+                        playerLoopMs = hv.GetItemColumnDataAsDouble(playerLoopId.Value, HierarchyFrameDataView.columnTotalTime);
+                    driversFromRoot = ResolveDrivers(hv, hv.GetRootItemID(), driversPerFrame);
+                    if (playerLoopId.HasValue)
+                        driversFromPlayerLoop = ResolveDrivers(hv, playerLoopId.Value, driversPerFrame);
+                }
+                enriched.Add((p.idx, p.cpuMs, p.ftMs, playerLoopMs, playerLoopId, driversFromRoot, driversFromPlayerLoop));
+            }
+
+            // Re-rank by playerLoopMs when most candidates have it (typical of editor+play and
+            // remote-player captures). Otherwise stay with CPU main thread ranking.
+            int withPlayerLoop = enriched.Count(e => e.playerLoopMs.HasValue && e.playerLoopMs.Value > 0);
+            bool rankByPlayerLoop = withPlayerLoop >= enriched.Count / 2 && withPlayerLoop > 0;
+            if (rankByPlayerLoop)
+                enriched.Sort((a, b) => (b.playerLoopMs ?? 0).CompareTo(a.playerLoopMs ?? 0));
+            // (else already sorted by cpuMs from the first pass)
+
+            int take = Math.Min(topN, enriched.Count);
+            var entries = new List<ProfileTopFrame>(take);
+            for (int k = 0; k < take; k++)
+            {
+                var e = enriched[k];
+                // When ranking by PlayerLoop, drivers should also come from inside PlayerLoop —
+                // editor IMGUI/repaint dominates the root view but isn't what the agent's tracking.
+                var drivers = rankByPlayerLoop && e.driversFromPlayerLoop.Length > 0
+                    ? e.driversFromPlayerLoop
+                    : e.driversFromRoot;
+                entries.Add(new ProfileTopFrame
+                {
+                    FrameIndex = e.idx,
+                    AbsoluteFrameIndex = startFrame + e.idx,
+                    CpuMainMs = Math.Round(e.cpuMs, 3),
+                    FrameTimeMs = double.IsNaN(e.ftMs) ? 0 : Math.Round(e.ftMs, 3),
+                    PlayerLoopMs = e.playerLoopMs.HasValue ? Math.Round(e.playerLoopMs.Value, 3) : (double?)null,
+                    Drivers = drivers
+                });
+            }
+            return entries.ToArray();
+        }
+
+        internal static double? FindDescendantTotalMs(HierarchyFrameDataView hv, int parentId, string name, int maxDepth = 10)
+        {
+            // PlayerLoop in editor+play mode is buried under
+            // EditorLoop > Application.Tick > UpdateScene > UpdateSceneIfNeeded > UpdateScene > PlayerLoop,
+            // and nested "PlayerLoop" markers can exist (e.g. a small outer one + the substantial
+            // gameplay one). We return the LARGEST match so we get the gameplay tick, not noise.
+            var queue = new Queue<(int Id, int Depth)>();
+            queue.Enqueue((parentId, 0));
+            var children = new List<int>();
+            double? best = null;
+            while (queue.Count > 0)
+            {
+                var (id, depth) = queue.Dequeue();
+                if (depth > maxDepth) continue;
+                children.Clear();
+                hv.GetItemChildren(id, children);
+                foreach (var c in children)
+                {
+                    if (string.Equals(hv.GetItemName(c), name, StringComparison.Ordinal))
+                    {
+                        var v = hv.GetItemColumnDataAsDouble(c, HierarchyFrameDataView.columnTotalTime);
+                        if (!best.HasValue || v > best.Value) best = v;
+                    }
+                    queue.Enqueue((c, depth + 1));
+                }
+            }
+            return best;
+        }
+
+        internal static int? FindDescendantIdByName(HierarchyFrameDataView hv, int parentId, string name, int maxDepth = 10)
+        {
+            // Find the descendant with this name that has the LARGEST totalMs — handles nested
+            // markers of the same name (e.g. multiple PlayerLoop occurrences) by picking the one
+            // that actually wraps significant work.
+            var queue = new Queue<(int Id, int Depth)>();
+            queue.Enqueue((parentId, 0));
+            var children = new List<int>();
+            int? bestId = null;
+            double bestTotal = -1;
+            while (queue.Count > 0)
+            {
+                var (id, depth) = queue.Dequeue();
+                if (depth > maxDepth) continue;
+                children.Clear();
+                hv.GetItemChildren(id, children);
+                foreach (var c in children)
+                {
+                    if (string.Equals(hv.GetItemName(c), name, StringComparison.Ordinal))
+                    {
+                        var v = hv.GetItemColumnDataAsDouble(c, HierarchyFrameDataView.columnTotalTime);
+                        if (v > bestTotal) { bestTotal = v; bestId = c; }
+                    }
+                    queue.Enqueue((c, depth + 1));
+                }
+            }
+            return bestId;
+        }
+
+        private static ProfileFrameDriver[] ResolveDrivers(HierarchyFrameDataView hv, int startId, int n)
+        {
+            // Walk down through dominant-single-child levels until we reach a real bifurcation,
+            // then return top-N children at that level. Caller picks the starting node — usually
+            // the hierarchy root, but PlayerLoop's id when we want gameplay-only attribution.
+            int currentId = startId;
+            const double DominanceRatio = 0.7;
+            const int MaxDescend = 10;
+
+            for (int step = 0; step < MaxDescend; step++)
+            {
+                var children = new List<int>();
+                hv.GetItemChildren(currentId, children);
+                if (children.Count == 0) break;
+
+                var ranked = children
+                    .Select(c => new
+                    {
+                        Id = c,
+                        Total = hv.GetItemColumnDataAsDouble(c, HierarchyFrameDataView.columnTotalTime)
+                    })
+                    .Where(x => x.Total > 0.01)
+                    .OrderByDescending(x => x.Total)
+                    .ToList();
+                if (ranked.Count == 0) break;
+
+                double totalAtLevel = ranked.Sum(x => x.Total);
+                double biggestShare = totalAtLevel > 0 ? ranked[0].Total / totalAtLevel : 1.0;
+
+                if (biggestShare < DominanceRatio)
+                    return RankToDrivers(hv, ranked.Select(r => r.Id), n);
+
+                currentId = ranked[0].Id;
+            }
+
+            var fallback = new List<int>();
+            hv.GetItemChildren(currentId, fallback);
+            if (fallback.Count == 0)
+                return new[] { ItemToDriver(hv, currentId) };
+            return RankToDrivers(hv, fallback, n);
+        }
+
+        private static ProfileFrameDriver[] RankToDrivers(HierarchyFrameDataView hv, IEnumerable<int> ids, int n) =>
+            ids
+                .Select(c => ItemToDriver(hv, c))
+                .OrderByDescending(d => d.TotalMs)
+                .Take(Math.Max(1, n))
+                .ToArray();
+
+        private static ProfileFrameDriver ItemToDriver(HierarchyFrameDataView hv, int id)
+        {
+            var name = hv.GetItemName(id) ?? "";
+            var total = hv.GetItemColumnDataAsDouble(id, HierarchyFrameDataView.columnTotalTime);
+            var self = hv.GetItemColumnDataAsDouble(id, HierarchyFrameDataView.columnSelfTime);
+            var calls = (int)hv.GetItemColumnDataAsDouble(id, HierarchyFrameDataView.columnCalls);
+            var gcKb = hv.GetItemColumnDataAsDouble(id, HierarchyFrameDataView.columnGcMemory) / 1024.0;
+            return new ProfileFrameDriver
+            {
+                Name = name,
+                TotalMs = Math.Round(total, 3),
+                SelfMs = Math.Round(self, 3),
+                Calls = calls,
+                GcKb = gcKb > 0.01 ? Math.Round(gcKb, 2) : (double?)null,
+                Hot = FindHotLeaf(hv, id)
+            };
+        }
+
+        /// <summary>
+        /// Walks the driver's subtree and returns the descendant with the highest self time —
+        /// the "what's actually slow" answer. Drivers are usually intermediate nodes (selfMs ~ 0)
+        /// so without this an agent gets a system-level totalMs but no clue where the wall-clock
+        /// goes inside it.
+        /// </summary>
+        private static ProfileFrameHotLeaf? FindHotLeaf(HierarchyFrameDataView hv, int rootId, int maxDepth = 12)
+        {
+            string? bestName = null;
+            double bestSelf = 0;
+            double bestTotal = 0;
+            var stack = new Stack<(int Id, int Depth)>();
+            stack.Push((rootId, 0));
+            var children = new List<int>();
+            while (stack.Count > 0)
+            {
+                var (id, depth) = stack.Pop();
+                if (depth > maxDepth) continue;
+                if (id != rootId)
+                {
+                    // Only consider descendants — the driver itself is reported separately.
+                    var self = hv.GetItemColumnDataAsDouble(id, HierarchyFrameDataView.columnSelfTime);
+                    if (self > bestSelf)
+                    {
+                        bestSelf = self;
+                        bestTotal = hv.GetItemColumnDataAsDouble(id, HierarchyFrameDataView.columnTotalTime);
+                        bestName = hv.GetItemName(id);
+                    }
+                }
+                children.Clear();
+                hv.GetItemChildren(id, children);
+                foreach (var c in children) stack.Push((c, depth + 1));
+            }
+            // Filter out hot leaves that are essentially noise — anything below 0.05ms self is
+            // not worth reporting to the agent (Round to 3 dp would show 0.000 anyway).
+            if (bestName == null || bestSelf < 0.05) return null;
+            return new ProfileFrameHotLeaf
+            {
+                Name = bestName,
+                SelfMs = Math.Round(bestSelf, 3),
+                TotalMs = Math.Round(bestTotal, 3)
             };
         }
 
@@ -306,15 +512,7 @@ namespace UnityCtl.Editor
         public void Cancel()
         {
             IsActive = false;
-            for (int i = 0; i < _recorders.Count; i++)
-            {
-                if (_recorders[i].Recorder.Valid) _recorders[i].Recorder.Dispose();
-            }
-            if (_frameTimeRecorder.Valid) _frameTimeRecorder.Dispose();
-            if (DriveEditorProfiler || _isRemoteMode)
-            {
-                try { ProfilerDriver.enabled = false; } catch { }
-            }
+            try { ProfilerDriver.enabled = false; } catch { }
         }
 
         private static (ProfilerRecorderHandle Handle, ProfilerMarkerDataUnit Unit, ProfilerCategory Category) FindHandleByName(string name)
@@ -349,8 +547,6 @@ namespace UnityCtl.Editor
             ProfilerMarkerDataUnit.FrequencyHz => "hz",
             _ => "value"
         };
-
-        private static string UnitToString(ProfilerMarkerDataUnit unit) => unit.ToString();
 
         private static double ComputeHitchThreshold(List<double> frameTimesMs, double multiplier, double? abs)
         {
@@ -425,8 +621,8 @@ namespace UnityCtl.Editor
     }
 
     /// <summary>
-    /// Singleton coordinator. Manages active profiling sessions, sampling them once per editor frame,
-    /// and serves list-stats / start / stop / status / snapshot / targets RPCs.
+    /// Singleton coordinator. Owns active profiling sessions, watches max-duration auto-stop,
+    /// and serves list-stats / start / stop / status / explain / hotspots / frame / mark / snapshot / targets RPCs.
     /// </summary>
     public class ProfilingManager
     {
@@ -566,7 +762,7 @@ namespace UnityCtl.Editor
                     SessionId = id,
                     StartedAt = s.StartedAtUtc.ToString("o"),
                     ElapsedSeconds = (DateTime.UtcNow - s.StartedAtUtc).TotalSeconds,
-                    Frames = s.FrameCount,
+                    Frames = s.CurrentFrameCount,
                     Stats = s.StatNames,
                     MaxDurationSeconds = s.MaxDurationSeconds,
                     Target = s.Target,
@@ -616,6 +812,379 @@ namespace UnityCtl.Editor
             // Url like "127.0.0.1:54999" for an adb-forwarded Android player.
             ProfilerDriver.DirectURLConnect(url);
             return ProfilerDriver.directConnectionUrl;
+        }
+
+        // ---------- explain / hotspots / frame ----------
+
+        /// <summary>
+        /// Walks the profiler buffer for a single frame and returns the top-N markers by self time
+        /// across all hierarchy depths. The agent uses this to diagnose what made a hitch frame slow:
+        /// hitches carry an absoluteFrameIndex that can be passed straight into Explain.
+        /// </summary>
+        public ProfileExplainResult Explain(int frameIndex, int threadIndex, int topN)
+        {
+            int first = ProfilerDriver.firstFrameIndex;
+            int last = ProfilerDriver.lastFrameIndex;
+            if (frameIndex < first || frameIndex > last)
+                throw new InvalidOperationException(
+                    $"Frame {frameIndex} is outside the profiler buffer [{first}, {last}]. " +
+                    "Run a `profile capture` first or pass a frame inside that range.");
+
+            var bucket = new Dictionary<string, MarkerAccum>(StringComparer.Ordinal);
+            string threadName = "";
+            double frameTimeMs = 0;
+
+            using (var raw = ProfilerDriver.GetRawFrameDataView(frameIndex, threadIndex))
+            {
+                if (raw == null || !raw.valid)
+                    throw new InvalidOperationException($"No frame data for frame {frameIndex}, thread {threadIndex}.");
+                threadName = raw.threadName ?? "";
+                frameTimeMs = raw.frameTimeNs / 1_000_000.0;
+            }
+
+            using var hv = ProfilerDriver.GetHierarchyFrameDataView(
+                frameIndex, threadIndex,
+                HierarchyFrameDataView.ViewModes.Default,
+                HierarchyFrameDataView.columnSelfTime,
+                sortAscending: false);
+            if (hv == null || !hv.valid)
+                throw new InvalidOperationException($"No hierarchy data for frame {frameIndex}, thread {threadIndex}.");
+
+            AccumulateMarkers(hv, hv.GetRootItemID(), bucket);
+
+            var top = bucket.Values
+                .OrderByDescending(m => m.SelfTimeMs)
+                .Take(Math.Max(1, topN))
+                .Select(m => m.ToEntry())
+                .ToArray();
+
+            return new ProfileExplainResult
+            {
+                FrameIndex = frameIndex,
+                ThreadIndex = threadIndex,
+                ThreadName = threadName,
+                FrameTimeMs = frameTimeMs,
+                TopMarkers = top
+            };
+        }
+
+        /// <summary>
+        /// Aggregates self time across a frame range and returns the top-N hottest markers.
+        /// Defaults to the entire profiler buffer when start/end are unspecified.
+        /// When `rootMarker` is set, accumulation only descends into the named child of the frame
+        /// root — useful for filtering to PlayerLoop in editor+play captures (excludes editor
+        /// IMGUI / OnGUI / menu-item update callbacks that otherwise drown out gameplay markers).
+        /// </summary>
+        public ProfileHotspotsResult Hotspots(int? startFrame, int? endFrame, int threadIndex, int topN, string? rootMarker)
+        {
+            int first = ProfilerDriver.firstFrameIndex;
+            int last = ProfilerDriver.lastFrameIndex;
+            int s = Math.Max(first, startFrame ?? first);
+            int e = Math.Min(last, endFrame ?? last);
+            if (e < s)
+                throw new InvalidOperationException(
+                    $"Empty frame range [{s}, {e}]. Profiler buffer holds [{first}, {last}].");
+
+            var bucket = new Dictionary<string, MarkerAccum>(StringComparer.Ordinal);
+            string threadName = "";
+            int framesProcessed = 0;
+            int framesWithRoot = 0;
+
+            for (int f = s; f <= e; f++)
+            {
+                using var hv = ProfilerDriver.GetHierarchyFrameDataView(
+                    f, threadIndex,
+                    HierarchyFrameDataView.ViewModes.Default,
+                    HierarchyFrameDataView.columnSelfTime,
+                    sortAscending: false);
+                if (hv == null || !hv.valid) continue;
+
+                if (string.IsNullOrEmpty(threadName))
+                {
+                    using var raw = ProfilerDriver.GetRawFrameDataView(f, threadIndex);
+                    if (raw != null && raw.valid) threadName = raw.threadName ?? "";
+                }
+
+                int walkFrom = hv.GetRootItemID();
+                if (!string.IsNullOrEmpty(rootMarker))
+                {
+                    int? rootChild = ProfilingSession.FindDescendantIdByName(hv, walkFrom, rootMarker);
+                    if (rootChild == null) continue; // skip frames that don't have the requested root
+                    walkFrom = rootChild.Value;
+                    framesWithRoot++;
+                }
+                AccumulateMarkers(hv, walkFrom, bucket);
+                framesProcessed++;
+            }
+
+            var top = bucket.Values
+                .OrderByDescending(m => m.SelfTimeMs)
+                .Take(Math.Max(1, topN))
+                .Select(m => m.ToEntry())
+                .ToArray();
+
+            return new ProfileHotspotsResult
+            {
+                StartFrame = s,
+                EndFrame = e,
+                FrameCount = framesProcessed,
+                ThreadIndex = threadIndex,
+                ThreadName = threadName,
+                TopMarkers = top
+            };
+        }
+
+
+        /// <summary>
+        /// Hierarchy tree drill-down for a single frame. Prunes nodes below thresholdMs and keeps
+        /// the top-N children per parent, so the response stays bounded for deep hierarchies.
+        /// Pairs with hitches[].absoluteFrameIndex — pass a hitch's index to see what's inside it.
+        /// When `rootMarker` is set, the tree starts at that named subtree (e.g. PlayerLoop) instead
+        /// of the frame root — useful for skipping past EditorLoop noise in editor+play captures.
+        /// </summary>
+        public ProfileFrameResult Frame(int frameIndex, int threadIndex, int maxDepth, double thresholdMs, int topPerNode, string? rootMarker)
+        {
+            int first = ProfilerDriver.firstFrameIndex;
+            int last = ProfilerDriver.lastFrameIndex;
+            if (frameIndex < first || frameIndex > last)
+                throw new InvalidOperationException(
+                    $"Frame {frameIndex} is outside the profiler buffer [{first}, {last}].");
+
+            // MergeSamplesWithTheSameName collapses repeated calls to the same marker into one
+            // node per parent, which is what an agent wants for a readable tree.
+            using var hv = ProfilerDriver.GetHierarchyFrameDataView(
+                frameIndex, threadIndex,
+                HierarchyFrameDataView.ViewModes.MergeSamplesWithTheSameName,
+                HierarchyFrameDataView.columnTotalTime,
+                sortAscending: false);
+            if (hv == null || !hv.valid)
+                throw new InvalidOperationException($"No hierarchy data for frame {frameIndex}, thread {threadIndex}.");
+
+            string threadName = "";
+            double frameTimeMs;
+            using (var raw = ProfilerDriver.GetRawFrameDataView(frameIndex, threadIndex))
+            {
+                if (raw != null && raw.valid)
+                {
+                    threadName = raw.threadName ?? "";
+                    frameTimeMs = raw.frameTimeNs / 1_000_000.0;
+                }
+                else
+                {
+                    var rootId = hv.GetRootItemID();
+                    frameTimeMs = hv.GetItemColumnDataAsDouble(rootId, HierarchyFrameDataView.columnTotalTime);
+                }
+            }
+
+            int treeRoot = hv.GetRootItemID();
+            if (!string.IsNullOrEmpty(rootMarker))
+            {
+                int? scoped = ProfilingSession.FindDescendantIdByName(hv, treeRoot, rootMarker);
+                if (scoped == null)
+                    throw new InvalidOperationException(
+                        $"Marker '{rootMarker}' not found in frame {frameIndex}'s hierarchy. " +
+                        $"Try without --root, or pick a different subtree (PlayerLoop / EditorLoop / Application.Tick).");
+                treeRoot = scoped.Value;
+            }
+
+            int prunedNodes = 0;
+            var tree = BuildFrameTree(hv, treeRoot, 0, maxDepth, (float)thresholdMs, topPerNode, ref prunedNodes);
+
+            return new ProfileFrameResult
+            {
+                FrameIndex = frameIndex,
+                ThreadIndex = threadIndex,
+                ThreadName = threadName,
+                FrameTimeMs = frameTimeMs,
+                Depth = maxDepth,
+                ThresholdMs = thresholdMs,
+                PrunedNodes = prunedNodes,
+                Tree = tree ?? Array.Empty<ProfileFrameNode>()
+            };
+        }
+
+        private static ProfileFrameNode[]? BuildFrameTree(
+            HierarchyFrameDataView hv, int id, int depth, int maxDepth,
+            float thresholdMs, int topPerNode, ref int pruned)
+        {
+            if (depth >= maxDepth) return null;
+
+            var children = new List<int>();
+            hv.GetItemChildren(id, children);
+            if (children.Count == 0) return null;
+
+            // Snapshot all children with their times, then prune.
+            var entries = new List<(int Id, string Name, float SelfMs, float TotalMs, int Calls, float GcKb)>(children.Count);
+            foreach (var c in children)
+            {
+                var name = hv.GetItemName(c) ?? "";
+                var selfMs = hv.GetItemColumnDataAsFloat(c, HierarchyFrameDataView.columnSelfTime);
+                var totalMs = hv.GetItemColumnDataAsFloat(c, HierarchyFrameDataView.columnTotalTime);
+                var calls = (int)hv.GetItemColumnDataAsFloat(c, HierarchyFrameDataView.columnCalls);
+                var gcKb = hv.GetItemColumnDataAsFloat(c, HierarchyFrameDataView.columnGcMemory) / 1024f;
+                entries.Add((c, name, selfMs, totalMs, calls, gcKb));
+            }
+
+            var kept = entries
+                .Where(e => e.TotalMs >= thresholdMs)
+                .OrderByDescending(e => e.TotalMs)
+                .Take(Math.Max(1, topPerNode))
+                .ToList();
+            pruned += entries.Count - kept.Count;
+
+            var result = new List<ProfileFrameNode>(kept.Count);
+            foreach (var n in kept)
+            {
+                var sub = BuildFrameTree(hv, n.Id, depth + 1, maxDepth, thresholdMs, topPerNode, ref pruned);
+                result.Add(new ProfileFrameNode
+                {
+                    Name = n.Name,
+                    SelfMs = Math.Round(n.SelfMs, 3),
+                    TotalMs = Math.Round(n.TotalMs, 3),
+                    Calls = n.Calls,
+                    GcKb = n.GcKb > 0.01f ? Math.Round(n.GcKb, 2) : (double?)null,
+                    Children = (sub != null && sub.Length > 0) ? sub : null
+                });
+            }
+            return result.ToArray();
+        }
+
+        private sealed class MarkerAccum
+        {
+            public string Name = "";
+            public double SelfTimeMs;
+            public int Calls;
+            public long GcAllocBytes;
+
+            public ProfileMarkerEntry ToEntry() => new()
+            {
+                Name = Name,
+                SelfTimeMs = SelfTimeMs,
+                Calls = Calls,
+                GcAllocBytes = GcAllocBytes > 0 ? GcAllocBytes : (long?)null
+            };
+        }
+
+        private static void AccumulateMarkers(HierarchyFrameDataView hv, int itemId, Dictionary<string, MarkerAccum> bucket)
+        {
+            // Walk every node in the tree; aggregate self time / calls / GC alloc by marker name.
+            // Self time is additive across nesting (each call's self contribution is disjoint from
+            // its children's), so summing across the tree gives the right per-marker total. Total
+            // time is intentionally not aggregated — it would double-count along the parent chain.
+            var children = new List<int>();
+            hv.GetItemChildren(itemId, children);
+            foreach (var c in children)
+            {
+                var name = hv.GetItemName(c);
+                if (string.IsNullOrEmpty(name)) { AccumulateMarkers(hv, c, bucket); continue; }
+
+                if (!bucket.TryGetValue(name, out var acc))
+                {
+                    acc = new MarkerAccum { Name = name };
+                    bucket[name] = acc;
+                }
+                // Unity 6 only exposes Single/Double/Float column readers — long would overflow for
+                // very large GC allocs, but Double has 53-bit mantissa which covers 8 PiB cleanly.
+                acc.SelfTimeMs += hv.GetItemColumnDataAsDouble(c, HierarchyFrameDataView.columnSelfTime);
+                acc.Calls += (int)hv.GetItemColumnDataAsDouble(c, HierarchyFrameDataView.columnCalls);
+                acc.GcAllocBytes += (long)hv.GetItemColumnDataAsDouble(c, HierarchyFrameDataView.columnGcMemory);
+
+                AccumulateMarkers(hv, c, bucket);
+            }
+        }
+
+        // ---------- mark ----------
+
+        /// <summary>
+        /// Wraps a user-provided C# expression in a ProfilerMarker + Stopwatch + per-thread GC
+        /// allocation accounting, runs it `repeat` times, and returns timing percentiles + GC bytes.
+        /// Re-uses the editor-side ScriptExecutor so the expression has access to the full editor
+        /// API surface and any runtime types the agent has loaded.
+        /// </summary>
+        public ProfileMarkResult Mark(string expression, string markerName, int repeat)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                throw new InvalidOperationException("Expression is required.");
+            if (repeat < 1) repeat = 1;
+            if (string.IsNullOrWhiteSpace(markerName)) markerName = "unityctl.mark";
+
+            // String literals must escape via Newtonsoft JSON — same trick fire/profile/mark.cs uses
+            // to safely embed user-supplied marker name inside generated source.
+            var nameLit = Newtonsoft.Json.JsonConvert.ToString(markerName);
+
+            var code = $@"
+using System;
+using System.Diagnostics;
+using System.Linq;
+using Unity.Profiling;
+using UnityEngine;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
+using Object = UnityEngine.Object;
+
+public class Marked
+{{
+    public static object Run()
+    {{
+        var marker = new ProfilerMarker({nameLit});
+        int repeat = {repeat};
+        var samples = new double[repeat];
+        long totalGcBytes = 0;
+        object lastResult = null;
+        for (int i = 0; i < repeat; i++)
+        {{
+            long gc0 = System.GC.GetAllocatedBytesForCurrentThread();
+            var sw = Stopwatch.StartNew();
+            marker.Begin();
+            try {{ lastResult = ({expression}); }}
+            finally {{ marker.End(); sw.Stop(); }}
+            samples[i] = sw.Elapsed.TotalMilliseconds;
+            totalGcBytes += System.GC.GetAllocatedBytesForCurrentThread() - gc0;
+        }}
+        var sorted = samples.OrderBy(x => x).ToArray();
+        double pct(double q) => sorted[Math.Min(sorted.Length - 1, (int)Math.Round(q * (sorted.Length - 1)))];
+        return new
+        {{
+            name = {nameLit},
+            repeat,
+            meanMs = Math.Round(samples.Average(), 4),
+            minMs = Math.Round(sorted[0], 4),
+            maxMs = Math.Round(sorted[sorted.Length - 1], 4),
+            p50Ms = Math.Round(pct(0.50), 4),
+            p95Ms = Math.Round(pct(0.95), 4),
+            gcBytes = totalGcBytes,
+            gcBytesPerCall = totalGcBytes / repeat,
+            result = lastResult?.ToString()
+        }};
+    }}
+}}
+";
+
+            var res = ScriptExecutor.Execute(code, "Marked", "Run", null);
+            if (!res.Success)
+            {
+                var detail = res.Error ?? "";
+                if (res.Diagnostics != null && res.Diagnostics.Length > 0)
+                    detail += "\nDiagnostics:\n  " + string.Join("\n  ", res.Diagnostics);
+                throw new InvalidOperationException($"profile mark failed to compile/run expression: {detail}");
+            }
+
+            var json = res.Result ?? "null";
+            var parsed = Newtonsoft.Json.Linq.JObject.Parse(json);
+            return new ProfileMarkResult
+            {
+                Name = (string)parsed["name"]!,
+                Repeat = (int)parsed["repeat"]!,
+                MeanMs = (double)parsed["meanMs"]!,
+                MinMs = (double)parsed["minMs"]!,
+                MaxMs = (double)parsed["maxMs"]!,
+                P50Ms = (double)parsed["p50Ms"]!,
+                P95Ms = (double)parsed["p95Ms"]!,
+                GcBytes = (long)parsed["gcBytes"]!,
+                GcBytesPerCall = (long)parsed["gcBytesPerCall"]!,
+                Result = parsed["result"]?.Type == Newtonsoft.Json.Linq.JTokenType.Null ? null : (string?)parsed["result"]
+            };
         }
 
         public ProfileSnapshotResult MemorySnapshot(string outputPath)
@@ -695,11 +1264,13 @@ namespace UnityCtl.Editor
             _tickHooked = false;
         }
 
+        // The tick is now only used to enforce max-duration auto-stop. Per-frame counter
+        // sampling moved into Stop() (post-hoc RawFrameDataView walk), since editor ticks
+        // don't line up with rendered frames.
         private void Tick()
         {
             if (_sessions.Count == 0) return;
 
-            // Snapshot keys to allow modification during iteration (e.g., auto-stop).
             string[] ids;
             {
                 ids = new string[_sessions.Count];
@@ -710,19 +1281,11 @@ namespace UnityCtl.Editor
             foreach (var id in ids)
             {
                 if (!_sessions.TryGetValue(id, out var s)) continue;
-                s.TickFrame();
 
                 if (s.MaxDurationSeconds.HasValue &&
                     (DateTime.UtcNow - s.StartedAtUtc).TotalSeconds >= s.MaxDurationSeconds.Value)
                 {
                     Debug.Log($"[UnityCtl] Profiling session {id} reached max-duration; auto-stopping.");
-                    // Auto-stop — caller will pull result via 'profile stop <id>' (returns the cached result).
-                    // For simplicity, leave the session in place so 'stop' still works; just disable sampling.
-                    // We model this by stopping internally and re-inserting a finalised wrapper is overkill,
-                    // so instead we mark the session inactive — TickFrame guards against double-counting.
-                    // The caller's stop() will get the right summaries because samples were collected up to now.
-                    // To avoid sampling forever after the cap, dispose recorders now via a controlled stop and
-                    // cache the result so 'stop' returns it.
                     var cached = s.Stop(includeSamples: false, hitchMultiplier: 2.0, hitchAbsoluteMs: null);
                     _sessions.Remove(id);
                     _autoStopped[id] = cached;

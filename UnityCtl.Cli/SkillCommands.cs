@@ -27,6 +27,16 @@ public static class SkillCommands
         ("unityctl-plugins", "UnityCtl.Cli.Resources.SKILL.plugins.md")
     ];
 
+    /// <summary>
+    /// Sidecar files written alongside the main SKILL.md inside the unity-editor skill folder.
+    /// Not auto-loaded — the base skill mentions them by relative path so agents can read them
+    /// when the topic is relevant. Each entry is (fileName, embeddedResourceName).
+    /// </summary>
+    private static readonly (string FileName, string Resource)[] Sidecars =
+    [
+        ("profiling.md", "UnityCtl.Cli.Resources.profiling.md")
+    ];
+
     public static Command CreateCommand()
     {
         var skillCommand = new Command("skill", "Claude Code skill management");
@@ -427,6 +437,15 @@ public static class SkillCommands
         var skillFolderPath = Path.Combine(skillsDir, SkillFolderName);
         Directory.CreateDirectory(skillFolderPath);
         await File.WriteAllTextAsync(Path.Combine(skillFolderPath, SkillFileName), content);
+
+        // Write sidecar files (e.g. profiling.md). They aren't @-referenced by SKILL.md so they
+        // stay out of the auto-loaded context, but agents can read them when the topic is relevant.
+        foreach (var (fileName, resource) in Sidecars)
+        {
+            var sidecarContent = GetEmbeddedResourceContent(resource);
+            if (sidecarContent == null) continue;
+            await File.WriteAllTextAsync(Path.Combine(skillFolderPath, fileName), sidecarContent);
+        }
         return true;
     }
 
@@ -455,6 +474,14 @@ public static class SkillCommands
         }
 
         File.Delete(skillPath);
+
+        // Remove sidecars co-located with the main skill.
+        foreach (var (fileName, _) in Sidecars)
+        {
+            var sidecarPath = Path.Combine(skillFolderPath, fileName);
+            if (File.Exists(sidecarPath))
+                File.Delete(sidecarPath);
+        }
 
         // Remove additional skills
         foreach (var (folder, _) in AdditionalSkills)

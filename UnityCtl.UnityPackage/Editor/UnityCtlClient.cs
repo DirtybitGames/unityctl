@@ -621,6 +621,22 @@ namespace UnityCtl
                         }
                         break;
 
+                    case UnityCtlCommands.ProfileExplain:
+                        result = HandleProfileExplain(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileHotspots:
+                        result = HandleProfileHotspots(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileFrame:
+                        result = HandleProfileFrame(request);
+                        break;
+
+                    case UnityCtlCommands.ProfileMark:
+                        result = HandleProfileMark(request);
+                        break;
+
                     default:
                         SendResponseError(request.RequestId, "unknown_command", $"Unknown command: {request.Command}");
                         return;
@@ -2766,6 +2782,49 @@ namespace UnityCtl
             if (!System.IO.Path.IsPathRooted(output))
                 output = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), output);
             return Editor.ProfilingManager.Instance.MemorySnapshot(output);
+        }
+
+        private object HandleProfileExplain(RequestMessage request)
+        {
+            var frameIndex = GetIntArgument(request, "frameIndex");
+            if (!frameIndex.HasValue)
+                throw new InvalidOperationException("'frameIndex' argument is required for profile.explain");
+            var threadIndex = GetIntArgument(request, "threadIndex") ?? 0;
+            var topN = GetIntArgument(request, "topN") ?? 20;
+            return Editor.ProfilingManager.Instance.Explain(frameIndex.Value, threadIndex, topN);
+        }
+
+        private object HandleProfileHotspots(RequestMessage request)
+        {
+            var startFrame = GetIntArgument(request, "startFrame");
+            var endFrame = GetIntArgument(request, "endFrame");
+            var threadIndex = GetIntArgument(request, "threadIndex") ?? 0;
+            var topN = GetIntArgument(request, "topN") ?? 20;
+            var rootMarker = GetStringArgument(request, "rootMarker");
+            return Editor.ProfilingManager.Instance.Hotspots(startFrame, endFrame, threadIndex, topN, rootMarker);
+        }
+
+        private object HandleProfileFrame(RequestMessage request)
+        {
+            var frameIndex = GetIntArgument(request, "frameIndex");
+            if (!frameIndex.HasValue)
+                throw new InvalidOperationException("'frameIndex' argument is required for profile.frame");
+            var threadIndex = GetIntArgument(request, "threadIndex") ?? 0;
+            var depth = GetIntArgument(request, "depth") ?? 3;
+            var thresholdMs = GetDoubleArgument(request, "thresholdMs") ?? 0.2;
+            var topPerNode = GetIntArgument(request, "topPerNode") ?? 8;
+            var rootMarker = GetStringArgument(request, "rootMarker");
+            return Editor.ProfilingManager.Instance.Frame(frameIndex.Value, threadIndex, depth, thresholdMs, topPerNode, rootMarker);
+        }
+
+        private object HandleProfileMark(RequestMessage request)
+        {
+            var expression = GetStringArgument(request, "expression");
+            if (string.IsNullOrEmpty(expression))
+                throw new InvalidOperationException("'expression' argument is required for profile.mark");
+            var name = GetStringArgument(request, "name");
+            var repeat = GetIntArgument(request, "repeat") ?? 1;
+            return Editor.ProfilingManager.Instance.Mark(expression, name ?? "unityctl.mark", repeat);
         }
 
         private object HandleRecordStart(RequestMessage request)
