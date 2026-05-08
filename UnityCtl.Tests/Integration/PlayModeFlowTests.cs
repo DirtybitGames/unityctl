@@ -358,22 +358,15 @@ public class PlayModeFlowTests : IAsyncLifetime
             $"play.exit without domain reload took {sw.ElapsedMilliseconds}ms — should be under 3.5s (2s compilation detection + margin)");
     }
 
-    // --- Chained play.exit + play.enter regression tests ---
-    //
-    // Production logs (2026-05-08, fire-2/fire-5) showed `unityctl play exit && unityctl play enter`
-    // chains failing with `Command 'play.status' timed out after 30s`. Root cause: play.exit
-    // returned OK on the first PlayModeChanged event (ExitingPlayMode) — but Unity is still
-    // mid-transition at that point. The chained play.enter then hit Unity mid-transition and
-    // its initial play.status RPC stalled because Unity's main thread wasn't yet idle.
-    //
-    // Fix: play.exit must wait for the terminal `EnteredEditMode` event before returning.
+    // Regression: chained `play exit && play enter` was 504-ing on play.enter's initial
+    // play.status because play.exit returned at ExitingPlayMode (transition started) instead
+    // of EnteredEditMode (transition complete), leaving Unity's main thread busy.
 
     [Fact]
     public async Task PlayExit_WaitsForEnteredEditMode_BeforeReturning()
     {
-        // Real Unity emits ExitingPlayMode (transition started) then EnteredEditMode
-        // (transition complete) for every play-mode exit. play.exit must wait for the
-        // latter — that is the actual "transition done" signal.
+        // Real Unity emits ExitingPlayMode then EnteredEditMode for every play-mode exit.
+        // EnteredEditMode is the actual "transition done" signal.
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
             new PlayModeResult { State = PlayModeState.Transitioning },
             ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
@@ -413,28 +406,20 @@ public class PlayModeFlowTests : IAsyncLifetime
 
         var rpcStart = DateTime.UtcNow;
 
-        // 1. play.exit RPC — completes when Unity is settled (EnteredEditMode)
         var exitResp = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
         AssertExtensions.IsOk(exitResp);
-        var exitState = AssertExtensions.GetResultJObject(exitResp)["state"]?.ToString();
-        Assert.Equal("EnteredEditMode", exitState);
+        Assert.Equal("EnteredEditMode", AssertExtensions.GetResultJObject(exitResp)["state"]?.ToString());
 
-        // The earliest EnteredEditMode could have been emitted is rpcStart + 300ms.
         var earliestSettled = rpcStart + TimeSpan.FromMilliseconds(300);
 
-        // 2. play.enter RPC — its internal play.status MUST be sent after settled.
         var enterResp = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayEnter);
         AssertExtensions.IsOk(enterResp);
 
-        // Find the FIRST play.status sent by the bridge to Unity AFTER play.enter began.
-        // (EnsurePlayModeAsync sends one before the asset.refresh + the play.enter retry loop.)
-        var statusRequests = _fixture.FakeUnity.ReceivedRequests
+        var firstStatus = _fixture.FakeUnity.ReceivedRequests
             .Where(r => r.Command == UnityCtlCommands.PlayStatus)
             .OrderBy(r => r.ReceivedAt)
-            .ToList();
-        Assert.NotEmpty(statusRequests);
-
-        var firstStatus = statusRequests[0];
+            .FirstOrDefault();
+        Assert.NotNull(firstStatus);
         Assert.True(firstStatus.ReceivedAt >= earliestSettled,
             $"First play.status arrived at {firstStatus.ReceivedAt:O}, before " +
             $"earliest EnteredEditMode at {earliestSettled:O}. Chained play.enter raced the transition.");

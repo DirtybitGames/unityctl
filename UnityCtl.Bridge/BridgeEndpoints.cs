@@ -23,6 +23,7 @@ public static class BridgeEndpoints
     private static readonly TimeSpan CompilationWaitTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DomainReloadReconnectTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DomainReloadDetectionTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan EditorReadyTimeout = TimeSpan.FromSeconds(10);
 
     // Command timeout configuration (in seconds, configurable via environment variables)
     // Note: Timeouts are resolved lazily via env vars so tests can override them per-fixture.
@@ -38,10 +39,9 @@ public static class BridgeEndpoints
         {
             TimeoutEnvVar = "UNITYCTL_TIMEOUT_PLAYMODE", TimeoutDefaultSeconds = 30,
             CompletionEvent = UnityCtlEvents.PlayModeChanged,
+            // EnteredEditMode = transition complete. Returning at ExitingPlayMode leaves
+            // Unity mid-transition; chained RPCs stall on a busy main thread.
             CompletionEventState = "EnteredEditMode"
-            // Wait for EnteredEditMode (transition complete), not ExitingPlayMode
-            // (transition started). Otherwise chained `play exit && play enter` hits
-            // Unity mid-transition and the next RPC stalls on a busy main thread.
         },
         [UnityCtlCommands.AssetImport] = new CommandConfig
         {
@@ -594,52 +594,42 @@ public static class BridgeEndpoints
                 return JsonResponse(response);
             }
 
-            // Race: wait for EnteredEditMode (transition complete) OR DomainReloadStarting
-            // (transition interrupted by reload — EnteredEditMode may be lost). One of these
-            // tells us the bridge can reasonably believe Unity is finishing the exit.
+            // Race: EnteredEditMode (transition complete) vs DomainReloadStarting (reload
+            // pre-empts the transition; EnteredEditMode would be lost across the disconnect).
+            await Task.WhenAny(eventWaitTask, domainReloadWaitTask);
+
             EventMessage? eventMessage = null;
+            string playModeState;
             var compilationTriggered = false;
-            var reloadInterruptedTransition = false;
 
-            var winner = await Task.WhenAny(eventWaitTask, domainReloadWaitTask);
-
-            if (winner == domainReloadWaitTask && domainReloadWaitTask.IsCompletedSuccessfully
-                && !eventWaitTask.IsCompletedSuccessfully)
+            if (eventWaitTask.IsCompletedSuccessfully)
             {
-                // Domain reload kicked in before EnteredEditMode. Unity will disconnect; the
-                // EnteredEditMode event is unlikely to be re-fired post-reload (reload starts
-                // in edit mode, no state-change event). Switch to waiting for reload to
-                // complete + main thread responsive.
-                Console.WriteLine($"[Bridge] Domain reload during play exit before EnteredEditMode - " +
-                    "waiting for reconnect + editor ready instead");
-                reloadInterruptedTransition = true;
-                compilationTriggered = true;
+                eventMessage = await eventWaitTask;
+                var enteredPayload = eventMessage.Payload as JObject;
+                playModeState = enteredPayload?["state"]?.Value<string>() ?? "EnteredEditMode";
+
+                // Unity sets compilationTriggered authoritatively at EnteredEditMode firing.
+                // If the field is absent (older plugin), fall back to a brief race for
+                // compilation.started in case a delayed compile follows.
+                var payloadField = enteredPayload?["compilationTriggered"];
+                if (payloadField != null)
+                {
+                    compilationTriggered = payloadField.Value<bool>();
+                }
+                else
+                {
+                    var detectionDelay = Task.Delay(CompilationWaitTimeout, cancellationToken);
+                    await Task.WhenAny(compilationStartedWaitTask, detectionDelay);
+                    compilationTriggered = compilationStartedWaitTask.IsCompletedSuccessfully;
+                }
             }
             else
             {
-                // EnteredEditMode arrived (or both completed; treat as normal path).
-                eventMessage = await eventWaitTask;
-
-                // Detect compilation: from EnteredEditMode payload or from compilation.started event.
-                var enteredPayload = eventMessage.Payload as JObject;
-                compilationTriggered = enteredPayload?["compilationTriggered"]?.Value<bool>() ?? false;
-
-                if (!compilationTriggered)
-                {
-                    var waitTask = Task.Delay(CompilationWaitTimeout, cancellationToken);
-                    var completedTask = await Task.WhenAny(compilationStartedWaitTask, waitTask);
-
-                    if (completedTask == compilationStartedWaitTask && compilationStartedWaitTask.IsCompletedSuccessfully)
-                    {
-                        compilationTriggered = true;
-                        Console.WriteLine($"[Bridge] Compilation started detected during play exit - will wait for compilation to finish");
-                    }
-                }
+                // Reload pre-empted EnteredEditMode; treat post-reload reconnect as completion.
+                Console.WriteLine($"[Bridge] Domain reload during play exit before EnteredEditMode - waiting for reconnect");
+                playModeState = "EnteredEditMode";
             }
 
-            // Build final result
-            var eventPayload = eventMessage?.Payload as JObject;
-            var playModeState = eventPayload?["state"]?.Value<string>() ?? "EnteredEditMode";
             object? finalResult = eventMessage?.Payload ?? new { state = playModeState };
 
             if (compilationTriggered)
@@ -653,22 +643,14 @@ public static class BridgeEndpoints
 
                 if (compResult != null)
                 {
-                    finalResult = playModeState != null
-                        ? new
-                        {
-                            state = playModeState,
-                            compilationTriggered = true,
-                            compilationSuccess = compResult.Success,
-                            errors = compResult.Errors,
-                            warnings = compResult.Warnings
-                        }
-                        : (object)new
-                        {
-                            compilationTriggered = true,
-                            compilationSuccess = compResult.Success,
-                            errors = compResult.Errors,
-                            warnings = compResult.Warnings
-                        };
+                    finalResult = new
+                    {
+                        state = playModeState,
+                        compilationTriggered = true,
+                        compilationSuccess = compResult.Success,
+                        errors = compResult.Errors,
+                        warnings = compResult.Warnings
+                    };
 
                     if (!compResult.Success)
                     {
@@ -685,21 +667,13 @@ public static class BridgeEndpoints
                 }
                 else
                 {
-                    // Compilation timed out (e.g., domain reload)
-                    finalResult = playModeState != null
-                        ? new
-                        {
-                            state = playModeState,
-                            compilationTriggered = true,
-                            compilationSuccess = (bool?)null,
-                            note = "Compilation may still be in progress (domain reload)"
-                        }
-                        : (object)new
-                        {
-                            compilationTriggered = true,
-                            compilationSuccess = (bool?)null,
-                            note = "Compilation may still be in progress (domain reload)"
-                        };
+                    finalResult = new
+                    {
+                        state = playModeState,
+                        compilationTriggered = true,
+                        compilationSuccess = (bool?)null,
+                        note = "Compilation may still be in progress (domain reload)"
+                    };
                 }
             }
 
@@ -712,33 +686,25 @@ public static class BridgeEndpoints
                 Error = response.Error
             };
 
-            // If compilation was triggered (or a reload interrupted the transition),
-            // a domain reload is happening or about to happen. Wait for the reload to
-            // complete AND for the editor to become ready, so the caller's next
-            // command finds Unity in a stable, responsive state.
-            if (compilationTriggered)
+            // Wait for any in-progress reload to settle so the caller's next command finds
+            // Unity in a responsive state. A reload follows compilation; it may also have
+            // pre-empted the transition above.
+            if (compilationTriggered && !domainReloadWaitTask.IsCompletedSuccessfully)
             {
-                if (!reloadInterruptedTransition)
-                {
-                    // We didn't observe DomainReloadStarting yet — give it a brief window.
-                    var detectionDelay = Task.Delay(DomainReloadDetectionTimeout, cancellationToken);
-                    await Task.WhenAny(domainReloadWaitTask, detectionDelay);
-                }
+                var detectionDelay = Task.Delay(DomainReloadDetectionTimeout, cancellationToken);
+                await Task.WhenAny(domainReloadWaitTask, detectionDelay);
+            }
 
-                if (domainReloadWaitTask.IsCompletedSuccessfully || state.IsDomainReloadInProgress)
+            if (domainReloadWaitTask.IsCompletedSuccessfully || state.IsDomainReloadInProgress)
+            {
+                Console.WriteLine($"[Bridge] Domain reload during/after play exit - waiting for reconnect");
+                var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
+                    DomainReloadReconnectTimeout, cancellationToken);
+                if (reloadComplete)
                 {
-                    Console.WriteLine($"[Bridge] Domain reload during/after play exit - waiting for Unity to reconnect");
-                    var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
-                        DomainReloadReconnectTimeout, cancellationToken);
-                    if (reloadComplete)
-                    {
-                        Console.WriteLine($"[Bridge] Unity reconnected after play exit domain reload - waiting for editor ready");
-                        // Wait for main thread to be responsive (editor.ping succeeds). Without
-                        // this, a chained next command can race ahead of asset reimport / scene
-                        // reload work that follows the assembly reload.
-                        await state.WaitForEditorReadyAsync(
-                            DomainReloadReconnectTimeout, cancellationToken);
-                    }
+                    // editor.ping success proves the main thread is responsive — without this
+                    // a chained command can race post-reload asset reimport / scene reload.
+                    await state.WaitForEditorReadyAsync(EditorReadyTimeout, cancellationToken);
                 }
             }
 
