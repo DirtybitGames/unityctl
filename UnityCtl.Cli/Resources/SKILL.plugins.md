@@ -52,7 +52,7 @@ unityctl plugin create my-tool   # scaffolds .unityctl/plugins/my-tool/
 
 ### Handler script
 
-Must define `public class Script` with `public static object Main(string[] args)`. Arguments and options are passed as the `args` array.
+Must define `public class Script` with a static `Main(string[] args)` method — sync `object`, async `Task<T>`, or async `Task`. Arguments and options are passed as the `args` array.
 
 ```csharp
 using UnityEngine;
@@ -68,7 +68,7 @@ public class Script
 }
 ```
 
-The return value is sent back as the command output. The script runs on Unity's main thread and has access to all Unity and UnityEditor APIs.
+The return value is sent back as the command output. `Task<T>` returns are awaited and unwrapped before serialisation. The script runs on Unity's main thread and has access to all Unity and UnityEditor APIs. Add `using System.Threading.Tasks;` when writing an async handler.
 
 ### Custom skill documentation
 
