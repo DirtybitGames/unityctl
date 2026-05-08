@@ -49,12 +49,16 @@ public class PlayModeFlowTests : IAsyncLifetime
                 UnityCtlEvents.PlayModeChanged,
                 new { state = "EnteredPlayMode" }));
 
-        // play.exit
+        // play.exit: real Unity emits ExitingPlayMode (transition started) then
+        // EnteredEditMode (transition complete). The bridge must wait for the latter.
         fakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
             new PlayModeResult { State = PlayModeState.Transitioning },
             ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
                 UnityCtlEvents.PlayModeChanged,
-                new { state = "ExitingPlayMode", compilationTriggered = false }));
+                new { state = "ExitingPlayMode", compilationTriggered = false }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "EnteredEditMode", compilationTriggered = false }));
     }
 
     [Fact]
@@ -173,7 +177,7 @@ public class PlayModeFlowTests : IAsyncLifetime
 
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
-        Assert.Equal("ExitingPlayMode", result["state"]?.ToString());
+        Assert.Equal("EnteredEditMode", result["state"]?.ToString());
     }
 
     [Fact]
@@ -249,17 +253,22 @@ public class PlayModeFlowTests : IAsyncLifetime
     [Fact]
     public async Task PlayExit_CompilationTriggered_WaitsForCompilationFinished()
     {
-        // Real Unity behavior: ExitingPlayMode has compilationTriggered=false,
-        // then compilation.started fires quickly, then compilation.finished later
+        // Real Unity sequence: ExitingPlayMode → EnteredEditMode (with
+        // compilationTriggered=true on the payload) → compilation.started →
+        // compilation.finished. The bridge waits for EnteredEditMode, then for
+        // the compilation to finish before returning.
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
             new PlayModeResult { State = PlayModeState.Transitioning },
             ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
                 UnityCtlEvents.PlayModeChanged,
                 new { state = "ExitingPlayMode", compilationTriggered = false }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(100),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "EnteredEditMode", compilationTriggered = true }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(200),
                 UnityCtlEvents.CompilationStarted,
                 new { }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(300),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(400),
                 UnityCtlEvents.CompilationFinished,
                 new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }));
 
@@ -277,20 +286,23 @@ public class PlayModeFlowTests : IAsyncLifetime
         // Reproduce the exact bug from conversation logs: play.exit triggers compilation
         // which triggers domain reload. The next command should NOT get a 503.
         //
-        // Real Unity sequence: ExitingPlayMode -> compilation.started -> compilation.finished
-        //   -> DomainReloadStarting -> Unity disconnects -> Unity reconnects
+        // Real Unity sequence: ExitingPlayMode -> EnteredEditMode -> compilation.started ->
+        //   compilation.finished -> DomainReloadStarting -> Unity disconnects -> Unity reconnects
         _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
             new PlayModeResult { State = PlayModeState.Transitioning },
             ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
                 UnityCtlEvents.PlayModeChanged,
                 new { state = "ExitingPlayMode", compilationTriggered = false }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(100),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "EnteredEditMode", compilationTriggered = true }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(200),
                 UnityCtlEvents.CompilationStarted,
                 new { }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(200),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(300),
                 UnityCtlEvents.CompilationFinished,
                 new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }),
-            ScheduledEvent.After(TimeSpan.FromMilliseconds(300),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(400),
                 UnityCtlEvents.DomainReloadStarting,
                 new { }));
 
@@ -329,7 +341,8 @@ public class PlayModeFlowTests : IAsyncLifetime
     {
         // When play.exit does NOT trigger compilation/domain reload,
         // it should return promptly without waiting for the detection timeout.
-        // The default handler has compilationTriggered=false and no DomainReloadStarting.
+        // The default handler fires ExitingPlayMode then EnteredEditMode quickly,
+        // with compilationTriggered=false and no DomainReloadStarting.
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
@@ -337,11 +350,93 @@ public class PlayModeFlowTests : IAsyncLifetime
 
         AssertExtensions.IsOk(response);
         var result = AssertExtensions.GetResultJObject(response);
-        Assert.Equal("ExitingPlayMode", result["state"]?.ToString());
+        Assert.Equal("EnteredEditMode", result["state"]?.ToString());
 
         // play.exit has an existing 2s CompilationWaitTimeout for detecting late compilations.
         // Our domain reload wait should NOT add latency when compilation wasn't triggered.
         Assert.True(sw.ElapsedMilliseconds < 3500,
             $"play.exit without domain reload took {sw.ElapsedMilliseconds}ms — should be under 3.5s (2s compilation detection + margin)");
+    }
+
+    // --- Chained play.exit + play.enter regression tests ---
+    //
+    // Production logs (2026-05-08, fire-2/fire-5) showed `unityctl play exit && unityctl play enter`
+    // chains failing with `Command 'play.status' timed out after 30s`. Root cause: play.exit
+    // returned OK on the first PlayModeChanged event (ExitingPlayMode) — but Unity is still
+    // mid-transition at that point. The chained play.enter then hit Unity mid-transition and
+    // its initial play.status RPC stalled because Unity's main thread wasn't yet idle.
+    //
+    // Fix: play.exit must wait for the terminal `EnteredEditMode` event before returning.
+
+    [Fact]
+    public async Task PlayExit_WaitsForEnteredEditMode_BeforeReturning()
+    {
+        // Real Unity emits ExitingPlayMode (transition started) then EnteredEditMode
+        // (transition complete) for every play-mode exit. play.exit must wait for the
+        // latter — that is the actual "transition done" signal.
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
+            new PlayModeResult { State = PlayModeState.Transitioning },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "ExitingPlayMode", compilationTriggered = false }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(300),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "EnteredEditMode", compilationTriggered = false }));
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var response = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
+        sw.Stop();
+
+        AssertExtensions.IsOk(response);
+        var result = AssertExtensions.GetResultJObject(response);
+        Assert.Equal("EnteredEditMode", result["state"]?.ToString());
+        Assert.True(sw.ElapsedMilliseconds >= 300,
+            $"play.exit returned in {sw.ElapsedMilliseconds}ms — must wait for EnteredEditMode (~300ms)");
+    }
+
+    [Fact]
+    public async Task PlayExit_ChainedPlayEnter_StatusCheckArrivesAfterEnteredEditMode()
+    {
+        // The end-to-end repro: chain play.exit and play.enter as two HTTP RPCs.
+        // play.enter's internal play.status check (the one that timed out at 30s in
+        // production) must be sent only after Unity has emitted EnteredEditMode —
+        // i.e., after the transition is actually complete.
+
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.PlayExit, _ =>
+            new PlayModeResult { State = PlayModeState.Transitioning },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "ExitingPlayMode", compilationTriggered = false }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(300),
+                UnityCtlEvents.PlayModeChanged,
+                new { state = "EnteredEditMode", compilationTriggered = false }));
+
+        var rpcStart = DateTime.UtcNow;
+
+        // 1. play.exit RPC — completes when Unity is settled (EnteredEditMode)
+        var exitResp = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayExit);
+        AssertExtensions.IsOk(exitResp);
+        var exitState = AssertExtensions.GetResultJObject(exitResp)["state"]?.ToString();
+        Assert.Equal("EnteredEditMode", exitState);
+
+        // The earliest EnteredEditMode could have been emitted is rpcStart + 300ms.
+        var earliestSettled = rpcStart + TimeSpan.FromMilliseconds(300);
+
+        // 2. play.enter RPC — its internal play.status MUST be sent after settled.
+        var enterResp = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayEnter);
+        AssertExtensions.IsOk(enterResp);
+
+        // Find the FIRST play.status sent by the bridge to Unity AFTER play.enter began.
+        // (EnsurePlayModeAsync sends one before the asset.refresh + the play.enter retry loop.)
+        var statusRequests = _fixture.FakeUnity.ReceivedRequests
+            .Where(r => r.Command == UnityCtlCommands.PlayStatus)
+            .OrderBy(r => r.ReceivedAt)
+            .ToList();
+        Assert.NotEmpty(statusRequests);
+
+        var firstStatus = statusRequests[0];
+        Assert.True(firstStatus.ReceivedAt >= earliestSettled,
+            $"First play.status arrived at {firstStatus.ReceivedAt:O}, before " +
+            $"earliest EnteredEditMode at {earliestSettled:O}. Chained play.enter raced the transition.");
     }
 }
