@@ -31,6 +31,9 @@ public class EvalCodeGeneratorTests
         Assert.Contains("using System;", code);
         Assert.Contains("using System.Collections.Generic;", code);
         Assert.Contains("using System.Linq;", code);
+        // Async-by-default: agents write `Task.Delay(...)`, not the
+        // fully-qualified form, so System.Threading.Tasks is in defaults.
+        Assert.Contains("using System.Threading.Tasks;", code);
         Assert.Contains("using UnityEngine;", code);
         Assert.Contains("using UnityEditor;", code);
     }

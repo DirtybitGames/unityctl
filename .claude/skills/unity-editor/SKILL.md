@@ -151,20 +151,20 @@ unityctl script eval 'args[0]' -- hello
 
 ### Async / waiting on things
 
-`script eval` and `script execute` are **async by default**. Write `await` directly:
+`script eval` and `script execute` are **async by default**. Write `await` directly (`System.Threading.Tasks` is in the default usings):
 
 ```bash
-unityctl script eval 'await System.Threading.Tasks.Task.Delay(500); return GameObject.Find("Boss") != null;'
+unityctl script eval 'await Task.Delay(500); return GameObject.Find("Boss") != null;'
 ```
 
 While your script awaits, Unity's main thread is freed — other unityctl commands keep running. `Task<T>` returns are unwrapped automatically (you get `T`, not the Task envelope).
 
 | If you want to … | Write |
 |---|---|
-| Pause a moment | `await System.Threading.Tasks.Task.Delay(ms);` |
-| Yield once (let Unity tick) | `await System.Threading.Tasks.Task.Yield();` |
-| Poll until a condition | `while (!cond) await System.Threading.Tasks.Task.Yield();` |
-| Run pure CPU off the main thread | `await System.Threading.Tasks.Task.Run(() => heavy())` |
+| Pause a moment | `await Task.Delay(ms);` |
+| Yield once (let Unity tick) | `await Task.Yield();` |
+| Poll until a condition | `while (!cond) await Task.Yield();` |
+| Run pure CPU off the main thread | `await Task.Run(() => heavy())` |
 
 **Threading rule:** Unity APIs (`GameObject.Find`, `Application.isPlaying`, anything in `UnityEngine`/`UnityEditor`) are **main-thread only**. Don't put them inside `Task.Run` — they'll throw. Plain C# (LINQ over plain data, math, I/O) is fine on the threadpool.
 

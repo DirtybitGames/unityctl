@@ -59,41 +59,26 @@ namespace UnityCtl.Editor
             }
         }
 
-        // Cap on how many layers of nested Task<Task<...>> we will unwrap.
-        // 4 covers any realistic agent expression — `return Task.FromResult(x)`
-        // inside an async Main is the only non-pathological way to nest, and
-        // that's depth 2 (outer async Task<object> wrapping the inner Task<T>).
-        // Beyond the cap we throw rather than handing a still-Task value to
-        // JSON serialisation, which would re-introduce the wedge bug if
-        // Newtonsoft reflected over `.Result` on a pending main-thread-bound
-        // Task.
-        const int MaxUnwrapDepth = 4;
-
         /// <summary>
         /// Async-aware script entry. If <c>Main</c> returns a <c>Task</c> or
         /// <c>Task&lt;T&gt;</c>, this awaits and unwraps before serialising.
-        /// All result serialisation is centralised here so the rule "the
-        /// string in <see cref="ScriptExecuteResult.Result"/> is the JSON
-        /// view of whatever the user ultimately returned" holds for every
-        /// path.
+        /// All result serialisation lives here so the wire shape of
+        /// <see cref="ScriptExecuteResult.Result"/> is built in one place.
         ///
-        /// The await captures the caller's <see cref="System.Threading.SynchronizationContext"/>,
-        /// so when invoked from Unity's main thread the continuation
-        /// (and serialisation) resume on the main thread — safe for Unity-type
-        /// JSON output. Callers that want the main thread freed during the
-        /// await should invoke this from a fire-and-forget Task so the
-        /// Pump tick releases the main thread immediately.
+        /// The await captures Unity's main-thread <see cref="System.Threading.SynchronizationContext"/>,
+        /// so the continuation (and serialisation) resume on the main thread —
+        /// safe for Unity-type JSON output. Callers that want the main thread
+        /// freed during the await invoke this from a fire-and-forget Task so
+        /// the Pump tick releases the main thread immediately.
         /// </summary>
         public static async Task<ScriptExecuteResult> ExecuteAsync(string code, string className, string methodName, string[]? scriptArgs = null)
         {
-            var result = Execute(code, className, methodName, scriptArgs);
+            var (result, raw, declared) = Compile(code, className, methodName, scriptArgs);
             if (!result.Success) return result;
 
             try
             {
-                var value = await AsyncUnwrap.UnwrapAsync(
-                    result.RawReturn, result.DeclaredReturnType, MaxUnwrapDepth);
-                result.RawReturn = value;
+                var value = await AsyncUnwrap.UnwrapAsync(raw, declared);
                 result.Result = SerializeReturn(value);
                 return result;
             }
@@ -117,39 +102,20 @@ namespace UnityCtl.Editor
             catch { return value.ToString(); }
         }
 
-        // Compile + invoke the user's Main. Internal — callers should use
-        // ExecuteAsync, which is the only path that handles Task returns
-        // correctly. Kept as a separate method so the (sync) Roslyn work and
-        // the (async) Task-unwrap responsibilities live in obviously
-        // separate functions.
-        static ScriptExecuteResult Execute(string code, string className, string methodName, string[]? scriptArgs = null)
+        // Compile + invoke the user's Main. Returns the success/error
+        // shell along with the raw return object and the method's
+        // declared return type — both needed by ExecuteAsync to decide
+        // whether to await/unwrap. Private so callers can't accidentally
+        // bypass the unwrap step.
+        static (ScriptExecuteResult Result, object? Raw, Type? Declared) Compile(
+            string code, string className, string methodName, string[]? scriptArgs = null)
         {
             if (string.IsNullOrEmpty(code))
-            {
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = "Code cannot be null or empty."
-                };
-            }
-
+                return (Failure("Code cannot be null or empty."), null, null);
             if (string.IsNullOrEmpty(className))
-            {
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = "Class name cannot be null or empty."
-                };
-            }
-
+                return (Failure("Class name cannot be null or empty."), null, null);
             if (string.IsNullOrEmpty(methodName))
-            {
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = "Method name cannot be null or empty."
-                };
-            }
+                return (Failure("Method name cannot be null or empty."), null, null);
 
             var profile = Environment.GetEnvironmentVariable("UNITYCTL_SCRIPT_PROFILE") == "1";
             var refSw = profile ? Stopwatch.StartNew() : null;
@@ -193,13 +159,13 @@ namespace UnityCtl.Editor
 
                     var hints = TypeResolver.BuildHints(diagnostics);
 
-                    return new ScriptExecuteResult
+                    return (new ScriptExecuteResult
                     {
                         Success = false,
                         Error = "Compilation failed.",
                         Diagnostics = diagnostics,
                         Hints = hints.Length > 0 ? hints : null
-                    };
+                    }, null, null);
                 }
 
                 // Load the assembly
@@ -209,13 +175,7 @@ namespace UnityCtl.Editor
                 // Find the type
                 var type = assembly.GetType(className);
                 if (type == null)
-                {
-                    return new ScriptExecuteResult
-                    {
-                        Success = false,
-                        Error = $"Class '{className}' not found in compiled assembly."
-                    };
-                }
+                    return (Failure($"Class '{className}' not found in compiled assembly."), null, null);
 
                 // Find the method - try with string[] parameter first, then parameterless
                 var methodWithArgs = type.GetMethod(methodName,
@@ -240,59 +200,38 @@ namespace UnityCtl.Editor
                 }
                 else
                 {
-                    return new ScriptExecuteResult
-                    {
-                        Success = false,
-                        Error = $"Static method '{methodName}' not found in class '{className}'. Expected '{methodName}()' or '{methodName}(string[] args)'."
-                    };
+                    return (Failure(
+                        $"Static method '{methodName}' not found in class '{className}'. " +
+                        $"Expected '{methodName}()' or '{methodName}(string[] args)'."), null, null);
                 }
 
-                // Invoke the method
-                object? result;
+                object? raw;
                 try
                 {
-                    result = method.Invoke(null, invokeArgs);
+                    raw = method.Invoke(null, invokeArgs);
                 }
                 catch (TargetInvocationException ex)
                 {
                     var inner = ex.InnerException ?? ex;
-                    return new ScriptExecuteResult
-                    {
-                        Success = false,
-                        Error = $"Runtime error: {inner.Message}\n{inner.StackTrace}"
-                    };
+                    return (Failure($"Runtime error: {inner.Message}\n{inner.StackTrace}"), null, null);
                 }
 
-                // Stash the raw return + declared return type for ExecuteAsync.
-                // The declared type lets the unwrapper distinguish `async Task`
-                // (declared Task, runtime Task<VoidTaskResult>) from
-                // `async Task<T>` without depending on the internal sentinel
-                // type name. ExecuteAsync owns serialisation — keeping it in
-                // one place ensures one rule for what the wire result looks
-                // like.
-                return new ScriptExecuteResult
-                {
-                    Success = true,
-                    RawReturn = result,
-                    DeclaredReturnType = method.ReturnType
-                };
+                return (new ScriptExecuteResult { Success = true }, raw, method.ReturnType);
             }
             catch (Exception ex)
             {
-                // Unwrap inner exceptions to get the real error
                 var innerMsg = ex.InnerException != null
                     ? $"\nInner: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}"
                     : "";
                 var inner2Msg = ex.InnerException?.InnerException != null
                     ? $"\nInner2: {ex.InnerException.InnerException.Message}"
                     : "";
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = $"Unexpected error: {ex.Message}{innerMsg}{inner2Msg}\n{ex.StackTrace}"
-                };
+                return (Failure($"Unexpected error: {ex.Message}{innerMsg}{inner2Msg}\n{ex.StackTrace}"), null, null);
             }
         }
+
+        static ScriptExecuteResult Failure(string error) =>
+            new ScriptExecuteResult { Success = false, Error = error };
     }
 
     public class ScriptExecuteResult
@@ -302,23 +241,5 @@ namespace UnityCtl.Editor
         public string? Error { get; set; }
         public string[]? Diagnostics { get; set; }
         public string[]? Hints { get; set; }
-
-        /// <summary>
-        /// Raw object returned by the user's Main method, before JSON
-        /// serialisation. Used by <see cref="ScriptExecutor.ExecuteAsync"/> to
-        /// detect a <c>Task</c>/<c>Task&lt;T&gt;</c> return so it can await
-        /// and unwrap. Not transmitted over the wire.
-        /// </summary>
-        [JsonIgnore]
-        public object? RawReturn { get; set; }
-
-        /// <summary>
-        /// Declared return type of the user's Main method. Lets the unwrapper
-        /// distinguish <c>async Task</c> (declared <c>Task</c>, runtime
-        /// <c>Task&lt;VoidTaskResult&gt;</c>) from <c>async Task&lt;T&gt;</c>.
-        /// Not transmitted over the wire.
-        /// </summary>
-        [JsonIgnore]
-        public Type? DeclaredReturnType { get; set; }
     }
 }

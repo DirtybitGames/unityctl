@@ -20,6 +20,7 @@ public static class ScriptCommands
         "System",
         "System.Collections.Generic",
         "System.Linq",
+        "System.Threading.Tasks",
         "UnityEngine",
         "UnityEditor"
     ];
