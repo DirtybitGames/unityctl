@@ -31,6 +31,9 @@ public class EvalCodeGeneratorTests
         Assert.Contains("using System;", code);
         Assert.Contains("using System.Collections.Generic;", code);
         Assert.Contains("using System.Linq;", code);
+        // Async-by-default: agents write `Task.Delay(...)`, not the
+        // fully-qualified form, so System.Threading.Tasks is in defaults.
+        Assert.Contains("using System.Threading.Tasks;", code);
         Assert.Contains("using UnityEngine;", code);
         Assert.Contains("using UnityEditor;", code);
     }
@@ -55,19 +58,20 @@ public class EvalCodeGeneratorTests
     }
 
     [Fact]
-    public void WithArgs_UsesArgsSignature()
+    public void WithArgs_UsesAsyncArgsSignature()
     {
         var code = ScriptCommands.BuildEvalCode("args[0]", [], hasArgs: true);
 
-        Assert.Contains("public static object Main(string[] args)", code);
+        // Async-by-default: agents can write `await ...` directly in eval.
+        Assert.Contains("public static async Task<object> Main(string[] args)", code);
     }
 
     [Fact]
-    public void WithoutArgs_UsesParameterlessSignature()
+    public void WithoutArgs_UsesAsyncParameterlessSignature()
     {
         var code = ScriptCommands.BuildEvalCode("1", [], hasArgs: false);
 
-        Assert.Contains("public static object Main()", code);
+        Assert.Contains("public static async Task<object> Main()", code);
         Assert.DoesNotContain("string[] args", code);
     }
 
@@ -77,7 +81,20 @@ public class EvalCodeGeneratorTests
         var code = ScriptCommands.BuildEvalCode("Application.version", [], hasArgs: false);
 
         Assert.Contains("public class Script", code);
-        Assert.Contains("public static object Main()", code);
+        Assert.Contains("public static async Task<object> Main()", code);
+    }
+
+    [Fact]
+    public void AsyncWrapper_AllowsAwaitInExpression()
+    {
+        // The whole point of async-by-default: this expression must end up
+        // inside an async method so the `await` compiles. Before this change,
+        // bare `await` produced CS4032.
+        var code = ScriptCommands.BuildEvalCode(
+            "await Task.Delay(10); return 42;", [], hasArgs: false);
+
+        Assert.Contains("async Task<object> Main", code);
+        Assert.Contains("await Task.Delay(10);", code);
     }
 
     [Fact]
@@ -513,7 +530,7 @@ public class EvalCodeGeneratorTests
         Assert.Contains("using Dirtybit.Game.Model;", code);
         Assert.Contains("using UnityEngine.SceneManagement;", code);
         // … and the body should no longer have inline `using` statements.
-        var mainBodyStart = code.IndexOf("public static object Main()", StringComparison.Ordinal);
+        var mainBodyStart = code.IndexOf("Task<object> Main()", StringComparison.Ordinal);
         var mainBody = code.Substring(mainBodyStart);
         Assert.DoesNotContain("using Dirtybit.Game.Model;", mainBody);
         Assert.DoesNotContain("using UnityEngine.SceneManagement;", mainBody);

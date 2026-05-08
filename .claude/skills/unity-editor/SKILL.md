@@ -149,9 +149,19 @@ Pass arguments to the script with `--`:
 unityctl script eval 'args[0]' -- hello
 ```
 
+### Async / waiting
+
+Eval is `async` by default — use `await` directly. `System.Threading.Tasks` is in default usings:
+
+```bash
+unityctl script eval 'await Task.Delay(500); return GameObject.Find("Boss") != null;'
+```
+
+`Task<T>` returns are unwrapped — `return Task.FromResult(x)` gives you `x`, not the envelope.
+
 ### Full Script Execution
 
-For complex scripts with custom classes, multiple methods, or logic beyond a single expression. Use the Write tool to create a `.cs` file, then execute it. The script must define a class with a static `Main()` method returning `object` (JSON-serialized):
+For complex scripts with custom classes, multiple methods, or logic beyond a single expression. Use the Write tool to create a `.cs` file, then execute it. Define a class with a static `Main()` method — sync, async `Task<T>`, or async `Task`:
 
 ```cs
 // /tmp/MyScript.cs

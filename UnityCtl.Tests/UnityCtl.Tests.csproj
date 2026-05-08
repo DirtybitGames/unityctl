@@ -31,6 +31,8 @@
   <ItemGroup>
     <!-- Link the Unity-side TypeResolver so we can unit-test its pure logic outside Unity. -->
     <Compile Include="..\UnityCtl.UnityPackage\Editor\TypeResolver.cs" Link="LinkedFromUnityPackage\TypeResolver.cs" />
+    <!-- Same trick for AsyncUnwrap — pure .NET, no Unity refs, testable outside Unity. -->
+    <Compile Include="..\UnityCtl.UnityPackage\Editor\AsyncUnwrap.cs" Link="LinkedFromUnityPackage\AsyncUnwrap.cs" />
   </ItemGroup>
 
 </Project>

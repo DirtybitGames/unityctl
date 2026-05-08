@@ -20,6 +20,7 @@ public static class ScriptCommands
         "System",
         "System.Collections.Generic",
         "System.Linq",
+        "System.Threading.Tasks",
         "UnityEngine",
         "UnityEditor"
     ];
@@ -463,7 +464,11 @@ public static class ScriptCommands
         // Alias `Object` to UnityEngine.Object so bare `Object.FindFirstObjectByType<T>()`
         // compiles — otherwise it's ambiguous between UnityEngine.Object and System.Object.
         usingBlock += "\nusing Object = UnityEngine.Object;";
-        var signature = hasArgs ? "public static object Main(string[] args)" : "public static object Main()";
+        // Async-by-default: agents can write `await ...` directly in the expression.
+        // ScriptExecutor unwraps the returned Task<object> before serialization.
+        var signature = hasArgs
+            ? "public static async Task<object> Main(string[] args)"
+            : "public static async Task<object> Main()";
 
         var body = BuildEvalBody(expression);
 

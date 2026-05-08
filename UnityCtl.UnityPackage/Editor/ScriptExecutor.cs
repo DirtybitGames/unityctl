@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Newtonsoft.Json;
@@ -58,34 +59,62 @@ namespace UnityCtl.Editor
             }
         }
 
-        public static ScriptExecuteResult Execute(string code, string className, string methodName, string[]? scriptArgs = null)
+        /// <summary>
+        /// Async-aware script entry. If <c>Main</c> returns a <c>Task</c> or
+        /// <c>Task&lt;T&gt;</c>, this awaits and unwraps before serialising.
+        /// All result serialisation lives here so the wire shape of
+        /// <see cref="ScriptExecuteResult.Result"/> is built in one place.
+        ///
+        /// The await captures Unity's main-thread <see cref="System.Threading.SynchronizationContext"/>,
+        /// so the continuation (and serialisation) resume on the main thread —
+        /// safe for Unity-type JSON output. Callers that want the main thread
+        /// freed during the await invoke this from a fire-and-forget Task so
+        /// the Pump tick releases the main thread immediately.
+        /// </summary>
+        public static async Task<ScriptExecuteResult> ExecuteAsync(string code, string className, string methodName, string[]? scriptArgs = null)
+        {
+            var (result, raw, declared) = Compile(code, className, methodName, scriptArgs);
+            if (!result.Success) return result;
+
+            try
+            {
+                var value = await AsyncUnwrap.UnwrapAsync(raw, declared);
+                result.Result = SerializeReturn(value);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                // `await` already rethrows the first inner exception from a
+                // faulted Task, so we don't need an AggregateException unwrap.
+                return new ScriptExecuteResult
+                {
+                    Success = false,
+                    Error = $"Runtime error: {ex.Message}\n{ex.StackTrace}"
+                };
+            }
+        }
+
+        static string? SerializeReturn(object? value)
+        {
+            if (value == null) return null;
+            try { return JsonConvert.SerializeObject(value, Formatting.Indented); }
+            catch { return value.ToString(); }
+        }
+
+        // Compile + invoke the user's Main. Returns the success/error
+        // shell along with the raw return object and the method's
+        // declared return type — both needed by ExecuteAsync to decide
+        // whether to await/unwrap. Private so callers can't accidentally
+        // bypass the unwrap step.
+        static (ScriptExecuteResult Result, object? Raw, Type? Declared) Compile(
+            string code, string className, string methodName, string[]? scriptArgs = null)
         {
             if (string.IsNullOrEmpty(code))
-            {
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = "Code cannot be null or empty."
-                };
-            }
-
+                return (Failure("Code cannot be null or empty."), null, null);
             if (string.IsNullOrEmpty(className))
-            {
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = "Class name cannot be null or empty."
-                };
-            }
-
+                return (Failure("Class name cannot be null or empty."), null, null);
             if (string.IsNullOrEmpty(methodName))
-            {
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = "Method name cannot be null or empty."
-                };
-            }
+                return (Failure("Method name cannot be null or empty."), null, null);
 
             var profile = Environment.GetEnvironmentVariable("UNITYCTL_SCRIPT_PROFILE") == "1";
             var refSw = profile ? Stopwatch.StartNew() : null;
@@ -129,13 +158,13 @@ namespace UnityCtl.Editor
 
                     var hints = TypeResolver.BuildHints(diagnostics);
 
-                    return new ScriptExecuteResult
+                    return (new ScriptExecuteResult
                     {
                         Success = false,
                         Error = "Compilation failed.",
                         Diagnostics = diagnostics,
                         Hints = hints.Length > 0 ? hints : null
-                    };
+                    }, null, null);
                 }
 
                 // Load the assembly
@@ -145,13 +174,7 @@ namespace UnityCtl.Editor
                 // Find the type
                 var type = assembly.GetType(className);
                 if (type == null)
-                {
-                    return new ScriptExecuteResult
-                    {
-                        Success = false,
-                        Error = $"Class '{className}' not found in compiled assembly."
-                    };
-                }
+                    return (Failure($"Class '{className}' not found in compiled assembly."), null, null);
 
                 // Find the method - try with string[] parameter first, then parameterless
                 var methodWithArgs = type.GetMethod(methodName,
@@ -176,65 +199,38 @@ namespace UnityCtl.Editor
                 }
                 else
                 {
-                    return new ScriptExecuteResult
-                    {
-                        Success = false,
-                        Error = $"Static method '{methodName}' not found in class '{className}'. Expected '{methodName}()' or '{methodName}(string[] args)'."
-                    };
+                    return (Failure(
+                        $"Static method '{methodName}' not found in class '{className}'. " +
+                        $"Expected '{methodName}()' or '{methodName}(string[] args)'."), null, null);
                 }
 
-                // Invoke the method
-                object? result;
+                object? raw;
                 try
                 {
-                    result = method.Invoke(null, invokeArgs);
+                    raw = method.Invoke(null, invokeArgs);
                 }
                 catch (TargetInvocationException ex)
                 {
                     var inner = ex.InnerException ?? ex;
-                    return new ScriptExecuteResult
-                    {
-                        Success = false,
-                        Error = $"Runtime error: {inner.Message}\n{inner.StackTrace}"
-                    };
+                    return (Failure($"Runtime error: {inner.Message}\n{inner.StackTrace}"), null, null);
                 }
 
-                // Serialize the result
-                string? resultString = null;
-                if (result != null)
-                {
-                    try
-                    {
-                        resultString = JsonConvert.SerializeObject(result, Formatting.Indented);
-                    }
-                    catch
-                    {
-                        resultString = result.ToString();
-                    }
-                }
-
-                return new ScriptExecuteResult
-                {
-                    Success = true,
-                    Result = resultString
-                };
+                return (new ScriptExecuteResult { Success = true }, raw, method.ReturnType);
             }
             catch (Exception ex)
             {
-                // Unwrap inner exceptions to get the real error
                 var innerMsg = ex.InnerException != null
                     ? $"\nInner: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}"
                     : "";
                 var inner2Msg = ex.InnerException?.InnerException != null
                     ? $"\nInner2: {ex.InnerException.InnerException.Message}"
                     : "";
-                return new ScriptExecuteResult
-                {
-                    Success = false,
-                    Error = $"Unexpected error: {ex.Message}{innerMsg}{inner2Msg}\n{ex.StackTrace}"
-                };
+                return (Failure($"Unexpected error: {ex.Message}{innerMsg}{inner2Msg}\n{ex.StackTrace}"), null, null);
             }
         }
+
+        static ScriptExecuteResult Failure(string error) =>
+            new ScriptExecuteResult { Success = false, Error = error };
     }
 
     public class ScriptExecuteResult
