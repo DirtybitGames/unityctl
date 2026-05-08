@@ -159,14 +159,6 @@ unityctl script eval 'await Task.Delay(500); return GameObject.Find("Boss") != n
 
 `Task<T>` returns are unwrapped — `return Task.FromResult(x)` gives you `x`, not the envelope.
 
-Unity's `AsyncOperation` (scene loads, asset ops, web requests) isn't a `Task` — bridge it:
-
-```cs
-var tcs = new TaskCompletionSource<bool>(); op.completed += _ => tcs.SetResult(true); await tcs.Task;
-```
-
-Unity APIs (`UnityEngine.*`, `UnityEditor.*`) are main-thread only — calling them inside `Task.Run` throws. Don't `.Wait()` or `.Result` an awaited task; it can deadlock the editor. Use `await`.
-
 ### Full Script Execution
 
 For complex scripts with custom classes, multiple methods, or logic beyond a single expression. Use the Write tool to create a `.cs` file, then execute it. Define a class with a static `Main()` method — sync, async `Task<T>`, or async `Task`:
