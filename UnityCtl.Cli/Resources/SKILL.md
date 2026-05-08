@@ -149,26 +149,23 @@ Pass arguments to the script with `--`:
 unityctl script eval 'args[0]' -- hello
 ```
 
-### Async / waiting on things
+### Async / waiting
 
-`script eval` and `script execute` are **async by default**. Write `await` directly (`System.Threading.Tasks` is in the default usings):
+Eval is `async` by default — use `await` directly. `System.Threading.Tasks` is in default usings:
 
 ```bash
 unityctl script eval 'await Task.Delay(500); return GameObject.Find("Boss") != null;'
 ```
 
-While your script awaits, Unity's main thread is freed — other unityctl commands keep running. `Task<T>` returns are unwrapped automatically (you get `T`, not the Task envelope).
+`Task<T>` returns are unwrapped — `return Task.FromResult(x)` gives you `x`, not the envelope.
 
-| If you want to … | Write |
-|---|---|
-| Pause a moment | `await Task.Delay(ms);` |
-| Yield once (let Unity tick) | `await Task.Yield();` |
-| Poll until a condition | `while (!cond) await Task.Yield();` |
-| Run pure CPU off the main thread | `await Task.Run(() => heavy())` |
+Unity's `AsyncOperation` (scene loads, asset ops, web requests) isn't a `Task` — bridge it:
 
-**Threading rule:** Unity APIs (`GameObject.Find`, `Application.isPlaying`, anything in `UnityEngine`/`UnityEditor`) are **main-thread only**. Don't put them inside `Task.Run` — they'll throw. Plain C# (LINQ over plain data, math, I/O) is fine on the threadpool.
+```cs
+var tcs = new TaskCompletionSource<bool>(); op.completed += _ => tcs.SetResult(true); await tcs.Task;
+```
 
-**Avoid:** `Task.Wait()` and `.Result` on tasks whose continuations need the main thread (i.e. anything calling Unity APIs after the await). Use `await` instead — it doesn't block the main thread and won't deadlock the editor.
+Unity APIs (`UnityEngine.*`, `UnityEditor.*`) are main-thread only — calling them inside `Task.Run` throws. Don't `.Wait()` or `.Result` an awaited task; it can deadlock the editor. Use `await`.
 
 ### Full Script Execution
 
