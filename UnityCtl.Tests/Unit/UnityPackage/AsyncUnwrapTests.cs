@@ -75,7 +75,7 @@ public class AsyncUnwrapTests
     [Fact]
     public async Task DeeplyNestedTaskAtDepthCap_UnwrapsAllLayers()
     {
-        // Four wrap layers — within the cap of 4.
+        // Four wrap layers — exactly at the cap of 4, must still succeed.
         var task = Task.FromResult<object>(
             Task.FromResult<object>(
                 Task.FromResult<object>(

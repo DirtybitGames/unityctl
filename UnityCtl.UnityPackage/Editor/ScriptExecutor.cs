@@ -84,13 +84,12 @@ namespace UnityCtl.Editor
             }
             catch (Exception ex)
             {
-                var inner = ex is AggregateException agg && agg.InnerException != null
-                    ? agg.InnerException
-                    : ex;
+                // `await` already rethrows the first inner exception from a
+                // faulted Task, so we don't need an AggregateException unwrap.
                 return new ScriptExecuteResult
                 {
                     Success = false,
-                    Error = $"Runtime error: {inner.Message}\n{inner.StackTrace}"
+                    Error = $"Runtime error: {ex.Message}\n{ex.StackTrace}"
                 };
             }
         }
