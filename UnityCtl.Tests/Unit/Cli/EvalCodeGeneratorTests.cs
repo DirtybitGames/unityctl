@@ -63,7 +63,7 @@ public class EvalCodeGeneratorTests
         var code = ScriptCommands.BuildEvalCode("args[0]", [], hasArgs: true);
 
         // Async-by-default: agents can write `await ...` directly in eval.
-        Assert.Contains("public static async System.Threading.Tasks.Task<object> Main(string[] args)", code);
+        Assert.Contains("public static async Task<object> Main(string[] args)", code);
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class EvalCodeGeneratorTests
     {
         var code = ScriptCommands.BuildEvalCode("1", [], hasArgs: false);
 
-        Assert.Contains("public static async System.Threading.Tasks.Task<object> Main()", code);
+        Assert.Contains("public static async Task<object> Main()", code);
         Assert.DoesNotContain("string[] args", code);
     }
 
@@ -81,7 +81,7 @@ public class EvalCodeGeneratorTests
         var code = ScriptCommands.BuildEvalCode("Application.version", [], hasArgs: false);
 
         Assert.Contains("public class Script", code);
-        Assert.Contains("public static async System.Threading.Tasks.Task<object> Main()", code);
+        Assert.Contains("public static async Task<object> Main()", code);
     }
 
     [Fact]
@@ -91,10 +91,10 @@ public class EvalCodeGeneratorTests
         // inside an async method so the `await` compiles. Before this change,
         // bare `await` produced CS4032.
         var code = ScriptCommands.BuildEvalCode(
-            "await System.Threading.Tasks.Task.Delay(10); return 42;", [], hasArgs: false);
+            "await Task.Delay(10); return 42;", [], hasArgs: false);
 
-        Assert.Contains("async System.Threading.Tasks.Task<object> Main", code);
-        Assert.Contains("await System.Threading.Tasks.Task.Delay(10);", code);
+        Assert.Contains("async Task<object> Main", code);
+        Assert.Contains("await Task.Delay(10);", code);
     }
 
     [Fact]

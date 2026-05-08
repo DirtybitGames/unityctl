@@ -173,17 +173,15 @@ For complex scripts with custom classes, multiple methods, or logic beyond a sin
 
 ```cs
 // /tmp/MyScript.cs
-using System.Threading.Tasks;
 using UnityEngine;
 
 public class Script
 {
-    // Sync: return a JSON-serializable value.
-    public static object Main() =>
-        GameObject.Find("Player")?.transform.position.ToString() ?? "not found";
-
-    // Or async: return Task<T> for a value, or Task for side-effect-only.
-    // public static async Task<int> Main() { await Task.Delay(100); return 42; }
+    public static object Main()
+    {
+        var player = GameObject.Find("Player");
+        return player?.transform.position.ToString() ?? "not found";
+    }
 }
 ```
 

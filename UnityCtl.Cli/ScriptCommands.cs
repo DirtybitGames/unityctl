@@ -467,8 +467,8 @@ public static class ScriptCommands
         // Async-by-default: agents can write `await ...` directly in the expression.
         // ScriptExecutor unwraps the returned Task<object> before serialization.
         var signature = hasArgs
-            ? "public static async System.Threading.Tasks.Task<object> Main(string[] args)"
-            : "public static async System.Threading.Tasks.Task<object> Main()";
+            ? "public static async Task<object> Main(string[] args)"
+            : "public static async Task<object> Main()";
 
         var body = BuildEvalBody(expression);
 
