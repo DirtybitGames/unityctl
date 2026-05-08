@@ -59,72 +59,55 @@ namespace UnityCtl.Editor
             }
         }
 
+        // Cap on how many layers of nested Task<Task<...>> we will unwrap.
+        // 4 covers any realistic agent expression — `return Task.FromResult(x)`
+        // inside an async Main is the only non-pathological way to nest, and
+        // that's depth 2 (outer async Task<object> wrapping the inner Task<T>).
+        // Beyond the cap we throw rather than handing a still-Task value to
+        // JSON serialisation, which would re-introduce the wedge bug if
+        // Newtonsoft reflected over `.Result` on a pending main-thread-bound
+        // Task.
+        const int MaxUnwrapDepth = 4;
+
         /// <summary>
         /// Async-aware script entry. If <c>Main</c> returns a <c>Task</c> or
-        /// <c>Task&lt;T&gt;</c>, this awaits it (unwrapping the value) before
-        /// serialising the result. Other return types are passed through.
+        /// <c>Task&lt;T&gt;</c>, this awaits and unwraps before serialising.
+        /// All result serialisation is centralised here so the rule "the
+        /// string in <see cref="ScriptExecuteResult.Result"/> is the JSON
+        /// view of whatever the user ultimately returned" holds for every
+        /// path.
         ///
-        /// The await happens on the calling thread's SynchronizationContext —
-        /// callers that want the main thread freed during the await should
-        /// invoke this from an async context (a fire-and-forget Task that
-        /// the Pump tick can release).
+        /// The await captures the caller's <see cref="System.Threading.SynchronizationContext"/>,
+        /// so when invoked from Unity's main thread the continuation
+        /// (and serialisation) resume on the main thread — safe for Unity-type
+        /// JSON output. Callers that want the main thread freed during the
+        /// await should invoke this from a fire-and-forget Task so the
+        /// Pump tick releases the main thread immediately.
         /// </summary>
         public static async Task<ScriptExecuteResult> ExecuteAsync(string code, string className, string methodName, string[]? scriptArgs = null)
         {
             var result = Execute(code, className, methodName, scriptArgs);
+            if (!result.Success) return result;
 
-            // Successful sync invoke that produced a Task → await and unwrap.
-            // Loop in case the unwrapped value is itself a Task (e.g. an agent
-            // wrote `return Task.FromResult(42);` inside an async Main, which
-            // boxes the inner Task<int> through the outer Task<object>). Cap
-            // at a small depth so a pathological nested return can't spin.
-            if (result.Success && result.RawReturn is Task)
+            try
             {
-                try
-                {
-                    object? value = result.RawReturn;
-                    for (var depth = 0; depth < 4 && value is Task t; depth++)
-                    {
-                        await t;
-                        // `async Task Main()` actually returns the runtime
-                        // type Task<VoidTaskResult> — IsGenericType is true,
-                        // but the inner value is a sentinel struct we must
-                        // treat as void. Walk up to find a Task<T> ancestor;
-                        // if T is VoidTaskResult, the user wanted void.
-                        Type? generic = t.GetType();
-                        while (generic != null &&
-                               !(generic.IsGenericType && generic.GetGenericTypeDefinition() == typeof(Task<>)))
-                            generic = generic.BaseType;
-
-                        if (generic != null)
-                        {
-                            var arg = generic.GetGenericArguments()[0];
-                            value = arg.FullName == "System.Threading.Tasks.VoidTaskResult"
-                                ? null
-                                : generic.GetProperty("Result")!.GetValue(t);
-                        }
-                        else
-                        {
-                            value = null;
-                        }
-                    }
-                    result.RawReturn = value;
-                    result.Result = SerializeReturn(value);
-                }
-                catch (Exception ex)
-                {
-                    var inner = ex is AggregateException agg && agg.InnerException != null
-                        ? agg.InnerException
-                        : ex;
-                    return new ScriptExecuteResult
-                    {
-                        Success = false,
-                        Error = $"Runtime error: {inner.Message}\n{inner.StackTrace}"
-                    };
-                }
+                var value = await AsyncUnwrap.UnwrapAsync(
+                    result.RawReturn, result.DeclaredReturnType, MaxUnwrapDepth);
+                result.RawReturn = value;
+                result.Result = SerializeReturn(value);
+                return result;
             }
-
-            return result;
+            catch (Exception ex)
+            {
+                var inner = ex is AggregateException agg && agg.InnerException != null
+                    ? agg.InnerException
+                    : ex;
+                return new ScriptExecuteResult
+                {
+                    Success = false,
+                    Error = $"Runtime error: {inner.Message}\n{inner.StackTrace}"
+                };
+            }
         }
 
         static string? SerializeReturn(object? value)
@@ -134,7 +117,12 @@ namespace UnityCtl.Editor
             catch { return value.ToString(); }
         }
 
-        public static ScriptExecuteResult Execute(string code, string className, string methodName, string[]? scriptArgs = null)
+        // Compile + invoke the user's Main. Internal — callers should use
+        // ExecuteAsync, which is the only path that handles Task returns
+        // correctly. Kept as a separate method so the (sync) Roslyn work and
+        // the (async) Task-unwrap responsibilities live in obviously
+        // separate functions.
+        static ScriptExecuteResult Execute(string code, string className, string methodName, string[]? scriptArgs = null)
         {
             if (string.IsNullOrEmpty(code))
             {
@@ -275,15 +263,18 @@ namespace UnityCtl.Editor
                     };
                 }
 
-                // Serialize the result. RawReturn is preserved so ExecuteAsync
-                // can detect a Task return and await/unwrap it before
-                // serialisation. Non-Task returns are serialised eagerly here
-                // so the existing sync API is unchanged.
+                // Stash the raw return + declared return type for ExecuteAsync.
+                // The declared type lets the unwrapper distinguish `async Task`
+                // (declared Task, runtime Task<VoidTaskResult>) from
+                // `async Task<T>` without depending on the internal sentinel
+                // type name. ExecuteAsync owns serialisation — keeping it in
+                // one place ensures one rule for what the wire result looks
+                // like.
                 return new ScriptExecuteResult
                 {
                     Success = true,
                     RawReturn = result,
-                    Result = result is Task ? null : SerializeReturn(result)
+                    DeclaredReturnType = method.ReturnType
                 };
             }
             catch (Exception ex)
@@ -320,5 +311,14 @@ namespace UnityCtl.Editor
         /// </summary>
         [JsonIgnore]
         public object? RawReturn { get; set; }
+
+        /// <summary>
+        /// Declared return type of the user's Main method. Lets the unwrapper
+        /// distinguish <c>async Task</c> (declared <c>Task</c>, runtime
+        /// <c>Task&lt;VoidTaskResult&gt;</c>) from <c>async Task&lt;T&gt;</c>.
+        /// Not transmitted over the wire.
+        /// </summary>
+        [JsonIgnore]
+        public Type? DeclaredReturnType { get; set; }
     }
 }
