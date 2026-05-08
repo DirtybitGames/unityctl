@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Newtonsoft.Json;
@@ -56,6 +57,81 @@ namespace UnityCtl.Editor
                 s_References = refs;
                 return refs;
             }
+        }
+
+        /// <summary>
+        /// Async-aware script entry. If <c>Main</c> returns a <c>Task</c> or
+        /// <c>Task&lt;T&gt;</c>, this awaits it (unwrapping the value) before
+        /// serialising the result. Other return types are passed through.
+        ///
+        /// The await happens on the calling thread's SynchronizationContext —
+        /// callers that want the main thread freed during the await should
+        /// invoke this from an async context (a fire-and-forget Task that
+        /// the Pump tick can release).
+        /// </summary>
+        public static async Task<ScriptExecuteResult> ExecuteAsync(string code, string className, string methodName, string[]? scriptArgs = null)
+        {
+            var result = Execute(code, className, methodName, scriptArgs);
+
+            // Successful sync invoke that produced a Task → await and unwrap.
+            // Loop in case the unwrapped value is itself a Task (e.g. an agent
+            // wrote `return Task.FromResult(42);` inside an async Main, which
+            // boxes the inner Task<int> through the outer Task<object>). Cap
+            // at a small depth so a pathological nested return can't spin.
+            if (result.Success && result.RawReturn is Task)
+            {
+                try
+                {
+                    object? value = result.RawReturn;
+                    for (var depth = 0; depth < 4 && value is Task t; depth++)
+                    {
+                        await t;
+                        // `async Task Main()` actually returns the runtime
+                        // type Task<VoidTaskResult> — IsGenericType is true,
+                        // but the inner value is a sentinel struct we must
+                        // treat as void. Walk up to find a Task<T> ancestor;
+                        // if T is VoidTaskResult, the user wanted void.
+                        Type? generic = t.GetType();
+                        while (generic != null &&
+                               !(generic.IsGenericType && generic.GetGenericTypeDefinition() == typeof(Task<>)))
+                            generic = generic.BaseType;
+
+                        if (generic != null)
+                        {
+                            var arg = generic.GetGenericArguments()[0];
+                            value = arg.FullName == "System.Threading.Tasks.VoidTaskResult"
+                                ? null
+                                : generic.GetProperty("Result")!.GetValue(t);
+                        }
+                        else
+                        {
+                            value = null;
+                        }
+                    }
+                    result.RawReturn = value;
+                    result.Result = SerializeReturn(value);
+                }
+                catch (Exception ex)
+                {
+                    var inner = ex is AggregateException agg && agg.InnerException != null
+                        ? agg.InnerException
+                        : ex;
+                    return new ScriptExecuteResult
+                    {
+                        Success = false,
+                        Error = $"Runtime error: {inner.Message}\n{inner.StackTrace}"
+                    };
+                }
+            }
+
+            return result;
+        }
+
+        static string? SerializeReturn(object? value)
+        {
+            if (value == null) return null;
+            try { return JsonConvert.SerializeObject(value, Formatting.Indented); }
+            catch { return value.ToString(); }
         }
 
         public static ScriptExecuteResult Execute(string code, string className, string methodName, string[]? scriptArgs = null)
@@ -199,24 +275,15 @@ namespace UnityCtl.Editor
                     };
                 }
 
-                // Serialize the result
-                string? resultString = null;
-                if (result != null)
-                {
-                    try
-                    {
-                        resultString = JsonConvert.SerializeObject(result, Formatting.Indented);
-                    }
-                    catch
-                    {
-                        resultString = result.ToString();
-                    }
-                }
-
+                // Serialize the result. RawReturn is preserved so ExecuteAsync
+                // can detect a Task return and await/unwrap it before
+                // serialisation. Non-Task returns are serialised eagerly here
+                // so the existing sync API is unchanged.
                 return new ScriptExecuteResult
                 {
                     Success = true,
-                    Result = resultString
+                    RawReturn = result,
+                    Result = result is Task ? null : SerializeReturn(result)
                 };
             }
             catch (Exception ex)
@@ -244,5 +311,14 @@ namespace UnityCtl.Editor
         public string? Error { get; set; }
         public string[]? Diagnostics { get; set; }
         public string[]? Hints { get; set; }
+
+        /// <summary>
+        /// Raw object returned by the user's Main method, before JSON
+        /// serialisation. Used by <see cref="ScriptExecutor.ExecuteAsync"/> to
+        /// detect a <c>Task</c>/<c>Task&lt;T&gt;</c> return so it can await
+        /// and unwrap. Not transmitted over the wire.
+        /// </summary>
+        [JsonIgnore]
+        public object? RawReturn { get; set; }
     }
 }

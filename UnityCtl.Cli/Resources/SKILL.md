@@ -149,21 +149,44 @@ Pass arguments to the script with `--`:
 unityctl script eval 'args[0]' -- hello
 ```
 
+### Async / waiting on things
+
+`script eval` and `script execute` are **async by default**. Write `await` directly:
+
+```bash
+unityctl script eval 'await System.Threading.Tasks.Task.Delay(500); return GameObject.Find("Boss") != null;'
+```
+
+While your script awaits, Unity's main thread is freed — other unityctl commands keep running. `Task<T>` returns are unwrapped automatically (you get `T`, not the Task envelope).
+
+| If you want to … | Write |
+|---|---|
+| Pause a moment | `await System.Threading.Tasks.Task.Delay(ms);` |
+| Yield once (let Unity tick) | `await System.Threading.Tasks.Task.Yield();` |
+| Poll until a condition | `while (!cond) await System.Threading.Tasks.Task.Yield();` |
+| Run pure CPU off the main thread | `await System.Threading.Tasks.Task.Run(() => heavy())` |
+
+**Threading rule:** Unity APIs (`GameObject.Find`, `Application.isPlaying`, anything in `UnityEngine`/`UnityEditor`) are **main-thread only**. Don't put them inside `Task.Run` — they'll throw. Plain C# (LINQ over plain data, math, I/O) is fine on the threadpool.
+
+**Avoid:** `Task.Wait()` and `.Result` on tasks whose continuations need the main thread (i.e. anything calling Unity APIs after the await). Use `await` instead — it doesn't block the main thread and won't deadlock the editor.
+
 ### Full Script Execution
 
-For complex scripts with custom classes, multiple methods, or logic beyond a single expression. Use the Write tool to create a `.cs` file, then execute it. The script must define a class with a static `Main()` method returning `object` (JSON-serialized):
+For complex scripts with custom classes, multiple methods, or logic beyond a single expression. Use the Write tool to create a `.cs` file, then execute it. Define a class with a static `Main()` method — sync, async `Task<T>`, or async `Task`:
 
 ```cs
 // /tmp/MyScript.cs
+using System.Threading.Tasks;
 using UnityEngine;
 
 public class Script
 {
-    public static object Main()
-    {
-        var player = GameObject.Find("Player");
-        return player?.transform.position.ToString() ?? "not found";
-    }
+    // Sync: return a JSON-serializable value.
+    public static object Main() =>
+        GameObject.Find("Player")?.transform.position.ToString() ?? "not found";
+
+    // Or async: return Task<T> for a value, or Task for side-effect-only.
+    // public static async Task<int> Main() { await Task.Delay(100); return 42; }
 }
 ```
 

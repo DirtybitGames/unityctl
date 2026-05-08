@@ -428,6 +428,15 @@ namespace UnityCtl
 
         private void HandleCommand(RequestMessage request)
         {
+            // Async dispatch: commands that may await user code run on a fire-and-
+            // forget Task so the Pump tick (and main thread) is freed during the
+            // await. Continuations resume on Unity's main-thread SyncContext.
+            if (request.Command == UnityCtlCommands.ScriptExecute)
+            {
+                _ = HandleScriptExecuteAsync(request);
+                return;
+            }
+
             try
             {
                 object result = null;
@@ -539,9 +548,7 @@ namespace UnityCtl
                         result = HandleScreenshotWindow(request);
                         break;
 
-                    case UnityCtlCommands.ScriptExecute:
-                        result = HandleScriptExecute(request);
-                        break;
+                    // ScriptExecute is dispatched async at the top of this method.
 
                     case UnityCtlCommands.ScriptLookupType:
                         result = HandleScriptLookupType(request);
@@ -1423,39 +1430,46 @@ namespace UnityCtl
             }
         }
 
-        private object HandleScriptExecute(RequestMessage request)
+        private async System.Threading.Tasks.Task HandleScriptExecuteAsync(RequestMessage request)
         {
-            var code = GetStringArgument(request, "code");
-            var className = GetStringArgument(request, "className") ?? "Script";
-            var methodName = GetStringArgument(request, "methodName") ?? "Main";
-            var scriptArgs = GetStringArrayArgument(request, "scriptArgs");
-
-            if (string.IsNullOrEmpty(code))
+            try
             {
-                throw new ArgumentException("C# code is required");
+                var code = GetStringArgument(request, "code");
+                var className = GetStringArgument(request, "className") ?? "Script";
+                var methodName = GetStringArgument(request, "methodName") ?? "Main";
+                var scriptArgs = GetStringArrayArgument(request, "scriptArgs");
+
+                if (string.IsNullOrEmpty(code))
+                {
+                    SendResponseError(request.RequestId, "command_failed", "C# code is required");
+                    return;
+                }
+
+                DebugLog($"[UnityCtl] Executing script: class={className}, method={methodName}, args={scriptArgs?.Length ?? 0}");
+
+                // ExecuteAsync returns to Unity's captured SyncContext after any
+                // user-code await, so serialisation runs back on the main thread.
+                var result = await Editor.ScriptExecutor.ExecuteAsync(code, className, methodName, scriptArgs);
+
+                if (result.Success)
+                    DebugLog($"[UnityCtl] Script executed successfully");
+                else
+                    DebugLogError($"[UnityCtl] Script execution failed: {result.Error}");
+
+                SendResponseOk(request.RequestId, new Protocol.ScriptExecuteResult
+                {
+                    Success = result.Success,
+                    Result = result.Result,
+                    Error = result.Error,
+                    Diagnostics = result.Diagnostics,
+                    Hints = result.Hints
+                });
             }
-
-            DebugLog($"[UnityCtl] Executing script: class={className}, method={methodName}, args={scriptArgs?.Length ?? 0}");
-
-            var result = Editor.ScriptExecutor.Execute(code, className, methodName, scriptArgs);
-
-            if (result.Success)
+            catch (Exception ex)
             {
-                DebugLog($"[UnityCtl] Script executed successfully");
+                DebugLogError($"[UnityCtl] Async script handler failed: {ex.Message}");
+                SendResponseError(request.RequestId, "command_failed", ex.Message);
             }
-            else
-            {
-                DebugLogError($"[UnityCtl] Script execution failed: {result.Error}");
-            }
-
-            return new Protocol.ScriptExecuteResult
-            {
-                Success = result.Success,
-                Result = result.Result,
-                Error = result.Error,
-                Diagnostics = result.Diagnostics,
-                Hints = result.Hints
-            };
         }
 
         private static int ClampLimit(int? requested, int defaultValue, int max)
