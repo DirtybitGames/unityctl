@@ -24,6 +24,11 @@ public static class BridgeEndpoints
     private static readonly TimeSpan DomainReloadReconnectTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DomainReloadDetectionTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan EditorReadyTimeout = TimeSpan.FromSeconds(10);
+    // Short backstop for the pre-flight gate — if the editor isn't responsive
+    // within this window, forward the command anyway; its own timeout will catch it.
+    private static readonly TimeSpan PreFlightReadyTimeout = TimeSpan.FromSeconds(3);
+
+    private const string DomainReloadWaiterSuffix = "_domain_reload_preregister";
 
     // Command timeout configuration (in seconds, configurable via environment variables)
     // Note: Timeouts are resolved lazily via env vars so tests can override them per-fixture.
@@ -448,7 +453,7 @@ public static class BridgeEndpoints
         // edit), wait briefly before forwarding the command. Cheap when ready (flag read).
         if (!state.IsEditorReady)
         {
-            await state.WaitForEditorReadyAsync(EditorReadyTimeout, context.RequestAborted);
+            await state.WaitForEditorReadyAsync(PreFlightReadyTimeout, context.RequestAborted);
         }
 
         var convertedArgs = ConvertArgs(request.Args);
@@ -593,7 +598,7 @@ public static class BridgeEndpoints
             cancellationToken);
 
         var domainReloadWaitTask = state.WaitForEventAsync(
-            requestMessage.RequestId + "_domain_reload_preregister",
+            requestMessage.RequestId + DomainReloadWaiterSuffix,
             UnityCtlEvents.DomainReloadStarting,
             timeout,
             cancellationToken);
@@ -702,13 +707,10 @@ public static class BridgeEndpoints
                 Error = response.Error
             };
 
-            // Wait for any in-progress reload to settle so the caller's next command finds
-            // Unity in a responsive state. A reload follows compilation; it may also have
-            // pre-empted the transition above.
-            if (compilationTriggered || domainReloadWaitTask.IsCompletedSuccessfully || state.IsDomainReloadInProgress)
-            {
-                await SettleAfterPossibleReloadAsync(state, domainReloadWaitTask, cancellationToken);
-            }
+            // Settle any in-progress reload before returning so the caller's next
+            // command finds Unity responsive. A reload follows compilation; it may
+            // also have pre-empted the transition above.
+            await SettleAfterPossibleReloadAsync(state, domainReloadWaitTask, compilationTriggered, cancellationToken);
 
             return JsonResponse(response);
         }
@@ -722,7 +724,7 @@ public static class BridgeEndpoints
             if (!compilationWaitTask.IsCompleted)
                 state.CancelEventWaiter(requestMessage.RequestId + "_compile_preregister");
             if (!domainReloadWaitTask.IsCompleted)
-                state.CancelEventWaiter(requestMessage.RequestId + "_domain_reload_preregister");
+                state.CancelEventWaiter(requestMessage.RequestId + DomainReloadWaiterSuffix);
         }
     }
 
@@ -842,7 +844,7 @@ public static class BridgeEndpoints
         if (config?.CompletionEvent != null)
         {
             domainReloadWaitTask = state.WaitForEventAsync(
-                requestMessage.RequestId + "_domain_reload_preregister",
+                requestMessage.RequestId + DomainReloadWaiterSuffix,
                 UnityCtlEvents.DomainReloadStarting,
                 timeout,
                 cancellationToken);
@@ -850,154 +852,158 @@ public static class BridgeEndpoints
 
         try
         {
+            // Send command to Unity
+            var response = await state.SendCommandToUnityAsync(requestMessage, timeout, cancellationToken);
 
-        // Send command to Unity
-        var response = await state.SendCommandToUnityAsync(requestMessage, timeout, cancellationToken);
+            // Check if Unity indicated the command was a no-op (already in desired state)
+            var resultState = (response.Result as JObject)?["state"]?.ToString();
+            var isAlreadyInState = resultState == "AlreadyPlaying" || resultState == "AlreadyStopped";
 
-        // Check if Unity indicated the command was a no-op (already in desired state)
-        var resultState = (response.Result as JObject)?["state"]?.ToString();
-        var isAlreadyInState = resultState == "AlreadyPlaying" || resultState == "AlreadyStopped";
-
-        // If command has a WebSocket completion event, wait for it (unless already in state)
-        if (eventWaitTask != null && !isAlreadyInState)
-        {
-            var eventMessage = await eventWaitTask;
-
-            // Check if compilation was triggered
-            var compilationTriggered = false;
-            if (eventMessage.Event == UnityCtlEvents.AssetRefreshComplete ||
-                eventMessage.Event == UnityCtlEvents.PlayModeChanged)
+            // If command has a WebSocket completion event, wait for it (unless already in state)
+            if (eventWaitTask != null && !isAlreadyInState)
             {
-                var payload = eventMessage.Payload as JObject;
-                compilationTriggered = payload?["compilationTriggered"]?.Value<bool>() ?? false;
-            }
+                var eventMessage = await eventWaitTask;
 
-            object? finalResult = eventMessage.Payload;
-            var eventPayload = eventMessage.Payload as JObject;
-
-            if (compilationTriggered)
-            {
-                var compResult = await WaitForCompilationAsync(
-                    state,
-                    requestMessage.RequestId + "_compile",
-                    timeout,
-                    cancellationToken);
-
-                if (compResult != null)
+                // Check if compilation was triggered
+                var compilationTriggered = false;
+                if (eventMessage.Event == UnityCtlEvents.AssetRefreshComplete ||
+                    eventMessage.Event == UnityCtlEvents.PlayModeChanged)
                 {
-                    var playModeState = eventPayload?["state"]?.Value<string>();
-                    finalResult = playModeState != null
-                        ? new
-                        {
-                            state = playModeState,
-                            compilationTriggered = true,
-                            compilationSuccess = compResult.Success,
-                            errors = compResult.Errors,
-                            warnings = compResult.Warnings
-                        }
-                        : (object)new
-                        {
-                            compilationTriggered = true,
-                            compilationSuccess = compResult.Success,
-                            errors = compResult.Errors,
-                            warnings = compResult.Warnings
-                        };
+                    var payload = eventMessage.Payload as JObject;
+                    compilationTriggered = payload?["compilationTriggered"]?.Value<bool>() ?? false;
+                }
 
-                    if (!compResult.Success)
+                object? finalResult = eventMessage.Payload;
+                var eventPayload = eventMessage.Payload as JObject;
+
+                if (compilationTriggered)
+                {
+                    var compResult = await WaitForCompilationAsync(
+                        state,
+                        requestMessage.RequestId + "_compile",
+                        timeout,
+                        cancellationToken);
+
+                    if (compResult != null)
                     {
-                        var errorCount = compResult.Errors?.Length ?? 0;
-                        return Results.Json(new ResponseMessage
+                        var playModeState = eventPayload?["state"]?.Value<string>();
+                        finalResult = playModeState != null
+                            ? new
+                            {
+                                state = playModeState,
+                                compilationTriggered = true,
+                                compilationSuccess = compResult.Success,
+                                errors = compResult.Errors,
+                                warnings = compResult.Warnings
+                            }
+                            : (object)new
+                            {
+                                compilationTriggered = true,
+                                compilationSuccess = compResult.Success,
+                                errors = compResult.Errors,
+                                warnings = compResult.Warnings
+                            };
+
+                        if (!compResult.Success)
                         {
-                            Origin = response.Origin,
-                            RequestId = response.RequestId,
-                            Status = ResponseStatus.Error,
-                            Result = finalResult,
-                            Error = new ErrorPayload { Code = "COMPILATION_ERROR", Message = $"Compilation failed with {errorCount} error(s)" }
-                        }, statusCode: 200);
+                            var errorCount = compResult.Errors?.Length ?? 0;
+                            return Results.Json(new ResponseMessage
+                            {
+                                Origin = response.Origin,
+                                RequestId = response.RequestId,
+                                Status = ResponseStatus.Error,
+                                Result = finalResult,
+                                Error = new ErrorPayload { Code = "COMPILATION_ERROR", Message = $"Compilation failed with {errorCount} error(s)" }
+                            }, statusCode: 200);
+                        }
+                    }
+                    else
+                    {
+                        // Compilation timed out
+                        var playModeState = eventPayload?["state"]?.Value<string>();
+                        finalResult = playModeState != null
+                            ? new
+                            {
+                                state = playModeState,
+                                compilationTriggered = true,
+                                compilationSuccess = (bool?)null,
+                                note = "Compilation may still be in progress (domain reload)"
+                            }
+                            : (object)new
+                            {
+                                compilationTriggered = true,
+                                compilationSuccess = (bool?)null,
+                                note = "Compilation may still be in progress (domain reload)"
+                            };
                     }
                 }
-                else
+
+                response = new ResponseMessage
                 {
-                    // Compilation timed out
-                    var playModeState = eventPayload?["state"]?.Value<string>();
-                    finalResult = playModeState != null
-                        ? new
-                        {
-                            state = playModeState,
-                            compilationTriggered = true,
-                            compilationSuccess = (bool?)null,
-                            note = "Compilation may still be in progress (domain reload)"
-                        }
-                        : (object)new
-                        {
-                            compilationTriggered = true,
-                            compilationSuccess = (bool?)null,
-                            note = "Compilation may still be in progress (domain reload)"
-                        };
-                }
+                    Origin = response.Origin,
+                    RequestId = response.RequestId,
+                    Status = response.Status,
+                    Result = finalResult,
+                    Error = response.Error
+                };
+
+                // Settle any in-progress reload before returning so the caller's next
+                // RPC doesn't race a busy main thread. Same contract play.exit honors.
+                await SettleAfterPossibleReloadAsync(state, domainReloadWaitTask, compilationTriggered, cancellationToken);
             }
 
-            response = new ResponseMessage
-            {
-                Origin = response.Origin,
-                RequestId = response.RequestId,
-                Status = response.Status,
-                Result = finalResult,
-                Error = response.Error
-            };
-
-            // Settle post-compile/reload work before returning so the caller's next
-            // RPC doesn't race a busy main thread (asset reimport finalization, domain
-            // reload, scene reload). Same contract that play.exit honors.
-            if (compilationTriggered || (domainReloadWaitTask?.IsCompletedSuccessfully ?? false) || state.IsDomainReloadInProgress)
-            {
-                await SettleAfterPossibleReloadAsync(state, domainReloadWaitTask!, cancellationToken);
-            }
-        }
-
-        return JsonResponse(response);
+            return JsonResponse(response);
         }
         finally
         {
             if (domainReloadWaitTask != null && !domainReloadWaitTask.IsCompleted)
-                state.CancelEventWaiter(requestMessage.RequestId + "_domain_reload_preregister");
+                state.CancelEventWaiter(requestMessage.RequestId + DomainReloadWaiterSuffix);
         }
     }
 
     // --- Post-compile / post-reload settle helper ---
 
     /// <summary>
-    /// After a command that triggered compilation, wait for any in-progress domain
-    /// reload to settle and for the editor's main thread to become responsive again.
-    /// This is the contract every compile-capable command honors so the caller's next
-    /// RPC doesn't race post-reload work (asset reimport, scene reload).
+    /// Waits for any in-progress or imminent domain reload to settle and for the
+    /// editor's main thread to become responsive again, so the caller's next RPC
+    /// doesn't race post-reload work (asset reimport, scene reload).
+    ///
+    /// No-ops when nothing suggests a reload is in flight. Compile-capable handlers
+    /// pass <paramref name="compilationTriggered"/> = true to force the detection
+    /// wait, since Unity always reloads after a successful compile.
     ///
     /// <paramref name="domainReloadWaitTask"/> must have been pre-registered before
-    /// the command was sent (the DomainReloadStarting event can fire before any
-    /// post-hoc registration would observe it).
+    /// the command was sent (DomainReloadStarting can fire before any post-hoc
+    /// registration would observe it).
     /// </summary>
     private static async Task SettleAfterPossibleReloadAsync(
         BridgeState state,
-        Task<EventMessage> domainReloadWaitTask,
+        Task<EventMessage>? domainReloadWaitTask,
+        bool compilationTriggered,
         CancellationToken cancellationToken)
     {
-        if (!domainReloadWaitTask.IsCompletedSuccessfully)
+        var reloadObserved = domainReloadWaitTask?.IsCompletedSuccessfully ?? false;
+        if (!compilationTriggered && !reloadObserved && !state.IsDomainReloadInProgress)
+            return;
+
+        if (domainReloadWaitTask != null && !reloadObserved)
         {
             var detectionDelay = Task.Delay(DomainReloadDetectionTimeout, cancellationToken);
             await Task.WhenAny(domainReloadWaitTask, detectionDelay);
+            reloadObserved = domainReloadWaitTask.IsCompletedSuccessfully;
         }
 
-        if (domainReloadWaitTask.IsCompletedSuccessfully || state.IsDomainReloadInProgress)
+        if (!reloadObserved && !state.IsDomainReloadInProgress)
+            return;
+
+        Console.WriteLine($"[Bridge] Domain reload detected - waiting for reconnect");
+        var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
+            DomainReloadReconnectTimeout, cancellationToken);
+        if (reloadComplete)
         {
-            Console.WriteLine($"[Bridge] Domain reload detected - waiting for reconnect");
-            var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
-                DomainReloadReconnectTimeout, cancellationToken);
-            if (reloadComplete)
-            {
-                // editor.ping success proves the main thread is responsive — without this
-                // a chained command can race post-reload asset reimport / scene reload.
-                await state.WaitForEditorReadyAsync(EditorReadyTimeout, cancellationToken);
-            }
+            // editor.ping success proves the main thread is responsive — without this
+            // a chained command can race post-reload asset reimport / scene reload.
+            await state.WaitForEditorReadyAsync(EditorReadyTimeout, cancellationToken);
         }
     }
 
