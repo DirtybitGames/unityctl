@@ -67,6 +67,14 @@ public static class BridgeEndpoints
         {
             TimeoutEnvVar = "UNITYCTL_TIMEOUT_RECORD", TimeoutDefaultSeconds = 600,
             CompletionEvent = UnityCtlEvents.RecordFinished
+        },
+        // script.execute (covers both `script eval` and `script execute`) has no
+        // completion event, but it can run user code that itself triggers asset
+        // imports / scene saves. 60s gives headroom over the 30s generic default;
+        // -t overrides at the call site.
+        [UnityCtlCommands.ScriptExecute] = new CommandConfig
+        {
+            TimeoutEnvVar = "UNITYCTL_TIMEOUT_SCRIPT", TimeoutDefaultSeconds = 60
         }
     };
 
@@ -435,6 +443,14 @@ public static class BridgeEndpoints
             }
         }
 
+        // Pre-flight readiness gate: if Unity is connected but the main thread hasn't
+        // become responsive yet (cold start, externally-triggered reload, manual code
+        // edit), wait briefly before forwarding the command. Cheap when ready (flag read).
+        if (!state.IsEditorReady)
+        {
+            await state.WaitForEditorReadyAsync(EditorReadyTimeout, context.RequestAborted);
+        }
+
         var convertedArgs = ConvertArgs(request.Args);
         var requestMessage = CreateRequestMessage(request, convertedArgs);
 
@@ -689,23 +705,9 @@ public static class BridgeEndpoints
             // Wait for any in-progress reload to settle so the caller's next command finds
             // Unity in a responsive state. A reload follows compilation; it may also have
             // pre-empted the transition above.
-            if (compilationTriggered && !domainReloadWaitTask.IsCompletedSuccessfully)
+            if (compilationTriggered || domainReloadWaitTask.IsCompletedSuccessfully || state.IsDomainReloadInProgress)
             {
-                var detectionDelay = Task.Delay(DomainReloadDetectionTimeout, cancellationToken);
-                await Task.WhenAny(domainReloadWaitTask, detectionDelay);
-            }
-
-            if (domainReloadWaitTask.IsCompletedSuccessfully || state.IsDomainReloadInProgress)
-            {
-                Console.WriteLine($"[Bridge] Domain reload during/after play exit - waiting for reconnect");
-                var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
-                    DomainReloadReconnectTimeout, cancellationToken);
-                if (reloadComplete)
-                {
-                    // editor.ping success proves the main thread is responsive — without this
-                    // a chained command can race post-reload asset reimport / scene reload.
-                    await state.WaitForEditorReadyAsync(EditorReadyTimeout, cancellationToken);
-                }
+                await SettleAfterPossibleReloadAsync(state, domainReloadWaitTask, cancellationToken);
             }
 
             return JsonResponse(response);
@@ -832,6 +834,23 @@ public static class BridgeEndpoints
                 requestMessage.RequestId, config.CompletionEvent, timeout, cancellationToken, config.CompletionEventState);
         }
 
+        // Pre-register domain-reload waiter for compile-capable commands. Without
+        // pre-registration the DomainReloadStarting event can fire before the waiter
+        // is in place, so we register up front for any command that has a completion
+        // event (i.e., is async and could trigger compilation).
+        Task<EventMessage>? domainReloadWaitTask = null;
+        if (config?.CompletionEvent != null)
+        {
+            domainReloadWaitTask = state.WaitForEventAsync(
+                requestMessage.RequestId + "_domain_reload_preregister",
+                UnityCtlEvents.DomainReloadStarting,
+                timeout,
+                cancellationToken);
+        }
+
+        try
+        {
+
         // Send command to Unity
         var response = await state.SendCommandToUnityAsync(requestMessage, timeout, cancellationToken);
 
@@ -926,9 +945,60 @@ public static class BridgeEndpoints
                 Result = finalResult,
                 Error = response.Error
             };
+
+            // Settle post-compile/reload work before returning so the caller's next
+            // RPC doesn't race a busy main thread (asset reimport finalization, domain
+            // reload, scene reload). Same contract that play.exit honors.
+            if (compilationTriggered || (domainReloadWaitTask?.IsCompletedSuccessfully ?? false) || state.IsDomainReloadInProgress)
+            {
+                await SettleAfterPossibleReloadAsync(state, domainReloadWaitTask!, cancellationToken);
+            }
         }
 
         return JsonResponse(response);
+        }
+        finally
+        {
+            if (domainReloadWaitTask != null && !domainReloadWaitTask.IsCompleted)
+                state.CancelEventWaiter(requestMessage.RequestId + "_domain_reload_preregister");
+        }
+    }
+
+    // --- Post-compile / post-reload settle helper ---
+
+    /// <summary>
+    /// After a command that triggered compilation, wait for any in-progress domain
+    /// reload to settle and for the editor's main thread to become responsive again.
+    /// This is the contract every compile-capable command honors so the caller's next
+    /// RPC doesn't race post-reload work (asset reimport, scene reload).
+    ///
+    /// <paramref name="domainReloadWaitTask"/> must have been pre-registered before
+    /// the command was sent (the DomainReloadStarting event can fire before any
+    /// post-hoc registration would observe it).
+    /// </summary>
+    private static async Task SettleAfterPossibleReloadAsync(
+        BridgeState state,
+        Task<EventMessage> domainReloadWaitTask,
+        CancellationToken cancellationToken)
+    {
+        if (!domainReloadWaitTask.IsCompletedSuccessfully)
+        {
+            var detectionDelay = Task.Delay(DomainReloadDetectionTimeout, cancellationToken);
+            await Task.WhenAny(domainReloadWaitTask, detectionDelay);
+        }
+
+        if (domainReloadWaitTask.IsCompletedSuccessfully || state.IsDomainReloadInProgress)
+        {
+            Console.WriteLine($"[Bridge] Domain reload detected - waiting for reconnect");
+            var reloadComplete = await state.WaitForDomainReloadCompleteAsync(
+                DomainReloadReconnectTimeout, cancellationToken);
+            if (reloadComplete)
+            {
+                // editor.ping success proves the main thread is responsive — without this
+                // a chained command can race post-reload asset reimport / scene reload.
+                await state.WaitForEditorReadyAsync(EditorReadyTimeout, cancellationToken);
+            }
+        }
     }
 
     // --- Editor readiness probing ---

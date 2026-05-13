@@ -16,14 +16,15 @@ public class RequestTimeoutTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        // Set a very short default so we can verify the override works
-        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_DEFAULT", "2");
+        // Set a very short default so we can verify the override works.
+        // script.execute is in CommandConfigs with its own env var.
+        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_SCRIPT", "2");
         return _fixture.InitializeAsync();
     }
 
     public async Task DisposeAsync()
     {
-        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_DEFAULT", null);
+        Environment.SetEnvironmentVariable("UNITYCTL_TIMEOUT_SCRIPT", null);
         await _fixture.DisposeAsync();
     }
 

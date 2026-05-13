@@ -145,4 +145,112 @@ public class AssetRefreshFlowTests : IAsyncLifetime
 
         AssertExtensions.IsOk(response);
     }
+
+    [Fact]
+    public async Task AssetRefresh_DomainReload_WaitsForReconnection()
+    {
+        // Reproduces the chained-RPC timeout from ai-jam-test-1 logs (2026-05-13):
+        //   `unityctl asset refresh && unityctl script execute …` → script.execute
+        //   timed out at 30s because Unity main thread was mid-reload when the next
+        //   command arrived. Bridge had already returned from asset.refresh.
+        //
+        // Real Unity sequence: AssetRefreshComplete(compilationTriggered=true)
+        //   → CompilationFinished → DomainReloadStarting → Unity disconnects
+        //   → Unity reconnects → editor.ping succeeds → editor ready.
+        //
+        // The bridge must wait for this whole sequence before returning, so the
+        // next chained RPC doesn't race the main thread.
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsEditorReady,
+            timeout: TimeSpan.FromSeconds(10));
+
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.AssetRefresh, _ => new { },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.AssetRefreshComplete,
+                new { compilationTriggered = true, hasCompilationErrors = false }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.CompilationFinished,
+                new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(250),
+                UnityCtlEvents.DomainReloadStarting,
+                new { }));
+
+        var refreshTask = _fixture.SendRpcAndParseAsync(UnityCtlCommands.AssetRefresh);
+
+        // Bridge must observe the domain-reload signal before returning
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress,
+            timeout: TimeSpan.FromSeconds(2));
+
+        // asset.refresh must still be waiting at this point — currently it has already
+        // returned after CompilationFinished. This is the red assertion.
+        Assert.False(refreshTask.IsCompleted,
+            "asset.refresh must wait for domain reload + editor ready before returning, " +
+            "so chained commands don't race the main thread");
+
+        // Simulate Unity disconnect during reload, then reconnect (real reload behavior)
+        await _fixture.FakeUnity.DisconnectAsync();
+        await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
+
+        var newFakeUnity = _fixture.CreateFakeUnity();
+        await newFakeUnity.ConnectAsync(_fixture.BaseUri);
+
+        var response = await refreshTask;
+        AssertExtensions.IsOk(response);
+
+        // Editor must be ready by the time asset.refresh returns — chained commands rely on this
+        Assert.True(_fixture.BridgeState.IsEditorReady,
+            "editor must be ready by the time asset.refresh returns");
+
+        await newFakeUnity.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AssetRefresh_ChainedCommand_DoesNotRaceMainThread()
+    {
+        // End-to-end version of the ai-jam-test-1 failure: asset.refresh that triggers
+        // compilation + reload, immediately followed by another RPC. The follow-up
+        // must succeed quickly.
+        await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsEditorReady,
+            timeout: TimeSpan.FromSeconds(10));
+
+        _fixture.FakeUnity.OnCommand(UnityCtlCommands.AssetRefresh, _ => new { },
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(50),
+                UnityCtlEvents.AssetRefreshComplete,
+                new { compilationTriggered = true, hasCompilationErrors = false }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(150),
+                UnityCtlEvents.CompilationFinished,
+                new { success = true, errors = Array.Empty<object>(), warnings = Array.Empty<object>() }),
+            ScheduledEvent.After(TimeSpan.FromMilliseconds(200),
+                UnityCtlEvents.DomainReloadStarting,
+                new { }));
+
+        // Background task: simulate Unity's disconnect/reconnect on domain reload.
+        // Without this, the FakeUnity stays connected and DomainReloadStarting alone
+        // doesn't reflect real Unity behavior.
+        var reloadTask = Task.Run(async () =>
+        {
+            await AssertExtensions.WaitUntilAsync(() => _fixture.BridgeState.IsDomainReloadInProgress,
+                timeout: TimeSpan.FromSeconds(5));
+            await _fixture.FakeUnity.DisconnectAsync();
+            await AssertExtensions.WaitUntilAsync(() => !_fixture.BridgeState.IsUnityConnected);
+            var newFake = _fixture.CreateFakeUnity();
+            await newFake.ConnectAsync(_fixture.BaseUri);
+            return newFake;
+        });
+
+        var refreshResponse = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.AssetRefresh);
+        AssertExtensions.IsOk(refreshResponse);
+
+        var newFake = await reloadTask;
+
+        // Chained command must succeed quickly — Unity is responsive by now
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var chainedResponse = await _fixture.SendRpcAndParseAsync(UnityCtlCommands.PlayStatus);
+        sw.Stop();
+
+        AssertExtensions.IsOk(chainedResponse);
+        Assert.True(sw.ElapsedMilliseconds < 5000,
+            $"chained play.status after asset.refresh took {sw.ElapsedMilliseconds}ms — should be <5s");
+
+        await newFake.DisposeAsync();
+    }
 }
