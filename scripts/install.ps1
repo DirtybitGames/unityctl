@@ -11,7 +11,7 @@ Write-Host
 
 # Check for dotnet
 try {
-    $dotnetVersion = & dotnet --version 2>&1
+    $dotnetVersion = & dotnet --version
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet not found"
     }
@@ -24,7 +24,7 @@ try {
 }
 
 # Get list of installed tools
-$installedTools = & dotnet tool list -g 2>&1
+$installedTools = & dotnet tool list -g
 
 # Install or update CLI
 Write-Host "Installing UnityCtl.Cli..."
