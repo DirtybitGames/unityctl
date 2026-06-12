@@ -54,7 +54,7 @@ public static class AssetCommands
         assetCommand.AddCommand(importCommand);
 
         // asset refresh
-        var refreshCommand = new Command("refresh", "Refresh all assets (like focusing the editor)");
+        var refreshCommand = new Command("refresh", "Refresh assets and resolve Packages/manifest.json changes (like focusing the editor)");
         refreshCommand.SetHandler(async (InvocationContext context) =>
         {
             var projectPath = ContextHelper.GetProjectPath(context);

@@ -437,6 +437,15 @@ namespace UnityCtl
                 return;
             }
 
+            // asset.refresh may resolve Packages/manifest.json changes, which is an
+            // async Package Manager operation. Run it off the Pump tick so awaits don't
+            // block the main thread; continuations resume on Unity's SyncContext.
+            if (request.Command == UnityCtlCommands.AssetRefresh)
+            {
+                _ = HandleAssetRefreshAsync(request);
+                return;
+            }
+
             try
             {
                 object result = null;
@@ -513,16 +522,7 @@ namespace UnityCtl
                         result = HandleAssetImport(request);
                         break;
 
-                    case UnityCtlCommands.AssetRefresh:
-                        // Force refresh to ensure assets are reimported even without editor focus
-                        AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-                        // Check if compilation was triggered after refresh
-                        var compilationTriggered = EditorApplication.isCompiling;
-                        // Check if there are existing compilation errors
-                        var hasCompilationErrors = EditorUtility.scriptCompilationFailed;
-                        SendAssetRefreshCompleteEvent(compilationTriggered, hasCompilationErrors);
-                        result = new { started = true, compilationTriggered, hasCompilationErrors };
-                        break;
+                    // asset.refresh is dispatched async at the top of this method.
 
                     case UnityCtlCommands.MenuList:
                         result = HandleMenuList(request);
@@ -1470,6 +1470,140 @@ namespace UnityCtl
                 DebugLogError($"[UnityCtl] Async script handler failed: {ex.Message}");
                 SendResponseError(request.RequestId, "command_failed", ex.Message);
             }
+        }
+
+        // SessionState key holding a hash of the resolved Packages/manifest.json.
+        // Survives domain reloads but resets when the editor closes — which is exactly
+        // what we want, since Unity resolves the manifest itself on project open.
+        private const string ManifestHashKey = "UnityCtl.ResolvedManifestHash";
+
+        // Max time to wait for a manifest resolve to reach the compile stage (or to
+        // settle without compiling) before falling back to a plain asset refresh.
+        private static readonly TimeSpan ResolveWaitTimeout = TimeSpan.FromSeconds(30);
+
+        private async System.Threading.Tasks.Task HandleAssetRefreshAsync(RequestMessage request)
+        {
+            try
+            {
+                // AssetDatabase.Refresh alone does NOT re-read Packages/manifest.json —
+                // Unity only resolves the manifest when the editor regains focus, which
+                // never happens under headless automation. So if the manifest changed
+                // since the last resolve, kick off a Package Manager resolve and wait for
+                // it to reach the compile stage before reporting completion. Reporting
+                // compilationTriggered=true lets the bridge wait for the resulting
+                // compile + domain reload, so a follow-up command sees the new package.
+                if (ManifestChangedSinceLastResolve())
+                {
+                    await ResolvePackagesAsync();
+                }
+
+                // Force refresh to ensure assets are reimported even without editor focus
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+                var compilationTriggered = EditorApplication.isCompiling;
+                var hasCompilationErrors = EditorUtility.scriptCompilationFailed;
+                SendAssetRefreshCompleteEvent(compilationTriggered, hasCompilationErrors);
+                SendResponseOk(request.RequestId, new { started = true, compilationTriggered, hasCompilationErrors });
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Async asset refresh handler failed: {ex.Message}");
+                SendResponseError(request.RequestId, "command_failed", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Triggers a Package Manager resolve of Packages/manifest.json and waits until
+        /// it either reaches the compile stage (a package with code was imported, so a
+        /// domain reload is imminent) or settles without compiling (data-only change).
+        /// Returns before the domain reload so the AssetRefreshComplete event — sent by
+        /// the caller — reaches the bridge first; the bridge then waits for the reload.
+        /// </summary>
+        private async System.Threading.Tasks.Task ResolvePackagesAsync()
+        {
+            // registeredPackages fires when a resolve completes without a domain reload
+            // (e.g., a data-only package). When a reload does happen it tears this handler
+            // down before the event arrives, so we exit via the compile signal instead.
+            var resolved = false;
+            Action<UnityEditor.PackageManager.PackageRegistrationEventArgs> onRegistered = _ => resolved = true;
+            // compilationStarted latches the compile signal so a fast compile can't slip
+            // past the polling interval before we observe it.
+            var compileStarted = false;
+            Action<object> onCompileStarted = _ => compileStarted = true;
+
+            UnityEditor.PackageManager.Events.registeredPackages += onRegistered;
+            CompilationPipeline.compilationStarted += onCompileStarted;
+            try
+            {
+                UnityEditor.PackageManager.Client.Resolve();
+
+                var deadline = DateTime.UtcNow + ResolveWaitTimeout;
+                while (!compileStarted && !EditorApplication.isCompiling && !resolved
+                       && DateTime.UtcNow < deadline)
+                {
+                    // Resumes on Unity's main-thread SyncContext, so the editor stays
+                    // responsive and the Package Manager resolve can make progress.
+                    await System.Threading.Tasks.Task.Delay(100);
+                }
+            }
+            finally
+            {
+                UnityEditor.PackageManager.Events.registeredPackages -= onRegistered;
+                CompilationPipeline.compilationStarted -= onCompileStarted;
+            }
+        }
+
+        /// <summary>
+        /// Returns true when Packages/manifest.json has unresolved edits since Unity last
+        /// resolved it. Compares a hash of the manifest's dependency-affecting fields
+        /// against the value stored at the previous refresh. The first refresh of an
+        /// editor session seeds the hash and returns false, since Unity resolves the
+        /// manifest itself on project open.
+        /// </summary>
+        private bool ManifestChangedSinceLastResolve()
+        {
+            try
+            {
+                var assetsParent = Directory.GetParent(Application.dataPath);
+                if (assetsParent == null) return false;
+                var manifestPath = Path.Combine(assetsParent.FullName, "Packages", "manifest.json");
+                if (!File.Exists(manifestPath)) return false;
+
+                var hash = ComputeManifestHash(File.ReadAllText(manifestPath));
+                var stored = SessionState.GetString(ManifestHashKey, "");
+                // Record the current state so subsequent refreshes take the fast path.
+                SessionState.SetString(ManifestHashKey, hash);
+
+                // No stored hash means this is the first refresh this session; Unity
+                // already resolved the manifest on project open, so treat as unchanged.
+                if (string.IsNullOrEmpty(stored)) return false;
+                return stored != hash;
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"[UnityCtl] Manifest change check failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        // Hashes only the fields that affect package resolution so whitespace or
+        // formatting-only edits to manifest.json don't trigger a needless resolve.
+        private static string ComputeManifestHash(string manifestContent)
+        {
+            string canonical;
+            try
+            {
+                var obj = JObject.Parse(manifestContent);
+                canonical = (obj["dependencies"]?.ToString(Newtonsoft.Json.Formatting.None) ?? "")
+                            + "|" + (obj["scopedRegistries"]?.ToString(Newtonsoft.Json.Formatting.None) ?? "");
+            }
+            catch
+            {
+                // Malformed JSON (mid-edit): fall back to the raw content.
+                canonical = manifestContent;
+            }
+
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(canonical)));
         }
 
         private static int ClampLimit(int? requested, int defaultValue, int max)

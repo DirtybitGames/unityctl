@@ -28,8 +28,8 @@ unityctl bridge start/stop   # Manage bridge daemon
 # Editor
 unityctl editor run/stop     # Launch or stop Unity Editor
 
-# Compile (run after modifying C# scripts or importing packages)
-unityctl asset refresh       # Compile scripts, returns errors on failure
+# Compile (run after modifying C# scripts or editing Packages/manifest.json)
+unityctl asset refresh       # Compile scripts + resolve manifest package changes; returns errors on failure
 
 # Play Mode
 unityctl play enter/exit     # Enter or exit play mode
