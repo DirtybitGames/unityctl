@@ -1772,7 +1772,7 @@ namespace UnityCtl
             {
                 if (targetId.HasValue)
                 {
-                    var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                    var go = ResolveObjectById(targetId.Value) as GameObject;
                     if (go == null || go.scene != scene)
                         throw new ArgumentException($"No GameObject with instance ID {targetId} in scene {scenePath}");
 
@@ -1837,7 +1837,7 @@ namespace UnityCtl
 
         private Protocol.SnapshotResult SnapshotDrillDown(int targetId, string filter, int depth, bool includeComponents, bool screen)
         {
-            var go = EditorUtility.InstanceIDToObject(targetId) as GameObject;
+            var go = ResolveObjectById(targetId) as GameObject;
             if (go == null)
                 throw new ArgumentException($"No GameObject with instance ID {targetId}");
 
@@ -1966,9 +1966,38 @@ namespace UnityCtl
             };
         }
 
+        // --- Unity 6000.5 EntityId compatibility ------------------------------
+        // Unity 6000.5 renamed the int-based "instance ID" APIs to the 64-bit
+        // EntityId type and marked Object.GetInstanceID() and
+        // EditorUtility.InstanceIDToObject(int) obsolete-as-error. These wrappers
+        // keep the package compiling on Unity 2022.3+ while using the new APIs on
+        // 6000.5+. Handles are still surfaced as int through the protocol; on
+        // 6000.5+ they round-trip through EntityId.ToULong()/FromULong(), which is
+        // lossless while editor entity IDs stay within 32 bits.
+
+        internal static int GetObjectInstanceId(UnityEngine.Object obj)
+        {
+#if UNITY_6000_5_OR_NEWER
+            return unchecked((int)UnityEngine.EntityId.ToULong(obj.GetEntityId()));
+#else
+            return obj.GetInstanceID();
+#endif
+        }
+
+        public static UnityEngine.Object ResolveObjectById(int id)
+        {
+#if UNITY_6000_5_OR_NEWER
+            // Editor scene objects carry negative instance IDs, so sign-extend the
+            // int back to the 64-bit value GetEntityId().ToULong() produced.
+            return EditorUtility.EntityIdToObject(UnityEngine.EntityId.FromULong(unchecked((ulong)(long)id)));
+#else
+            return EditorUtility.InstanceIDToObject(id);
+#endif
+        }
+
         private static GameObject FindInHierarchy(GameObject root, int instanceId)
         {
-            if (root.GetInstanceID() == instanceId) return root;
+            if (GetObjectInstanceId(root) == instanceId) return root;
             foreach (Transform child in root.transform)
             {
                 var found = FindInHierarchy(child.gameObject, instanceId);
@@ -1996,7 +2025,7 @@ namespace UnityCtl
                 {
                     var instanceRoot = prefabStage.openedFromInstanceRoot;
                     if (instanceRoot != null)
-                        openedFrom = instanceRoot.GetInstanceID();
+                        openedFrom = GetObjectInstanceId(instanceRoot);
                 }
 
                 return new StageInfo
@@ -2036,7 +2065,7 @@ namespace UnityCtl
 
             if (contextInstanceId.HasValue)
             {
-                var instance = EditorUtility.InstanceIDToObject(contextInstanceId.Value) as GameObject;
+                var instance = ResolveObjectById(contextInstanceId.Value) as GameObject;
                 if (instance == null)
                     throw new ArgumentException($"Context instance not found: {contextInstanceId.Value}");
                 if (!PrefabUtility.IsPartOfPrefabInstance(instance))
@@ -2103,7 +2132,7 @@ namespace UnityCtl
             var t = go.transform;
             var obj = new Protocol.SnapshotObject
             {
-                InstanceId = go.GetInstanceID(),
+                InstanceId = GetObjectInstanceId(go),
                 Name = go.name,
                 Active = go.activeSelf,
                 Tag = go.tag != "Untagged" ? go.tag : null,
@@ -2489,7 +2518,7 @@ namespace UnityCtl
                 var centerX = (minX + maxX) / 2f;
                 var centerY = (minY + maxY) / 2f;
                 var hitId = GetUIHitAtPoint(new Vector2(centerX, centerY));
-                if (hitId == go.GetInstanceID() || IsDescendantOf(hitId, go))
+                if (hitId == GetObjectInstanceId(go) || IsDescendantOf(hitId, go))
                 {
                     obj.Hittable = true;
                 }
@@ -2516,7 +2545,7 @@ namespace UnityCtl
             var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
             var results = new List<RaycastResult>();
             EventSystem.current.RaycastAll(pointerData, results);
-            return results.Count > 0 ? results[0].gameObject.GetInstanceID() : 0;
+            return results.Count > 0 ? GetObjectInstanceId(results[0].gameObject) : 0;
         }
 
         /// <summary>
@@ -2562,7 +2591,7 @@ namespace UnityCtl
                 {
                     uiHits.Add(new Protocol.SnapshotQueryHit
                     {
-                        InstanceId = r.gameObject.GetInstanceID(),
+                        InstanceId = GetObjectInstanceId(r.gameObject),
                         Name = r.gameObject.name,
                         Path = GetHierarchyPath(r.gameObject),
                         Text = GetUIText(r.gameObject),
@@ -2602,7 +2631,7 @@ namespace UnityCtl
                 {
                     uiHits.Add(new Protocol.SnapshotQueryHit
                     {
-                        InstanceId = g.gameObject.GetInstanceID(),
+                        InstanceId = GetObjectInstanceId(g.gameObject),
                         Name = g.gameObject.name,
                         Path = GetHierarchyPath(g.gameObject),
                         Text = GetUIText(g.gameObject),
@@ -2640,7 +2669,7 @@ namespace UnityCtl
             if (targetId.HasValue)
             {
                 // Resolve by instance ID
-                target = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                target = ResolveObjectById(targetId.Value) as GameObject;
                 if (target == null)
                     throw new ArgumentException($"No GameObject with instance ID {targetId.Value}");
 
@@ -2662,7 +2691,7 @@ namespace UnityCtl
                     if (topHit != target && !topHit.transform.IsChildOf(target.transform))
                     {
                         throw new InvalidOperationException(
-                            $"'{target.name}' [i:{targetId.Value}] is blocked by '{topHit.name}' [i:{topHit.GetInstanceID()}]");
+                            $"'{target.name}' [i:{targetId.Value}] is blocked by '{topHit.name}' [i:{GetObjectInstanceId(topHit)}]");
                     }
                 }
             }
@@ -2690,7 +2719,7 @@ namespace UnityCtl
                     if (topHit != target && !topHit.transform.IsChildOf(target.transform))
                     {
                         throw new InvalidOperationException(
-                            $"'{target.name}' [i:{target.GetInstanceID()}] is blocked by '{topHit.name}' [i:{topHit.GetInstanceID()}]");
+                            $"'{target.name}' [i:{GetObjectInstanceId(target)}] is blocked by '{topHit.name}' [i:{GetObjectInstanceId(topHit)}]");
                     }
                 }
             }
@@ -2739,7 +2768,7 @@ namespace UnityCtl
 
             return new Protocol.UIClickResult
             {
-                InstanceId = target.GetInstanceID(),
+                InstanceId = GetObjectInstanceId(target),
                 Name = target.name,
                 Path = GetHierarchyPath(target),
                 ScreenPosition = string.Format(System.Globalization.CultureInfo.InvariantCulture,
@@ -2764,7 +2793,7 @@ namespace UnityCtl
         /// </summary>
         private static bool IsDescendantOf(int instanceId, GameObject parent)
         {
-            var obj = EditorUtility.InstanceIDToObject(instanceId) as GameObject;
+            var obj = ResolveObjectById(instanceId) as GameObject;
             if (obj == null) return false;
             var t = obj.transform;
             while (t != null)

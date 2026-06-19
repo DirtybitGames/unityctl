@@ -119,7 +119,7 @@ public class EvalCodeGeneratorTests
     {
         var code = ScriptCommands.BuildEvalCode("target.name", [], hasArgs: false, instanceIds: "14200");
 
-        Assert.Contains("InstanceIDToObject(14200)", code);
+        Assert.Contains("ResolveObjectById(14200)", code);
         Assert.Contains("var target =", code);
     }
 
@@ -129,8 +129,8 @@ public class EvalCodeGeneratorTests
         var code = ScriptCommands.BuildEvalCode("targets[0].name", [], hasArgs: false, instanceIds: "14200,14210");
 
         Assert.Contains("var targets = new GameObject[2]", code);
-        Assert.Contains("InstanceIDToObject(14200)", code);
-        Assert.Contains("InstanceIDToObject(14210)", code);
+        Assert.Contains("ResolveObjectById(14200)", code);
+        Assert.Contains("ResolveObjectById(14210)", code);
     }
 
     [Fact]
@@ -138,7 +138,7 @@ public class EvalCodeGeneratorTests
     {
         var code = ScriptCommands.BuildEvalCode("target.name", [], hasArgs: false, instanceIds: "-1290");
 
-        Assert.Contains("InstanceIDToObject(-1290)", code);
+        Assert.Contains("ResolveObjectById(-1290)", code);
     }
 
     [Fact]
