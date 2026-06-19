@@ -637,7 +637,7 @@ public static class ScriptCommands
 
         if (ids.Length == 1)
         {
-            sb.Append($"var target = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[0]});");
+            sb.Append($"var target = (GameObject)UnityCtl.UnityCtlClient.ResolveObjectById({ids[0]});");
             sb.Append($"{pad}if (target == null) throw new System.Exception(\"Object {ids[0]} not found (destroyed?)\");");
         }
         else
@@ -645,7 +645,7 @@ public static class ScriptCommands
             sb.Append($"var targets = new GameObject[{ids.Length}];");
             for (int i = 0; i < ids.Length; i++)
             {
-                sb.Append($"{pad}targets[{i}] = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[i]});");
+                sb.Append($"{pad}targets[{i}] = (GameObject)UnityCtl.UnityCtlClient.ResolveObjectById({ids[i]});");
                 sb.Append($"{pad}if (targets[{i}] == null) throw new System.Exception(\"Object {ids[i]} not found (destroyed?)\");");
             }
         }
