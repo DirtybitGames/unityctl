@@ -811,6 +811,36 @@ namespace UnityCtl
             return null;
         }
 
+        private static long? GetLongArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return null;
+
+            try
+            {
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return null;
+
+                    if (value is long longValue) return longValue;
+                    if (value is int intValue) return intValue;
+
+                    if (value is JToken jtoken && jtoken.Type == JTokenType.Integer)
+                        return jtoken.Value<long>();
+
+                    if (long.TryParse(value.ToString(), out var parsed)) return parsed;
+
+                    DebugLog($"[UnityCtl] Could not parse argument '{key}' as long: {value}");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get long argument '{key}': {ex.Message}");
+            }
+
+            return null;
+        }
+
         private static double? GetDoubleArgument(RequestMessage request, string key)
         {
             if (request.Args == null) return null;
@@ -1683,7 +1713,7 @@ namespace UnityCtl
         private object HandleSnapshot(RequestMessage request)
         {
             var depth = GetIntArgument(request, "depth") ?? 2;
-            var targetId = GetIntArgument(request, "id");
+            var targetId = GetLongArgument(request, "id");
             var includeComponents = GetBoolArgument(request, "components");
             var screen = GetBoolArgument(request, "screen");
             var filter = GetStringArgument(request, "filter");
@@ -1714,7 +1744,7 @@ namespace UnityCtl
             return result;
         }
 
-        private Protocol.SnapshotResult SnapshotPrefabAsset(string prefabPath, int? targetId, string filter, int depth, bool includeComponents, bool screen)
+        private Protocol.SnapshotResult SnapshotPrefabAsset(string prefabPath, long? targetId, string filter, int depth, bool includeComponents, bool screen)
         {
             if (!prefabPath.EndsWith(".prefab"))
                 throw new ArgumentException($"Not a prefab asset: {prefabPath} (must end with .prefab)");
@@ -1755,7 +1785,7 @@ namespace UnityCtl
             };
         }
 
-        private Protocol.SnapshotResult SnapshotSpecificScene(string scenePath, int? targetId, string filter, int depth, bool includeComponents, bool screen)
+        private Protocol.SnapshotResult SnapshotSpecificScene(string scenePath, long? targetId, string filter, int depth, bool includeComponents, bool screen)
         {
             if (EditorApplication.isPlaying)
                 throw new InvalidOperationException("Cannot snapshot other scenes during play mode. Use snapshot without --scene for the active scene.");
@@ -1835,7 +1865,7 @@ namespace UnityCtl
             }
         }
 
-        private Protocol.SnapshotResult SnapshotDrillDown(int targetId, string filter, int depth, bool includeComponents, bool screen)
+        private Protocol.SnapshotResult SnapshotDrillDown(long targetId, string filter, int depth, bool includeComponents, bool screen)
         {
             var go = ResolveObjectById(targetId) as GameObject;
             if (go == null)
@@ -1966,36 +1996,41 @@ namespace UnityCtl
             };
         }
 
-        // --- Unity 6000.5 EntityId compatibility ------------------------------
-        // Unity 6000.5 renamed the int-based "instance ID" APIs to the 64-bit
-        // EntityId type and marked Object.GetInstanceID() and
-        // EditorUtility.InstanceIDToObject(int) obsolete-as-error. These wrappers
-        // keep the package compiling on Unity 2022.3+ while using the new APIs on
-        // 6000.5+. Handles are still surfaced as int through the protocol; on
-        // 6000.5+ they round-trip through EntityId.ToULong()/FromULong(), which is
-        // lossless while editor entity IDs stay within 32 bits.
+        // --- Unity EntityId compatibility -------------------------------------
+        // Unity introduced the EntityId type in 6000.3 and deprecated (warning)
+        // Object.GetInstanceID() and EditorUtility.InstanceIDToObject(int) there;
+        // 6000.5 promotes those to obsolete-as-error and widens EntityId to 64-bit
+        // (EntityId.ToULong/FromULong). We adopt the new APIs from 6000.3 to stay
+        // warning-free, with three regimes:
+        //   * 6000.5+   : EntityId is 64-bit; round-trip losslessly via ToULong/FromULong.
+        //   * 6000.3/.4 : EntityId is int-backed and converts implicitly to/from int.
+        //   * pre-6000.3: legacy GetInstanceID()/InstanceIDToObject(int).
+        // Handles are surfaced as 64-bit (long) through the protocol so a 6000.5 id
+        // is never truncated; narrower ids simply widen to long and narrow back.
 
-        internal static int GetObjectInstanceId(UnityEngine.Object obj)
+        internal static long GetObjectInstanceId(UnityEngine.Object obj)
         {
 #if UNITY_6000_5_OR_NEWER
-            return unchecked((int)UnityEngine.EntityId.ToULong(obj.GetEntityId()));
+            return unchecked((long)UnityEngine.EntityId.ToULong(obj.GetEntityId()));
+#elif UNITY_6000_3_OR_NEWER
+            return (int)obj.GetEntityId();
 #else
             return obj.GetInstanceID();
 #endif
         }
 
-        public static UnityEngine.Object ResolveObjectById(int id)
+        public static UnityEngine.Object ResolveObjectById(long id)
         {
 #if UNITY_6000_5_OR_NEWER
-            // Editor scene objects carry negative instance IDs, so sign-extend the
-            // int back to the 64-bit value GetEntityId().ToULong() produced.
-            return EditorUtility.EntityIdToObject(UnityEngine.EntityId.FromULong(unchecked((ulong)(long)id)));
+            return EditorUtility.EntityIdToObject(UnityEngine.EntityId.FromULong(unchecked((ulong)id)));
+#elif UNITY_6000_3_OR_NEWER
+            return EditorUtility.EntityIdToObject((UnityEngine.EntityId)unchecked((int)id));
 #else
-            return EditorUtility.InstanceIDToObject(id);
+            return EditorUtility.InstanceIDToObject(unchecked((int)id));
 #endif
         }
 
-        private static GameObject FindInHierarchy(GameObject root, int instanceId)
+        private static GameObject FindInHierarchy(GameObject root, long instanceId)
         {
             if (GetObjectInstanceId(root) == instanceId) return root;
             foreach (Transform child in root.transform)
@@ -2011,7 +2046,7 @@ namespace UnityCtl
             public string Stage;
             public string PrefabAssetPath;
             public bool? HasUnsavedChanges;
-            public int? OpenedFromInstanceId;
+            public long? OpenedFromInstanceId;
         }
 
         private StageInfo GetStageInfo()
@@ -2020,7 +2055,7 @@ namespace UnityCtl
             if (prefabStage != null)
             {
                 var isInContext = prefabStage.mode == PrefabStage.Mode.InContext;
-                int? openedFrom = null;
+                long? openedFrom = null;
                 if (isInContext)
                 {
                     var instanceRoot = prefabStage.openedFromInstanceRoot;
@@ -2061,7 +2096,7 @@ namespace UnityCtl
             if (asset == null)
                 throw new ArgumentException($"Prefab not found: {path}");
 
-            var contextInstanceId = GetIntArgument(request, "context");
+            var contextInstanceId = GetLongArgument(request, "context");
 
             if (contextInstanceId.HasValue)
             {
@@ -2538,7 +2573,7 @@ namespace UnityCtl
         /// Returns the instance ID of the top UI element at the given screen point, or 0 if nothing.
         /// Requires play mode with an active EventSystem.
         /// </summary>
-        private static int GetUIHitAtPoint(Vector2 screenPoint)
+        private static long GetUIHitAtPoint(Vector2 screenPoint)
         {
             if (EventSystem.current == null) return 0;
 
@@ -2658,7 +2693,7 @@ namespace UnityCtl
             if (EventSystem.current == null)
                 throw new InvalidOperationException("No EventSystem found in scene");
 
-            var targetId = GetIntArgument(request, "id");
+            var targetId = GetLongArgument(request, "id");
             var targetName = GetStringArgument(request, "name");
             var x = GetIntArgument(request, "x");
             var y = GetIntArgument(request, "y");
@@ -2791,7 +2826,7 @@ namespace UnityCtl
         /// <summary>
         /// Returns true if the object with the given instance ID is a descendant of parent.
         /// </summary>
-        private static bool IsDescendantOf(int instanceId, GameObject parent)
+        private static bool IsDescendantOf(long instanceId, GameObject parent)
         {
             var obj = ResolveObjectById(instanceId) as GameObject;
             if (obj == null) return false;

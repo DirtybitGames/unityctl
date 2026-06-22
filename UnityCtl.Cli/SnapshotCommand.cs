@@ -16,7 +16,7 @@ public static class SnapshotCommand
     {
         var snapshotCommand = new Command("snapshot", "Snapshot the scene hierarchy as a compact, LLM-friendly tree with instance IDs");
 
-        var idOption = new Option<int?>(
+        var idOption = new Option<long?>(
             "--id",
             "Drill into a specific object by instance ID"
         );

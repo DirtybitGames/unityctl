@@ -473,7 +473,7 @@ public class SnapshotResult
     public bool? HasUnsavedChanges { get; init; }
 
     [JsonProperty("openedFromInstanceId", NullValueHandling = NullValueHandling.Ignore)]
-    public int? OpenedFromInstanceId { get; init; }
+    public long? OpenedFromInstanceId { get; init; }
 
     [JsonProperty("isPlaying")]
     public required bool IsPlaying { get; init; }
@@ -521,7 +521,7 @@ public class SnapshotSceneInfo
 public class SnapshotObject
 {
     [JsonProperty("instanceId")]
-    public int InstanceId { get; set; }
+    public long InstanceId { get; set; }
 
     [JsonProperty("name")]
     public string Name { get; set; } = "";
@@ -583,7 +583,7 @@ public class SnapshotObject
     public bool? Hittable { get; set; }
 
     [JsonProperty("blockedBy", NullValueHandling = NullValueHandling.Ignore)]
-    public int? BlockedBy { get; set; }
+    public long? BlockedBy { get; set; }
 
     [JsonProperty("childCount")]
     public int ChildCount { get; set; }
@@ -646,7 +646,7 @@ public class SnapshotQueryResult
 public class SnapshotQueryHit
 {
     [JsonProperty("instanceId")]
-    public int InstanceId { get; set; }
+    public long InstanceId { get; set; }
 
     [JsonProperty("name")]
     public string Name { get; set; } = "";
@@ -664,7 +664,7 @@ public class SnapshotQueryHit
 public class UIClickResult
 {
     [JsonProperty("instanceId")]
-    public int InstanceId { get; set; }
+    public long InstanceId { get; set; }
 
     [JsonProperty("name")]
     public string Name { get; set; } = "";
