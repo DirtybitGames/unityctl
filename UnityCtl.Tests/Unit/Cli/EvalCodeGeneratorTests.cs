@@ -119,7 +119,7 @@ public class EvalCodeGeneratorTests
     {
         var code = ScriptCommands.BuildEvalCode("target.name", [], hasArgs: false, instanceIds: "14200");
 
-        Assert.Contains("InstanceIDToObject(14200)", code);
+        Assert.Contains("ResolveObjectById(14200)", code);
         Assert.Contains("var target =", code);
     }
 
@@ -129,8 +129,8 @@ public class EvalCodeGeneratorTests
         var code = ScriptCommands.BuildEvalCode("targets[0].name", [], hasArgs: false, instanceIds: "14200,14210");
 
         Assert.Contains("var targets = new GameObject[2]", code);
-        Assert.Contains("InstanceIDToObject(14200)", code);
-        Assert.Contains("InstanceIDToObject(14210)", code);
+        Assert.Contains("ResolveObjectById(14200)", code);
+        Assert.Contains("ResolveObjectById(14210)", code);
     }
 
     [Fact]
@@ -138,7 +138,16 @@ public class EvalCodeGeneratorTests
     {
         var code = ScriptCommands.BuildEvalCode("target.name", [], hasArgs: false, instanceIds: "-1290");
 
-        Assert.Contains("InstanceIDToObject(-1290)", code);
+        Assert.Contains("ResolveObjectById(-1290)", code);
+    }
+
+    [Fact]
+    public void InstanceId_BeyondInt32_Accepted()
+    {
+        // Unity 6000.5 EntityIds are 64-bit; ids beyond int range must round-trip.
+        var code = ScriptCommands.BuildEvalCode("target.name", [], hasArgs: false, instanceIds: "5000000000");
+
+        Assert.Contains("ResolveObjectById(5000000000)", code);
     }
 
     [Fact]
@@ -155,6 +164,14 @@ public class EvalCodeGeneratorTests
         var ids = ScriptCommands.ParseInstanceIds("14200,-1290,0");
 
         Assert.Equal([14200, -1290, 0], ids);
+    }
+
+    [Fact]
+    public void ParseInstanceIds_BeyondInt32_ParsesAsLong()
+    {
+        var ids = ScriptCommands.ParseInstanceIds("5000000000,-5000000000");
+
+        Assert.Equal([5000000000L, -5000000000L], ids);
     }
 
     [Fact]

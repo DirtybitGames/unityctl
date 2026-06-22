@@ -811,6 +811,36 @@ namespace UnityCtl
             return null;
         }
 
+        private static long? GetLongArgument(RequestMessage request, string key)
+        {
+            if (request.Args == null) return null;
+
+            try
+            {
+                if (request.Args is System.Collections.IDictionary dict && dict.Contains(key))
+                {
+                    var value = dict[key];
+                    if (value == null) return null;
+
+                    if (value is long longValue) return longValue;
+                    if (value is int intValue) return intValue;
+
+                    if (value is JToken jtoken && jtoken.Type == JTokenType.Integer)
+                        return jtoken.Value<long>();
+
+                    if (long.TryParse(value.ToString(), out var parsed)) return parsed;
+
+                    DebugLog($"[UnityCtl] Could not parse argument '{key}' as long: {value}");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLogError($"[UnityCtl] Failed to get long argument '{key}': {ex.Message}");
+            }
+
+            return null;
+        }
+
         private static double? GetDoubleArgument(RequestMessage request, string key)
         {
             if (request.Args == null) return null;
@@ -1683,7 +1713,7 @@ namespace UnityCtl
         private object HandleSnapshot(RequestMessage request)
         {
             var depth = GetIntArgument(request, "depth") ?? 2;
-            var targetId = GetIntArgument(request, "id");
+            var targetId = GetLongArgument(request, "id");
             var includeComponents = GetBoolArgument(request, "components");
             var screen = GetBoolArgument(request, "screen");
             var filter = GetStringArgument(request, "filter");
@@ -1714,7 +1744,7 @@ namespace UnityCtl
             return result;
         }
 
-        private Protocol.SnapshotResult SnapshotPrefabAsset(string prefabPath, int? targetId, string filter, int depth, bool includeComponents, bool screen)
+        private Protocol.SnapshotResult SnapshotPrefabAsset(string prefabPath, long? targetId, string filter, int depth, bool includeComponents, bool screen)
         {
             if (!prefabPath.EndsWith(".prefab"))
                 throw new ArgumentException($"Not a prefab asset: {prefabPath} (must end with .prefab)");
@@ -1755,7 +1785,7 @@ namespace UnityCtl
             };
         }
 
-        private Protocol.SnapshotResult SnapshotSpecificScene(string scenePath, int? targetId, string filter, int depth, bool includeComponents, bool screen)
+        private Protocol.SnapshotResult SnapshotSpecificScene(string scenePath, long? targetId, string filter, int depth, bool includeComponents, bool screen)
         {
             if (EditorApplication.isPlaying)
                 throw new InvalidOperationException("Cannot snapshot other scenes during play mode. Use snapshot without --scene for the active scene.");
@@ -1772,7 +1802,7 @@ namespace UnityCtl
             {
                 if (targetId.HasValue)
                 {
-                    var go = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                    var go = ResolveObjectById(targetId.Value) as GameObject;
                     if (go == null || go.scene != scene)
                         throw new ArgumentException($"No GameObject with instance ID {targetId} in scene {scenePath}");
 
@@ -1835,9 +1865,9 @@ namespace UnityCtl
             }
         }
 
-        private Protocol.SnapshotResult SnapshotDrillDown(int targetId, string filter, int depth, bool includeComponents, bool screen)
+        private Protocol.SnapshotResult SnapshotDrillDown(long targetId, string filter, int depth, bool includeComponents, bool screen)
         {
-            var go = EditorUtility.InstanceIDToObject(targetId) as GameObject;
+            var go = ResolveObjectById(targetId) as GameObject;
             if (go == null)
                 throw new ArgumentException($"No GameObject with instance ID {targetId}");
 
@@ -1966,9 +1996,43 @@ namespace UnityCtl
             };
         }
 
-        private static GameObject FindInHierarchy(GameObject root, int instanceId)
+        // --- Unity EntityId compatibility -------------------------------------
+        // Unity introduced the EntityId type in 6000.3 and deprecated (warning)
+        // Object.GetInstanceID() and EditorUtility.InstanceIDToObject(int) there;
+        // 6000.5 promotes those to obsolete-as-error and widens EntityId to 64-bit
+        // (EntityId.ToULong/FromULong). We adopt the new APIs from 6000.3 to stay
+        // warning-free, with three regimes:
+        //   * 6000.5+   : EntityId is 64-bit; round-trip losslessly via ToULong/FromULong.
+        //   * 6000.3/.4 : EntityId is int-backed and converts implicitly to/from int.
+        //   * pre-6000.3: legacy GetInstanceID()/InstanceIDToObject(int).
+        // Handles are surfaced as 64-bit (long) through the protocol so a 6000.5 id
+        // is never truncated; narrower ids simply widen to long and narrow back.
+
+        internal static long GetObjectInstanceId(UnityEngine.Object obj)
         {
-            if (root.GetInstanceID() == instanceId) return root;
+#if UNITY_6000_5_OR_NEWER
+            return unchecked((long)UnityEngine.EntityId.ToULong(obj.GetEntityId()));
+#elif UNITY_6000_3_OR_NEWER
+            return (int)obj.GetEntityId();
+#else
+            return obj.GetInstanceID();
+#endif
+        }
+
+        public static UnityEngine.Object ResolveObjectById(long id)
+        {
+#if UNITY_6000_5_OR_NEWER
+            return EditorUtility.EntityIdToObject(UnityEngine.EntityId.FromULong(unchecked((ulong)id)));
+#elif UNITY_6000_3_OR_NEWER
+            return EditorUtility.EntityIdToObject((UnityEngine.EntityId)unchecked((int)id));
+#else
+            return EditorUtility.InstanceIDToObject(unchecked((int)id));
+#endif
+        }
+
+        private static GameObject FindInHierarchy(GameObject root, long instanceId)
+        {
+            if (GetObjectInstanceId(root) == instanceId) return root;
             foreach (Transform child in root.transform)
             {
                 var found = FindInHierarchy(child.gameObject, instanceId);
@@ -1982,7 +2046,7 @@ namespace UnityCtl
             public string Stage;
             public string PrefabAssetPath;
             public bool? HasUnsavedChanges;
-            public int? OpenedFromInstanceId;
+            public long? OpenedFromInstanceId;
         }
 
         private StageInfo GetStageInfo()
@@ -1991,12 +2055,12 @@ namespace UnityCtl
             if (prefabStage != null)
             {
                 var isInContext = prefabStage.mode == PrefabStage.Mode.InContext;
-                int? openedFrom = null;
+                long? openedFrom = null;
                 if (isInContext)
                 {
                     var instanceRoot = prefabStage.openedFromInstanceRoot;
                     if (instanceRoot != null)
-                        openedFrom = instanceRoot.GetInstanceID();
+                        openedFrom = GetObjectInstanceId(instanceRoot);
                 }
 
                 return new StageInfo
@@ -2032,11 +2096,11 @@ namespace UnityCtl
             if (asset == null)
                 throw new ArgumentException($"Prefab not found: {path}");
 
-            var contextInstanceId = GetIntArgument(request, "context");
+            var contextInstanceId = GetLongArgument(request, "context");
 
             if (contextInstanceId.HasValue)
             {
-                var instance = EditorUtility.InstanceIDToObject(contextInstanceId.Value) as GameObject;
+                var instance = ResolveObjectById(contextInstanceId.Value) as GameObject;
                 if (instance == null)
                     throw new ArgumentException($"Context instance not found: {contextInstanceId.Value}");
                 if (!PrefabUtility.IsPartOfPrefabInstance(instance))
@@ -2103,7 +2167,7 @@ namespace UnityCtl
             var t = go.transform;
             var obj = new Protocol.SnapshotObject
             {
-                InstanceId = go.GetInstanceID(),
+                InstanceId = GetObjectInstanceId(go),
                 Name = go.name,
                 Active = go.activeSelf,
                 Tag = go.tag != "Untagged" ? go.tag : null,
@@ -2489,7 +2553,7 @@ namespace UnityCtl
                 var centerX = (minX + maxX) / 2f;
                 var centerY = (minY + maxY) / 2f;
                 var hitId = GetUIHitAtPoint(new Vector2(centerX, centerY));
-                if (hitId == go.GetInstanceID() || IsDescendantOf(hitId, go))
+                if (hitId == GetObjectInstanceId(go) || IsDescendantOf(hitId, go))
                 {
                     obj.Hittable = true;
                 }
@@ -2509,14 +2573,14 @@ namespace UnityCtl
         /// Returns the instance ID of the top UI element at the given screen point, or 0 if nothing.
         /// Requires play mode with an active EventSystem.
         /// </summary>
-        private static int GetUIHitAtPoint(Vector2 screenPoint)
+        private static long GetUIHitAtPoint(Vector2 screenPoint)
         {
             if (EventSystem.current == null) return 0;
 
             var pointerData = new PointerEventData(EventSystem.current) { position = screenPoint };
             var results = new List<RaycastResult>();
             EventSystem.current.RaycastAll(pointerData, results);
-            return results.Count > 0 ? results[0].gameObject.GetInstanceID() : 0;
+            return results.Count > 0 ? GetObjectInstanceId(results[0].gameObject) : 0;
         }
 
         /// <summary>
@@ -2562,7 +2626,7 @@ namespace UnityCtl
                 {
                     uiHits.Add(new Protocol.SnapshotQueryHit
                     {
-                        InstanceId = r.gameObject.GetInstanceID(),
+                        InstanceId = GetObjectInstanceId(r.gameObject),
                         Name = r.gameObject.name,
                         Path = GetHierarchyPath(r.gameObject),
                         Text = GetUIText(r.gameObject),
@@ -2602,7 +2666,7 @@ namespace UnityCtl
                 {
                     uiHits.Add(new Protocol.SnapshotQueryHit
                     {
-                        InstanceId = g.gameObject.GetInstanceID(),
+                        InstanceId = GetObjectInstanceId(g.gameObject),
                         Name = g.gameObject.name,
                         Path = GetHierarchyPath(g.gameObject),
                         Text = GetUIText(g.gameObject),
@@ -2629,7 +2693,7 @@ namespace UnityCtl
             if (EventSystem.current == null)
                 throw new InvalidOperationException("No EventSystem found in scene");
 
-            var targetId = GetIntArgument(request, "id");
+            var targetId = GetLongArgument(request, "id");
             var targetName = GetStringArgument(request, "name");
             var x = GetIntArgument(request, "x");
             var y = GetIntArgument(request, "y");
@@ -2640,7 +2704,7 @@ namespace UnityCtl
             if (targetId.HasValue)
             {
                 // Resolve by instance ID
-                target = EditorUtility.InstanceIDToObject(targetId.Value) as GameObject;
+                target = ResolveObjectById(targetId.Value) as GameObject;
                 if (target == null)
                     throw new ArgumentException($"No GameObject with instance ID {targetId.Value}");
 
@@ -2662,7 +2726,7 @@ namespace UnityCtl
                     if (topHit != target && !topHit.transform.IsChildOf(target.transform))
                     {
                         throw new InvalidOperationException(
-                            $"'{target.name}' [i:{targetId.Value}] is blocked by '{topHit.name}' [i:{topHit.GetInstanceID()}]");
+                            $"'{target.name}' [i:{targetId.Value}] is blocked by '{topHit.name}' [i:{GetObjectInstanceId(topHit)}]");
                     }
                 }
             }
@@ -2690,7 +2754,7 @@ namespace UnityCtl
                     if (topHit != target && !topHit.transform.IsChildOf(target.transform))
                     {
                         throw new InvalidOperationException(
-                            $"'{target.name}' [i:{target.GetInstanceID()}] is blocked by '{topHit.name}' [i:{topHit.GetInstanceID()}]");
+                            $"'{target.name}' [i:{GetObjectInstanceId(target)}] is blocked by '{topHit.name}' [i:{GetObjectInstanceId(topHit)}]");
                     }
                 }
             }
@@ -2739,7 +2803,7 @@ namespace UnityCtl
 
             return new Protocol.UIClickResult
             {
-                InstanceId = target.GetInstanceID(),
+                InstanceId = GetObjectInstanceId(target),
                 Name = target.name,
                 Path = GetHierarchyPath(target),
                 ScreenPosition = string.Format(System.Globalization.CultureInfo.InvariantCulture,
@@ -2762,9 +2826,9 @@ namespace UnityCtl
         /// <summary>
         /// Returns true if the object with the given instance ID is a descendant of parent.
         /// </summary>
-        private static bool IsDescendantOf(int instanceId, GameObject parent)
+        private static bool IsDescendantOf(long instanceId, GameObject parent)
         {
-            var obj = EditorUtility.InstanceIDToObject(instanceId) as GameObject;
+            var obj = ResolveObjectById(instanceId) as GameObject;
             if (obj == null) return false;
             var t = obj.transform;
             while (t != null)

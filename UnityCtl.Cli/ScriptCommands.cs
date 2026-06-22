@@ -613,15 +613,15 @@ public static class ScriptCommands
         return expression;
     }
 
-    internal static int[] ParseInstanceIds(string idArg)
+    internal static long[] ParseInstanceIds(string idArg)
     {
         var parts = idArg.Split(',');
-        var ids = new List<int>();
+        var ids = new List<long>();
         foreach (var part in parts)
         {
             var trimmed = part.Trim();
             if (trimmed.Length == 0) continue;
-            if (!int.TryParse(trimmed, out var id))
+            if (!long.TryParse(trimmed, out var id))
                 throw new ArgumentException($"Invalid instance ID: '{trimmed}' — must be an integer");
             ids.Add(id);
         }
@@ -630,14 +630,14 @@ public static class ScriptCommands
         return ids.ToArray();
     }
 
-    internal static string BuildInstanceIdPreamble(int[] ids)
+    internal static string BuildInstanceIdPreamble(long[] ids)
     {
         const string pad = "\n        ";
         var sb = new System.Text.StringBuilder();
 
         if (ids.Length == 1)
         {
-            sb.Append($"var target = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[0]});");
+            sb.Append($"var target = (GameObject)UnityCtl.UnityCtlClient.ResolveObjectById({ids[0]});");
             sb.Append($"{pad}if (target == null) throw new System.Exception(\"Object {ids[0]} not found (destroyed?)\");");
         }
         else
@@ -645,7 +645,7 @@ public static class ScriptCommands
             sb.Append($"var targets = new GameObject[{ids.Length}];");
             for (int i = 0; i < ids.Length; i++)
             {
-                sb.Append($"{pad}targets[{i}] = (GameObject)UnityEditor.EditorUtility.InstanceIDToObject({ids[i]});");
+                sb.Append($"{pad}targets[{i}] = (GameObject)UnityCtl.UnityCtlClient.ResolveObjectById({ids[i]});");
                 sb.Append($"{pad}if (targets[{i}] == null) throw new System.Exception(\"Object {ids[i]} not found (destroyed?)\");");
             }
         }

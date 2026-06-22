@@ -20,7 +20,7 @@ public static class UICommands
     {
         var clickCommand = new Command("click", "Click a UI element by instance ID, name, or screen coordinates");
 
-        var idOption = new Option<int?>("--id", "Instance ID of the UI element to click");
+        var idOption = new Option<long?>("--id", "Instance ID of the UI element to click");
         var nameOption = new Option<string?>("--name", "Find and click a GameObject by name (uses GameObject.Find)");
         var xArg = new Argument<int?>("x", () => null, "Screen X coordinate");
         var yArg = new Argument<int?>("y", () => null, "Screen Y coordinate");
