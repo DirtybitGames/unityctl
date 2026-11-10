@@ -24,3 +24,7 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build
+        env:
+          # Each integration test hosts an in-process bridge whose config file
+          # watchers each take an inotify instance; ubuntu runners cap these at 128.
+          DOTNET_USE_POLLING_FILE_WATCHER: "true"

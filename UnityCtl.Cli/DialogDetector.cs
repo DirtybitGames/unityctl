@@ -180,8 +180,9 @@ internal static class DialogDetector
                 var btnHwnd = (IntPtr)button.NativeHandle;
                 var dlgHwnd = (IntPtr)dialog.NativeHandle;
 
-                // Bring the dialog to the foreground so it processes messages
-                Win32.SetForegroundWindow(dlgHwnd);
+                // Don't SetForegroundWindow here: SendMessage is delivered to the
+                // dialog's thread whether or not it is foreground, and activating it
+                // yanks focus away from whatever the user is doing.
 
                 // Get the button's control ID and send WM_COMMAND to the dialog.
                 // This is more reliable than BM_CLICK across processes because
@@ -195,7 +196,10 @@ internal static class DialogDetector
                     return true;
                 }
 
-                // Fallback: direct BM_CLICK on the button
+                // Fallback (buttons without a control ID — rare): direct BM_CLICK.
+                // BM_CLICK can fail on an inactive dialog, so this path still has to
+                // activate it, at the cost of taking focus.
+                Win32.SetForegroundWindow(dlgHwnd);
                 Win32.SendMessage(btnHwnd, Win32.BM_CLICK, IntPtr.Zero, IntPtr.Zero);
                 return true;
             }
