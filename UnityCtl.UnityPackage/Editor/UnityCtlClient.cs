@@ -1310,14 +1310,27 @@ namespace UnityCtl
                 DebugLog("[UnityCtl] Created Screenshots directory");
             }
 
-            targetWindow.Focus();
+            // Bring the window's tab to the front of its dock area without calling
+            // EditorWindow.Focus(), which activates the editor's OS window and steals
+            // focus from whatever the user is doing.
+            var restoreTab = ShowTabWithoutFocus(targetWindow);
             targetWindow.Repaint();
 
             var pos = targetWindow.position;
             int width = (int)pos.width;
             int height = (int)pos.height;
 
-            if (!CaptureWindowViaGrabPixels(targetWindow, capturePath, width, height))
+            bool captured;
+            try
+            {
+                captured = CaptureWindowViaGrabPixels(targetWindow, capturePath, width, height);
+            }
+            finally
+            {
+                restoreTab?.Invoke();
+            }
+
+            if (!captured)
             {
                 throw new System.InvalidOperationException($"Failed to capture window '{windowArg}'");
             }
@@ -1388,6 +1401,53 @@ namespace UnityCtl
         private static readonly System.Reflection.MethodInfo RepaintImmediatelyMethod =
             GuiViewType?.GetMethod("RepaintImmediately",
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static readonly System.Type DockAreaType =
+            typeof(EditorWindow).Assembly.GetType("UnityEditor.DockArea");
+
+        private static readonly System.Reflection.PropertyInfo DockAreaSelectedProperty =
+            DockAreaType?.GetProperty("selected",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        private static readonly System.Reflection.FieldInfo DockAreaPanesField =
+            DockAreaType?.GetField("m_Panes",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        /// <summary>
+        /// If the window is a background tab in a dock area, selects its tab so it gets
+        /// rendered. Returns an action that re-selects the previously active tab, or null
+        /// if nothing was changed.
+        /// </summary>
+        private static System.Action ShowTabWithoutFocus(EditorWindow window)
+        {
+            try
+            {
+                var host = ParentViewField?.GetValue(window);
+                if (host == null || DockAreaType == null || !DockAreaType.IsInstanceOfType(host)
+                    || DockAreaSelectedProperty == null || DockAreaPanesField == null)
+                    return null;
+
+                if (!(DockAreaPanesField.GetValue(host) is System.Collections.Generic.List<EditorWindow> panes))
+                    return null;
+
+                var index = panes.IndexOf(window);
+                var previous = (int)DockAreaSelectedProperty.GetValue(host);
+                if (index < 0 || index == previous)
+                    return null;
+
+                DockAreaSelectedProperty.SetValue(host, index);
+                return () =>
+                {
+                    try { DockAreaSelectedProperty.SetValue(host, previous); }
+                    catch (Exception ex) { DebugLog($"[UnityCtl] Could not restore dock tab: {ex.Message}"); }
+                };
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"[UnityCtl] Could not select dock tab: {ex.Message}");
+                return null;
+            }
+        }
 
         private static bool CaptureWindowViaGrabPixels(EditorWindow window, string capturePath, int width, int height)
         {
